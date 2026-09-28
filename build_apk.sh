@@ -12,7 +12,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/env.sh"
 MODE="${1:-debug}"
-[ "$MODE" = debug ] || [ "$MODE" = release ] || { echo "Usage: ./build_apk.sh [debug|release]"; exit 1; }
+[ "$MODE" = debug ] || [ "$MODE" = release ] || [ "$MODE" = release-debug ] || { echo "Usage: ./build_apk.sh [debug|release|release-debug]"; exit 1; }
 PROJ="${BLOCKER_DIR:-$HERE/project}"
 
 LOG_FILE="$HERE/build.log"
@@ -41,7 +41,9 @@ if [ "${#NEED[@]}" -gt 0 ]; then
 else
   echo "Java 17, Node, adb, unzip and git are already installed."
 fi
-sudo archlinux-java set java-17-openjdk >/dev/null 2>&1 || true
+if [ "$(archlinux-java get 2>/dev/null)" != "java-17-openjdk" ]; then
+  sudo -n archlinux-java set java-17-openjdk >/dev/null 2>&1 || true
+fi
 
 # ---------- 2. Android SDK ----------
 step "Checking Android SDK"
@@ -111,18 +113,54 @@ step "Installing JS dependencies"
 step "Building the $MODE APK"
 cd "$PROJ/android"
 chmod +x gradlew
-# arm64 covers virtually every phone made since 2017; use ARCH=armeabi-v7a for an old 32-bit phone.
-./gradlew "assemble${MODE^}" "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "1")"
-OUT="$HERE/Blocker-$MODE-$BUILD_NUM.apk"
-cp "app/build/outputs/apk/$MODE/app-$MODE.apk" "$OUT"
+BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
+
+if [ "$MODE" = "release" ]; then
+  # Build both Release and Release-Debug so the release version can be tested before finally installing
+  ./gradlew assembleRelease assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  OUT_RELEASE="$HERE/Blocker-release-$BUILD_NUM.apk"
+  OUT_DEBUG="$HERE/Blocker-release-debug-$BUILD_NUM.apk"
+  cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
+  cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT_DEBUG"
+  OUT="$OUT_RELEASE"
+elif [ "$MODE" = "release-debug" ]; then
+  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  OUT="$HERE/Blocker-release-debug-$BUILD_NUM.apk"
+  cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
+else
+  # debug
+  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  OUT="$HERE/Blocker-debug-$BUILD_NUM.apk"
+  cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
+fi
 
 step "Done"
-echo "APK ready: $OUT"
-echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
-echo "Copy it to your phone and tap it, or run: ./05_install_on_phone.sh $MODE"
+if [ "$MODE" = "release" ]; then
+  echo "Release APK ready:       $OUT_RELEASE (real 1-30 day timers, no back door)"
+  echo "Release-Debug APK ready: $OUT_DEBUG (1-minute timers for testing)"
+  echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
+  echo
+  echo "To test on your phone first:"
+  echo "  ./05_install_on_phone.sh release"
+  echo "  (automatically installs the release-debug test version)"
+  echo
+  echo "When ready for the final locked-down release:"
+  echo "  ./05_install_on_phone.sh release --final"
+else
+  echo "APK ready: $OUT"
+  echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
+  echo "Copy it to your phone and tap it, or run: ./05_install_on_phone.sh $MODE"
+fi
 echo "Build log saved to: $LOG_FILE"
 echo "=== Build finished at $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+if [ "${2:-}" = "--install" ] || [ "${2:-}" = "-i" ]; then
+  step "Installing on connected phone"
+  "$HERE/05_install_on_phone.sh" "$MODE"
+fi
+
+# Bump build number for the next build
+python3 "$HERE/set_version.py" --bump >/dev/null 2>&1 || echo $((BUILD_NUM + 1)) > "$HERE/.build_number"
 
 # Kill java running after the script
 killall java 2>/dev/null || true

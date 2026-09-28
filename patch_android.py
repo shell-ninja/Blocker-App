@@ -154,10 +154,12 @@ version_file = here / "VERSION"
 build_file = here / ".build_number"
 app_version = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else "1.0.0"
 try:
-    build_number = int(build_file.read_text(encoding="utf-8").strip()) if build_file.exists() else 1
+    build_number = int(build_file.read_text(encoding="utf-8").strip()) if build_file.exists() else 0
 except ValueError:
-    build_number = 1
-g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {build_number}", g, count=1)
+    build_number = 0
+# Android requires versionCode to be a strictly positive integer (> 0)
+version_code = max(1, build_number + 1)
+g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {version_code}", g, count=1)
 g, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{app_version}"', g, count=1)
 if not n1 or not n2:
     warnings.append(

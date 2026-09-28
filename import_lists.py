@@ -29,14 +29,17 @@ def parse_structured(path: Path):
     section = None
     in_fence = False
     raw_content = path.read_text(encoding="utf-8", errors="ignore")
-    # Check if the file is encrypted/obfuscated
-    enc_match = re.search(r"```encrypted-blocklist\s*([A-Za-z0-9+/=\s]+)\s*```", raw_content)
-    if enc_match:
+    # Check if the file is encrypted/obfuscated (supports nested encryption)
+    while True:
+        enc_match = re.search(r"```encrypted-blocklist\s*([A-Za-z0-9+/=\s]+)\s*```", raw_content)
+        if not enc_match:
+            break
         try:
             b64_data = "".join(enc_match.group(1).split())
             raw_content = zlib.decompress(base64.b64decode(b64_data)).decode("utf-8")
         except Exception as e:
             print(f"Warning: could not decrypt blocklist: {e}")
+            break
     for raw in raw_content.splitlines():
         line = raw.strip()
         header = re.match(r"^#{1,6}\s*\d*\.?\s*(.+)$", line)

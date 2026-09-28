@@ -2,22 +2,71 @@
 # Installs the APK on a phone connected by USB (USB debugging must be on).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; source "$HERE/env.sh"
-MODE="${1:-debug}"
+INPUT="${1:-debug}"
+FLAG="${2:-}"
+APK=""
 
-BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "")"
-APK="$HERE/Blocker-$MODE-$BUILD_NUM.apk"
-
-# Fallback to latest matching APK if exact build number is not present
-if [ ! -f "$APK" ]; then
-  APK="$(ls -t "$HERE"/Blocker-"$MODE"-*.apk 2>/dev/null | head -1 || true)"
-fi
-
-if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-  echo "No APK found for mode '$MODE'. Run ./build_apk.sh $MODE first."
+# Direct APK file path or filename support
+if [ -f "$INPUT" ]; then
+  APK="$(realpath "$INPUT")"
+elif [ -f "$HERE/$INPUT" ]; then
+  APK="$HERE/$INPUT"
+elif [[ "$INPUT" == *.apk ]]; then
+  echo "Error: APK file '$INPUT' not found in current directory."
   exit 1
 fi
 
-echo "Installing $APK..."
+if [ -z "$APK" ]; then
+  MODE="$INPUT"
+  BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
+
+  # Determine target mode:
+  # If user runs 'release' without --final, install the release-debug test version first
+  TARGET_MODE="$MODE"
+  if [ "$MODE" = "release" ] && [ "$FLAG" != "--final" ] && [ "$FLAG" != "-f" ]; then
+    TARGET_MODE="release-debug"
+  fi
+
+  APK="$HERE/Blocker-$TARGET_MODE-$BUILD_NUM.apk"
+
+  # If exact build number APK does not exist, check previous build number $((BUILD_NUM - 1))
+  if [ ! -f "$APK" ] && [ "$BUILD_NUM" -gt 0 ] 2>/dev/null; then
+    PREV=$((BUILD_NUM - 1))
+    if [ -f "$HERE/Blocker-$TARGET_MODE-$PREV.apk" ]; then
+      APK="$HERE/Blocker-$TARGET_MODE-$PREV.apk"
+    fi
+  fi
+
+  # Fallback to latest matching APK for target mode
+  if [ ! -f "$APK" ]; then
+    APK="$(ls -t "$HERE"/Blocker-"$TARGET_MODE"-*.apk 2>/dev/null | head -1 || true)"
+  fi
+
+  # If release-debug was targeted but not found, fallback to release
+  if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+    if [ "$TARGET_MODE" = "release-debug" ]; then
+      APK="$(ls -t "$HERE"/Blocker-release-*.apk 2>/dev/null | head -1 || true)"
+      TARGET_MODE="release"
+    fi
+  fi
+
+  if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+    echo "No APK found for mode '$MODE'. Run ./build_apk.sh $MODE first."
+    exit 1
+  fi
+fi
+
+if [ -n "${MODE:-}" ] && [ "$MODE" = "release" ] && [ "$TARGET_MODE" = "release-debug" ]; then
+  echo "=== Notice: Installing Test Version ==="
+  echo "Installing test APK: $(basename "$APK")"
+  echo "This version has identical code and blocklists, but 1-minute timers for testing."
+  echo "To install the final locked-down release (real 1-30 day timers, no back door), run:"
+  echo "    ./05_install_on_phone.sh release --final"
+  echo
+else
+  echo "Installing $APK..."
+fi
+
 adb devices
 adb install -r "$APK"
 echo "Installed. Open Blocker on the phone."
