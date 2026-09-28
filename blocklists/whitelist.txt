@@ -1,0 +1,14 @@
+# Words or short phrases that should NEVER be blocked, even though a blocked keyword appears inside them.
+# One per line. Case doesn't matter. Lines starting with # are ignored.
+# These protect legitimate words/phrases that happen to contain a blocked keyword as a substring
+# (e.g. "sex" inside "sex education", "adult" inside "adulteducation").
+#
+# A few common ones are enabled by default below. Remove the # to disable one, or add your own.
+sex education
+adult education
+adulteducation
+sex ed
+camera
+essex
+sussex
+wessex

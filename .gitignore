@@ -1,0 +1,27 @@
+# Private developer architecture & internals document
+INTERNAL.md
+
+# Build project directory
+project/
+
+# APK outputs & build counter
+*.apk
+Blocker-*.apk
+.build_number
+
+# Dependencies & caches
+node_modules/
+__pycache__/
+*.pyc
+
+# Android build outputs & local config
+.gradle/
+build/
+local.properties
+*.keystore
+
+# IDE / System files
+.DS_Store
+*.log
+.idea/
+.vscode/

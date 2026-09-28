@@ -1,0 +1,10 @@
+# Your own quick additions, on top of blocklists/block-list.md. One entry per line.
+#   - something that looks like a website (example.com, https://www.example.com/page) is blocked as a WEBSITE
+#     (including all its subdomains)
+#   - anything else (a word or phrase) is blocked as a KEYWORD: matched as a whole word, so "camera" is
+#     never blocked by a "cam" keyword. See blocklists/whitelist.txt to protect specific phrases.
+# Lines starting with # are ignored. After editing, rebuild with ./build_apk.sh (it re-imports automatically).
+#
+# examples (delete the leading # to use them):
+# example-bad-site.com
+# some bad phrase
