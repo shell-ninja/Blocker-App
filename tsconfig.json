@@ -11,12 +11,14 @@
     "moduleResolution": "node",
     "baseUrl": ".",
     "typeRoots": [
-      "/home/shell-ninja/Blocker/node_modules/@types"
+      "./node_modules/@types",
+      "./project/node_modules/@types"
     ],
     "paths": {
       "*": [
         "*",
-        "/home/shell-ninja/Blocker/node_modules/*"
+        "./node_modules/*",
+        "./project/node_modules/*"
       ]
     },
     "allowSyntheticDefaultImports": true,

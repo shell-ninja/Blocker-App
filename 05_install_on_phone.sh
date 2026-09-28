@@ -6,13 +6,17 @@ INPUT="${1:-debug}"
 FLAG="${2:-}"
 APK=""
 
+APK_DIR="$HERE/apk"
+
 # Direct APK file path or filename support
 if [ -f "$INPUT" ]; then
   APK="$(realpath "$INPUT")"
+elif [ -f "$APK_DIR/$INPUT" ]; then
+  APK="$APK_DIR/$INPUT"
 elif [ -f "$HERE/$INPUT" ]; then
   APK="$HERE/$INPUT"
 elif [[ "$INPUT" == *.apk ]]; then
-  echo "Error: APK file '$INPUT' not found in current directory."
+  echo "Error: APK file '$INPUT' not found in $APK_DIR or current directory."
   exit 1
 fi
 
@@ -27,25 +31,34 @@ if [ -z "$APK" ]; then
     TARGET_MODE="release-debug"
   fi
 
-  APK="$HERE/Blocker-$TARGET_MODE-$BUILD_NUM.apk"
+  # Check in apk/ directory first, fallback to root
+  for DIR in "$APK_DIR" "$HERE"; do
+    if [ -f "$DIR/Blocker-$TARGET_MODE-$BUILD_NUM.apk" ]; then
+      APK="$DIR/Blocker-$TARGET_MODE-$BUILD_NUM.apk"
+      break
+    fi
+  done
 
   # If exact build number APK does not exist, check previous build number $((BUILD_NUM - 1))
-  if [ ! -f "$APK" ] && [ "$BUILD_NUM" -gt 0 ] 2>/dev/null; then
+  if [ -z "$APK" ] && [ "$BUILD_NUM" -gt 0 ] 2>/dev/null; then
     PREV=$((BUILD_NUM - 1))
-    if [ -f "$HERE/Blocker-$TARGET_MODE-$PREV.apk" ]; then
-      APK="$HERE/Blocker-$TARGET_MODE-$PREV.apk"
-    fi
+    for DIR in "$APK_DIR" "$HERE"; do
+      if [ -f "$DIR/Blocker-$TARGET_MODE-$PREV.apk" ]; then
+        APK="$DIR/Blocker-$TARGET_MODE-$PREV.apk"
+        break
+      fi
+    done
   fi
 
   # Fallback to latest matching APK for target mode
-  if [ ! -f "$APK" ]; then
-    APK="$(ls -t "$HERE"/Blocker-"$TARGET_MODE"-*.apk 2>/dev/null | head -1 || true)"
+  if [ -z "$APK" ]; then
+    APK="$(ls -t "$APK_DIR"/Blocker-"$TARGET_MODE"-*.apk "$HERE"/Blocker-"$TARGET_MODE"-*.apk 2>/dev/null | head -1 || true)"
   fi
 
   # If release-debug was targeted but not found, fallback to release
   if [ -z "$APK" ] || [ ! -f "$APK" ]; then
     if [ "$TARGET_MODE" = "release-debug" ]; then
-      APK="$(ls -t "$HERE"/Blocker-release-*.apk 2>/dev/null | head -1 || true)"
+      APK="$(ls -t "$APK_DIR"/Blocker-release-*.apk "$HERE"/Blocker-release-*.apk 2>/dev/null | head -1 || true)"
       TARGET_MODE="release"
     fi
   fi

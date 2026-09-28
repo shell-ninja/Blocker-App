@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
+</p>
+
 # Blocker
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
@@ -96,7 +100,7 @@ If you do not have the Android SDK command-line tools yet, download `commandline
 ```
 * Uses **1-minute** delay timers for protection unlocks so you do not get locked out while testing.
 * Automatically imports blocklists, increments the build number, patches React Native files, and compiles.
-* Outputs the binary to: `Blocker-debug-{build_number}.apk`.
+* Outputs the binary to: `apk/Blocker-debug-{build_number}.apk`.
 
 #### Release Build:
 ```bash
@@ -104,7 +108,7 @@ If you do not have the Android SDK command-line tools yet, download `commandline
 ```
 * Enforces real **1 to 30 day** delayed-unlock timers.
 * No backdoors: settings changes cannot be bypassed without waiting the full duration.
-* Outputs the binary to: `Blocker-release-{build_number}.apk`.
+* Outputs the binary to: `apk/Blocker-release-{build_number}.apk`.
 
 ### 3. Install on Device
 

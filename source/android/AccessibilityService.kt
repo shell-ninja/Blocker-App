@@ -54,13 +54,26 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.google.android.packageinstaller",
             "com.android.packageinstaller",
             "com.samsung.android.packageinstaller",
+            "com.samsung.android.settings",
             "com.miui.securitycenter",
             "com.coloros.safecenter",
+            "com.coloros.settings",
+            "com.oplus.safecenter",
+            "com.oplus.settings",
+            "com.vivo.settings",
             "com.oppo.launcher"
+        )
+        private val DEV_OPTIONS_CLASSES = setOf(
+            "com.android.settings.Settings\$DevelopmentSettingsDashboardActivity",
+            "com.android.settings.Settings\$DevelopmentSettingsActivity",
+            "com.android.settings.development.DevelopmentSettingsDashboardActivity",
+            "com.android.settings.DevelopmentSettings",
+            "com.samsung.android.settings.development.DevelopmentSettings"
         )
         private val DIRECT_TERMS = listOf(
             "device admin apps", "special app access", "device administrators",
-            "device admin", "device administrator", "admin apps"
+            "device admin", "device administrator", "admin apps",
+            "developer options", "development settings"
         )
         private val APP_RISK_TERMS = listOf(
             "deactivate", "uninstall", "force stop", "accessibility", "turn off", "remove", "disable", "clear data",
@@ -209,6 +222,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val ev = e ?: return
         val pkg = ev.packageName?.toString() ?: return
         if (pkg == packageName) return
+        if (checkAdbDialog(pkg)) return
         if (pkg in neverBlock) return
         if (BlockerStore.focusActive(this) && focusBlocks(ev, pkg)) return
         if (!BlockerStore.active(this)) return
@@ -222,7 +236,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
             pkg in BROWSER_URL_IDS -> if (checkBrowser(pkg)) return
             pkg in SETTINGS_PKGS -> {
-                checkSettings()
+                checkSettings(ev)
                 return
             }
             pkg in GRANULAR_TARGET_PKGS -> {
@@ -404,10 +418,37 @@ class BlockerAccessibilityService : AccessibilityService() {
             .isAdminActive(android.content.ComponentName(this, BlockerDeviceAdminReceiver::class.java))
     }.getOrDefault(false)
 
-    private fun checkSettings() {
+    private fun checkAdbDialog(pkg: String): Boolean {
+        if (!BlockerStore.active(this) || !BlockerStore.shield(this) || BlockerStore.guardOpen(this, "shield")) return false
+        if (pkg != "com.android.systemui" && pkg != "android") return false
+        val root = rootInActiveWindow ?: return false
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(100))
+        val t = sb.toString().lowercase()
+        if ("allow usb debugging" in t || ("usb debugging" in t && ("fingerprint" in t || "rsa" in t || "always allow" in t))) {
+            val now = System.currentTimeMillis()
+            if (now - lastHit < 700) return true
+            lastHit = now
+            BlockerStore.incr(this, "tamper")
+            val cancelBtn = root.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
+            if (cancelBtn != null) {
+                cancelBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                cancelBtn.recycle()
+            } else {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            showOverlay("🔐 Tamper Protection", "USB debugging authorization is locked while Protection Mode is active.", 5000)
+            return true
+        }
+        return false
+    }
+
+    private fun checkSettings(ev: AccessibilityEvent) {
         if (!BlockerStore.active(this) || !BlockerStore.shield(this) || BlockerStore.guardOpen(this, "shield")) return
         val root = rootInActiveWindow ?: return
         val cls = root.className?.toString().orEmpty()
+        val evCls = ev.className?.toString().orEmpty()
 
         if (cls in DEVICE_ADMIN_LIST_CLASSES) {
             lockOutOfSettings()
@@ -421,18 +462,45 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Developer options activity detection
+        val isDevActivity = cls in DEV_OPTIONS_CLASSES ||
+            evCls in DEV_OPTIONS_CLASSES ||
+            cls.contains("DevelopmentSettings", ignoreCase = true) ||
+            cls.contains("DeveloperOptions", ignoreCase = true) ||
+            evCls.contains("DevelopmentSettings", ignoreCase = true) ||
+            evCls.contains("DeveloperOptions", ignoreCase = true)
+        if (isDevActivity) {
+            lockOutOfSettings("Developer options are locked while Protection Mode is active.")
+            return
+        }
+
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(400))
         // Strip Blocker's own device-admin explanation text before matching: it legitimately contains
         // "blocker" + "uninstalled" together, which would otherwise look identical to a real attempt.
         val t = sb.toString().lowercase().replace("prevents blocker from being uninstalled.", "")
+
+        // Check for Developer Options screen content (title and characteristic developer options)
+        val hasDevTitle = "developer options" in t || "development settings" in t
+        val hasDevMarkers = "usb debugging" in t || "wireless debugging" in t || "revoke usb debugging" in t ||
+            "oem unlocking" in t || "desktop backup password" in t || "stay awake" in t ||
+            "running services" in t || "logger buffer" in t || "bug report" in t ||
+            "use developer options" in t || "turn off developer options" in t
+        val isDeveloperOptions = (hasDevTitle && hasDevMarkers) ||
+            "revoke usb debugging" in t || "wireless debugging" in t
+
+        if (isDeveloperOptions) {
+            lockOutOfSettings("Developer options are locked while Protection Mode is active.")
+            return
+        }
+
         val direct = DIRECT_TERMS.any { it in t }
         val isOurAppScreen = "blocker" in t || packageName.lowercase() in t
         val hasRiskAction = APP_RISK_TERMS.any { it in t }
         if (direct || (isOurAppScreen && hasRiskAction)) lockOutOfSettings()
     }
 
-    private fun lockOutOfSettings() {
+    private fun lockOutOfSettings(message: String = "Device Admin & app settings for Blocker are locked while Protection Mode is active.") {
         val now = System.currentTimeMillis()
         if (now - lastHit < 700) return
         lastHit = now
@@ -440,7 +508,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
             performGlobalAction(GLOBAL_ACTION_HOME)
         }
-        showOverlay("🔐 Tamper Protection", "Device Admin & app settings for Blocker are locked while Protection Mode is active.", 5000)
+        showOverlay("🔐 Tamper Protection", message, 5000)
     }
 
     // ---------- Granular focus interception (Reels / Shorts / Search) ----------

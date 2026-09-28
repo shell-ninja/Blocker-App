@@ -1,11 +1,12 @@
 import React from 'react';
-import { Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { Code, ExternalLink, Github } from 'lucide-react-native';
+import { Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Code, ExternalLink } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { setDelay, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
+import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
 
 const DAYS = [1, 2, 3, 7, 14, 30];
 const NAMES: Record<LockKey, string> = {
@@ -69,7 +70,7 @@ export default function SettingsScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Title icon={Icons.lock}>Uninstall & settings shield</Title>
-            <Sub>Blocks Device admin, Special app access and Blocker's app settings pages.</Sub>
+            <Sub>Blocks Developer options, Device admin, Special app access and Blocker's app settings pages.</Sub>
           </View>
           <Switch value={p.shield} onValueChange={v => run(() => setShield(v), 'The shield')} trackColor={{ true: t.ok }} />
         </View>
@@ -170,10 +171,14 @@ export default function SettingsScreen() {
             style={({ pressed }) => [{
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 4,
+              gap: 5,
               opacity: pressed ? 0.7 : 1
             }]}>
-            <Github size={13} color={t.accent} strokeWidth={2.2} />
+            <Image
+              source={{ uri: SHELL_NINJA_LOGO_URI }}
+              style={{ width: 18, height: 18, borderRadius: 4 }}
+              resizeMode="contain"
+            />
             <Text style={{
               color: t.accent,
               fontSize: 13,

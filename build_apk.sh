@@ -85,6 +85,7 @@ python3 "$HERE/import_lists.py"
 step "Generating the app icon from assets/app-icon-source.png"
 python3 "$HERE/generate_icons.py"
 python3 "$HERE/embed_icon.py"
+python3 "$HERE/embed_shell_ninja_logo.py"
 step "Setting the app version"
 python3 "$HERE/set_version.py"
 
@@ -115,22 +116,25 @@ cd "$PROJ/android"
 chmod +x gradlew
 BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
 
+APK_DIR="$HERE/apk"
+mkdir -p "$APK_DIR"
+
 if [ "$MODE" = "release" ]; then
   # Build both Release and Release-Debug so the release version can be tested before finally installing
   ./gradlew assembleRelease assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT_RELEASE="$HERE/Blocker-release-$BUILD_NUM.apk"
-  OUT_DEBUG="$HERE/Blocker-release-debug-$BUILD_NUM.apk"
+  OUT_RELEASE="$APK_DIR/Blocker-release-$BUILD_NUM.apk"
+  OUT_DEBUG="$APK_DIR/Blocker-release-debug-$BUILD_NUM.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT_DEBUG"
   OUT="$OUT_RELEASE"
 elif [ "$MODE" = "release-debug" ]; then
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$HERE/Blocker-release-debug-$BUILD_NUM.apk"
+  OUT="$APK_DIR/Blocker-release-debug-$BUILD_NUM.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 else
   # debug
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$HERE/Blocker-debug-$BUILD_NUM.apk"
+  OUT="$APK_DIR/Blocker-debug-$BUILD_NUM.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 fi
 
