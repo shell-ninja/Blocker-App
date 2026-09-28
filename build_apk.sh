@@ -115,6 +115,7 @@ step "Building the $MODE APK"
 cd "$PROJ/android"
 chmod +x gradlew
 BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
+APP_VER="$(cat "$HERE/VERSION" 2>/dev/null || echo "1.0.0" | tr -d '[:space:]')"
 
 APK_DIR="$HERE/apk"
 mkdir -p "$APK_DIR"
@@ -122,19 +123,19 @@ mkdir -p "$APK_DIR"
 if [ "$MODE" = "release" ]; then
   # Build both Release and Release-Debug so the release version can be tested before finally installing
   ./gradlew assembleRelease assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT_RELEASE="$APK_DIR/Blocker-release-$BUILD_NUM.apk"
-  OUT_DEBUG="$APK_DIR/Blocker-release-debug-$BUILD_NUM.apk"
+  OUT_RELEASE="$APK_DIR/Blocker-release-$APP_VER.apk"
+  OUT_DEBUG="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT_DEBUG"
   OUT="$OUT_RELEASE"
 elif [ "$MODE" = "release-debug" ]; then
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$APK_DIR/Blocker-release-debug-$BUILD_NUM.apk"
+  OUT="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 else
   # debug
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$APK_DIR/Blocker-debug-$BUILD_NUM.apk"
+  OUT="$APK_DIR/Blocker-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 fi
 
