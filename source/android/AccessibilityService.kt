@@ -480,14 +480,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         // "blocker" + "uninstalled" together, which would otherwise look identical to a real attempt.
         val t = sb.toString().lowercase().replace("prevents blocker from being uninstalled.", "")
 
-        // Check for Developer Options screen content (title and characteristic developer options)
+        // Check for Developer Options screen content.
+        // Trigger on the title alone — don't require markers to also be present, because the first
+        // accessibility event often fires before the page content has fully rendered.
         val hasDevTitle = "developer options" in t || "development settings" in t
-        val hasDevMarkers = "usb debugging" in t || "wireless debugging" in t || "revoke usb debugging" in t ||
-            "oem unlocking" in t || "desktop backup password" in t || "stay awake" in t ||
-            "running services" in t || "logger buffer" in t || "bug report" in t ||
-            "use developer options" in t || "turn off developer options" in t
-        val isDeveloperOptions = (hasDevTitle && hasDevMarkers) ||
-            "revoke usb debugging" in t || "wireless debugging" in t
+        val hasUniqueDevMarker = "revoke usb debugging" in t || "wireless debugging" in t ||
+            "oem unlocking" in t || "desktop backup password" in t || "logger buffer" in t
+        val isDeveloperOptions = hasDevTitle || hasUniqueDevMarker
 
         if (isDeveloperOptions) {
             lockOutOfSettings("Developer options are locked while Protection Mode is active.")
