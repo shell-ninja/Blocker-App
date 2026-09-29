@@ -12,3 +12,4 @@ camera
 essex
 sussex
 wessex
+ai camera

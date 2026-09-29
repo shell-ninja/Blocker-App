@@ -103,7 +103,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
     guard(async () => {
       const r = await updateSchedule(s.id, { ...patch, enabled });
       if (r !== 'applied') {
-        showAlert('Change requested', `Turning this off applies only after ${delayText} and confirming, while protection is on.`);
+        showAlert('Change requested', `Turning this off applies only after ${delayText} and confirming.`);
       }
     });
   };
@@ -114,7 +114,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
       text: 'Delete', style: 'destructive', onPress: () => guard(async () => {
         const r = await deleteSchedule(s.id);
         if (r !== 'applied') {
-          showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming, while protection is on.`);
+          showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming.`);
         }
       })
     }
@@ -198,8 +198,8 @@ function SchedulesCard() {
       </View>
       {p.schedules.length === 0 && <Sub>No schedules yet — tap Add, or the + button, to create one.</Sub>}
       {p.schedules.map(s => <ScheduleRow key={s.id} s={s} />)}
-      <Sub>Turning one on or widening it applies now. Turning one off, shrinking it, or deleting it while protection is on waits for {delayText}.</Sub>
-      <LockBar lockKey="focus" />
+      <Sub>Turning one on or widening it applies now. Turning one off, shrinking it, or deleting it waits for {delayText}.</Sub>
+      <LockBar lockKey="schedule" />
     </Card>
   );
 }

@@ -3,10 +3,10 @@ import { NativeModules, Platform } from 'react-native';
 export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
-  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus';
+  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule';
 export const LOCK_KEYS: LockKey[] = [
   'protection', 'shield', 'delay_duration', 'remove_apps', 'remove_blocklist',
-  'whitelist', 'exempt_apps', 'focus', 'granular_focus'
+  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule'
 ];
 
 export interface PermissionStatus {

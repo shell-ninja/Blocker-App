@@ -228,6 +228,7 @@ export async function confirm(key: LockKey) {
   if (key === 'remove_apps') await sync(s);
   if (key === 'remove_blocklist' || key === 'whitelist') await sync(s);
   if (key === 'exempt_apps') await sync(s);
+  if (key === 'schedule') await refresh(); // schedules already applied above, just re-read them
   const queue = { ...s.queue };
   delete queue[key];
   persist({ ...s, queue });
@@ -343,7 +344,7 @@ export async function updateSchedule(id: string, patch: SchedulePatch): Promise<
     await refresh();
     return 'applied';
   }
-  return queueAction('focus', { t: 'schedule_update', v: id, schedule: patch, label: `Update "${old.label}"` });
+  return queueAction('schedule', { t: 'schedule_update', v: id, schedule: patch, label: `Update "${old.label}"` });
 }
 
 export async function deleteSchedule(id: string): Promise<Outcome> {
@@ -356,7 +357,7 @@ export async function deleteSchedule(id: string): Promise<Outcome> {
     await refresh();
     return 'applied';
   }
-  return queueAction('focus', { t: 'schedule_delete', v: id, label: `Delete "${old.label}"` });
+  return queueAction('schedule', { t: 'schedule_delete', v: id, label: `Delete "${old.label}"` });
 }
 
 // ---------- blocklist, whitelist & apps ----------
@@ -398,13 +399,15 @@ export const isCategoryOn = (id: string) => {
   return catOn(snap.state, id, c?.defaultOn ?? false);
 };
 
-/** Whitelisting a word/phrase creates an exception, so adding one is gated while protection is on;
- *  removing one only tightens things, so it's immediate. Only the user's own entries ever show up
- *  here \u2014 built-in protective phrases are applied in the background and never listed. */
+/** Whitelisting a word/phrase creates an exception, so adding one is gated while protection is on
+ *  OR while any daily schedule exists — schedules are a commitment to future protection, so they
+ *  count the same as protection being active for weakening changes.
+ *  Removing one only tightens things, so it's immediate. Only the user's own entries ever show up
+ *  here — built-in protective phrases are applied in the background and never listed. */
 export async function addWhitelist(phrase: string): Promise<Outcome> {
   const p = phrase.trim().toLowerCase().replace(/\s+/g, ' ');
   if (!p || snap.state.whitelist.includes(p) || USER_DEFAULT_WHITELIST.includes(p)) return 'applied';
-  if (!snap.active) {
+  if (!snap.active && snap.schedules.length === 0) {
     const s = { ...snap.state, whitelist: [...snap.state.whitelist, p] };
     await sync(s);
     persist(s);
