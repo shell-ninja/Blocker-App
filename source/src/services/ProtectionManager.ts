@@ -329,17 +329,16 @@ export async function addSchedule(label: string, startMin: number, endMin: numbe
   await refresh();
 }
 
-/** Enabling, widening, or editing an inactive schedule is immediate. Shrinking or disabling one
- *  that's currently running waits for the delay timer. */
-/** Enabling, widening, or editing an inactive schedule is immediate. Shrinking or disabling one
- *  that's currently running waits for the delay timer. Refreshes first so "is this active/shrinking"
- *  reflects the real current time rather than a stale poll. */
+/** Enabling or widening a schedule is always immediate.
+ *  Disabling, shrinking, or any other weakening change waits for the delay timer whenever
+ *  protection is active — regardless of whether the schedule is currently running. */
 export async function updateSchedule(id: string, patch: SchedulePatch): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) throw new Error('That schedule no longer exists.');
-  const shrinking = old.activeNow && (!patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin));
-  if (!shrinking) {
+  // A change weakens scheduling if it disables the schedule or narrows its time window.
+  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin);
+  if (!weakening || !snap.active) {
     await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
     await refresh();
     return 'applied';
@@ -351,7 +350,8 @@ export async function deleteSchedule(id: string): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) return 'applied';
-  if (!old.activeNow) {
+  // Deleting a schedule weakens future protection, so it's always gated while protection is on.
+  if (!snap.active) {
     await Native.deleteSchedule(id);
     await refresh();
     return 'applied';
