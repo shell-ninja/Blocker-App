@@ -546,7 +546,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         val new = FocusSchedule(id, label.trim().ifEmpty { "Schedule" }, startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled)
         val wasActive = BlockerStore.scheduleIsActiveNow(old)
         val shrinking = wasActive && (!new.enabled || windowLen(new.startMin, new.endMin) < windowLen(old.startMin, old.endMin))
-        if (shrinking && !BlockerStore.guardOpen(ctx, "focus")) {
+        if (shrinking && !BlockerStore.guardOpen(ctx, "schedule") && !BlockerStore.guardOpen(ctx, "focus")) {
             promise.reject("LOCKED", "Shortening or disabling an active schedule requires the delay timer.")
             return
         }
@@ -561,7 +561,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             promise.resolve(true) // already gone
             return
         }
-        if (BlockerStore.scheduleIsActiveNow(old) && !BlockerStore.guardOpen(ctx, "focus")) {
+        if (BlockerStore.scheduleIsActiveNow(old) && !BlockerStore.guardOpen(ctx, "schedule") && !BlockerStore.guardOpen(ctx, "focus")) {
             promise.reject("LOCKED", "Deleting an active schedule requires the delay timer.")
             return
         }
@@ -658,6 +658,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 }
 
 class BlockerPackage : ReactPackage {
-    override fun createNativeModules(rc: ReactApplicationContext): List<NativeModule> = listOf(BlockerNativeModule(rc))
+    override fun createNativeModules(rc: ReactApplicationContext): List<NativeModule> =
+        listOf(BlockerNativeModule(rc), ProtectionModule(rc))
     override fun createViewManagers(rc: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }

@@ -18,7 +18,8 @@ const NAMES: Record<LockKey, string> = {
   whitelist: 'Whitelist additions',
   exempt_apps: 'Scan exemptions',
   focus: 'Focus mode',
-  granular_focus: 'Distraction shield changes'
+  granular_focus: 'Distraction shield changes',
+  schedule: 'Daily schedules'
 };
 
 export default function SettingsScreen() {
@@ -154,7 +155,6 @@ export default function SettingsScreen() {
             shadowOpacity: 0.35,
             shadowRadius: 10,
             shadowOffset: { width: 0, height: 2 },
-            elevation: 4,
             opacity: pressed ? 0.75 : 1,
             transform: [{ scale: pressed ? 0.97 : 1 }]
           }]}>
@@ -194,7 +194,7 @@ export default function SettingsScreen() {
         </View>
 
         <Text style={{ color: t.sub, fontSize: 11.5, textAlign: 'center', opacity: 0.75 }}>
-          Blocker {APP_VERSION} (build {BUILD_NUMBER})
+          Blocker v-{APP_VERSION}
         </Text>
       </View>
     </ScrollView>

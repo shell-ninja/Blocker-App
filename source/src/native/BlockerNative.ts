@@ -98,3 +98,13 @@ interface BlockerNativeSpec {
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;
 export const Native = NativeModules.BlockerNative as BlockerNativeSpec;
+
+export interface ProtectionStatus {
+  isDeviceOwner: boolean;
+  uninstallBlocked: boolean;
+}
+export interface ProtectionNativeSpec {
+  getStatus(): Promise<ProtectionStatus>;
+  setProtectionMode(enabled: boolean): Promise<boolean>;
+}
+export const ProtectionNative = NativeModules.ProtectionModule as ProtectionNativeSpec;

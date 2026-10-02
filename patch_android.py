@@ -33,17 +33,32 @@ xml_dir = main / "res" / "xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="150"
+    android:notificationTimeout="20"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-policies>
         <force-lock/>
+    </uses-policies>
+</device-admin>
+""")
+write(xml_dir / "device_admin_policies.xml", """<?xml version="1.0" encoding="utf-8"?>
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <limit-password />
+        <watch-login />
+        <reset-password />
+        <force-lock />
+        <wipe-data />
+        <expire-password />
+        <encrypted-storage />
+        <disable-camera />
+        <disable-keyguard-features />
     </uses-policies>
 </device-admin>
 """)
@@ -126,6 +141,16 @@ if "BlockerAccessibilityService" not in t:
         android:exported="true"
         android:permission="android.permission.BIND_DEVICE_ADMIN">
         <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin"/>
+        <intent-filter>
+            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+        </intent-filter>
+    </receiver>
+
+    <receiver
+        android:name=".MyDeviceAdminReceiver"
+        android:exported="true"
+        android:permission="android.permission.BIND_DEVICE_ADMIN">
+        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
         <intent-filter>
             <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
         </intent-filter>

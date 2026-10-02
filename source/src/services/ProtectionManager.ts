@@ -35,6 +35,7 @@ export interface PersistState {
   granularFocus?: GranularFocusToggles;
   queue: Partial<Record<LockKey, Action[]>>;
   onboarded: boolean;
+  savedSchedules?: string[];
 }
 export interface FocusState {
   active: boolean;
@@ -67,7 +68,7 @@ export type Outcome = 'applied' | 'queued' | 'restarted';
 const EMPTY: PersistState = {
   categories: {}, customDomains: [], customKeywords: [], whitelist: [], blockedApps: [], exemptApps: [],
   granularFocus: DEFAULT_GRANULAR,
-  queue: {}, onboarded: false
+  queue: {}, onboarded: false, savedSchedules: []
 };
 
 let snap: Snapshot = {
@@ -132,6 +133,13 @@ export async function init() {
     // native side still holds entries pending a locked removal; keep native state
   }
   await refresh();
+  // Ensure any existing schedules already loaded on startup are marked as saved
+  if (!state.savedSchedules || state.savedSchedules.length === 0) {
+    if (snap.schedules.length > 0) {
+      const savedSchedules = snap.schedules.map(s => s.id);
+      persist({ ...snap.state, savedSchedules });
+    }
+  }
   emit({ ready: true });
 }
 
@@ -207,6 +215,7 @@ export async function confirm(key: LockKey) {
   if (!snap.locks[key]?.open) await Native.confirmSettingChange(key);
   let s = snap.state;
   let focusApps = snap.focus.apps;
+  let savedSchedules = s.savedSchedules ?? [];
   for (const a of s.queue[key] ?? []) {
     if (a.t === 'protection_off') await Native.setProtectionActive(false);
     else if (a.t === 'shield_off') await Native.setShieldEnabled(false);
@@ -215,9 +224,10 @@ export async function confirm(key: LockKey) {
     else if (a.t === 'focus_shorten') await Native.shortenFocus(a.n!);
     else if (a.t === 'schedule_update') {
       const p = a.schedule!;
-      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled).catch(() => {});
+      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled);
     } else if (a.t === 'schedule_delete') {
-      await Native.deleteSchedule(a.v!).catch(() => {});
+      await Native.deleteSchedule(a.v!);
+      savedSchedules = savedSchedules.filter(x => x !== a.v);
     } else if (a.t === 'focus_add_app') {
       focusApps = [...new Set([...focusApps, a.v!])];
       await Native.setFocusApps(focusApps);
@@ -225,6 +235,7 @@ export async function confirm(key: LockKey) {
       await Native.setGranularFocusToggle(a.v as GranularFocusKey, false).catch(() => {});
     } else s = reduce(s, a);
   }
+  s = { ...s, savedSchedules };
   if (key === 'remove_apps') await sync(s);
   if (key === 'remove_blocklist' || key === 'whitelist') await sync(s);
   if (key === 'exempt_apps') await sync(s);
@@ -325,21 +336,35 @@ export async function removeFocusApp(pkg: string) {
 
 const windowLen = (start: number, end: number) => (start <= end ? end - start : 1440 - start + end);
 
-export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean) {
-  await Native.addSchedule(label, startMin, endMin, enabled);
+export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean): Promise<string> {
+  const id = await Native.addSchedule(label, startMin, endMin, enabled);
   await refresh();
+  return id;
 }
 
 /** Enabling or widening a schedule is always immediate.
- *  Disabling, shrinking, or any other weakening change waits for the delay timer whenever
- *  protection is active — regardless of whether the schedule is currently running. */
+ *  Disabling, shrinking, or modifying an already-saved schedule waits for the delay timer whenever
+ *  protection is active. The very first time a newly created schedule is configured/saved, it applies
+ *  immediately and becomes locked for subsequent edits. */
 export async function updateSchedule(id: string, patch: SchedulePatch): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) throw new Error('That schedule no longer exists.');
-  // A change weakens scheduling if it disables the schedule or narrows its time window.
-  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin);
-  if (!weakening || !snap.active) {
+
+  const isSaved = (snap.state.savedSchedules ?? []).includes(id);
+  // Setting for the first time: apply immediately without delay timer, and mark as saved
+  if (!isSaved) {
+    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
+    const savedSchedules = [...new Set([...(snap.state.savedSchedules ?? []), id])];
+    persist({ ...snap.state, savedSchedules });
+    await refresh();
+    return 'applied';
+  }
+
+  // From the 2nd time onward: modifying times or disabling requires delay timer while active
+  const timesChanged = patch.startMin !== old.startMin || patch.endMin !== old.endMin;
+  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin) || timesChanged;
+  if (!weakening || !snap.active || snap.locks.schedule?.open) {
     await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
     await refresh();
     return 'applied';
@@ -351,9 +376,15 @@ export async function deleteSchedule(id: string): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) return 'applied';
-  // Deleting a schedule weakens future protection, so it's always gated while protection is on.
-  if (!snap.active) {
+
+  const isSaved = (snap.state.savedSchedules ?? []).includes(id);
+  // Unsaved new schedule can be deleted immediately without delay timer
+  if (!isSaved || !snap.active || snap.locks.schedule?.open) {
     await Native.deleteSchedule(id);
+    if (isSaved) {
+      const savedSchedules = (snap.state.savedSchedules ?? []).filter(x => x !== id);
+      persist({ ...snap.state, savedSchedules });
+    }
     await refresh();
     return 'applied';
   }
