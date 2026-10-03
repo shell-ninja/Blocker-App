@@ -117,8 +117,30 @@ chmod +x gradlew
 BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
 APP_VER="$(cat "$HERE/VERSION" 2>/dev/null || echo "1.0.0" | tr -d '[:space:]')"
 
-APK_DIR="$HERE/apk"
-mkdir -p "$APK_DIR"
+# Define variables clearly
+APK_DIR="${HERE}/apk"
+# Use hyphens instead of colons for cross-platform filesystem safety
+TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+
+mkdir -p "${APK_DIR}"
+
+# Store target files in an array for clean, scalable management
+TARGET_APKS=(
+    "${APK_DIR}/Blocker-release-${APP_VER}.apk"
+    "${APK_DIR}/Blocker-release-debug${APP_VER}.apk"
+)
+
+# Process each APK independently
+for APK in "${TARGET_APKS[@]}"; do
+    if [[ -f "${APK}" ]]; then
+        BACKUP_NAME="${APK}.back-${TIMESTAMP}"
+        mv "${APK}" "${BACKUP_NAME}"
+        
+        # Log the action (using basename to keep the log output clean)
+        echo "[INFO] Backed up: $(basename "${APK}") -> $(basename "${BACKUP_NAME}")"
+    fi
+done
+
 
 if [ "$MODE" = "release" ]; then
   # Build both Release and Release-Debug so the release version can be tested before finally installing

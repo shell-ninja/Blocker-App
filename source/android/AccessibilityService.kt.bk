@@ -214,7 +214,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
         // Activity / fragment class-name fragments that announce "this window is an App Info screen"
         private val APP_INFO_CLASS_HINTS = listOf("appinfo", "installedapp", "appdetail", "applicationdetail", "applicationsdetail")
-        private const val APP_INFO_FAST_TICK_MS = 15L      // scan cadence right after a window opens
+        private const val APP_INFO_FAST_TICK_MS = 25L      // scan cadence right after a window opens
         private const val APP_INFO_SLOW_TICK_MS = 60L      // scan cadence while merely sitting in Settings
         private const val APP_INFO_FRESH_MS = 1_500L       // how long after an opening the fast cadence lasts
         private const val APP_INFO_IMMEDIATE_GAP_MS = 20L  // min gap between event-triggered scans
@@ -1542,13 +1542,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun kickFromAppInfo() {
-        performGlobalAction(GLOBAL_ACTION_HOME)                 // instant: closes the page before anything else runs
-        // Land on Settings' own home list rather than leaving the user on the launcher. This is a second,
-        // slightly slower step on purpose: HOME above already guarantees the App Info page is gone immediately;
-        // this just decides where they end up a moment later.
-        runCatching {
-            startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
+        performGlobalAction(GLOBAL_ACTION_HOME)                 // instant: nothing runs before it
         val now = System.currentTimeMillis()
         viewingBlockerSettingsUntil = now + 30_000L             // arms the existing uninstall / clear-data dialog catchers
         if (now - lastAppInfoKick < APP_INFO_KICK_GAP_MS) return
