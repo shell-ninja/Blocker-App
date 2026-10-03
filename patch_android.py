@@ -162,6 +162,26 @@ if "BlockerAccessibilityService" not in t:
     t = t.replace("</application>", tail + "</application>", 1)
     write(mf, t)
 
+# 4b. Permissions added after the first release. Kept apart from the block above (which only runs once per
+# manifest) so re-running this script upgrades a manifest that was already patched.
+#  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
+#        adb shell pm grant <package> android.permission.WRITE_SECURE_SETTINGS
+#  - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets Settings > Background activity open the "allow background" dialog.
+t = read(mf)
+extra = []
+for perm, attrs in (
+    ("android.permission.WRITE_SECURE_SETTINGS", ' tools:ignore="ProtectedPermissions"'),
+    ("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", ""),
+):
+    if perm not in t:
+        extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
+if extra:
+    if "xmlns:tools" not in t:
+        t = t.replace('xmlns:android="http://schemas.android.com/apk/res/android"',
+                      'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
+    t = t.replace("<application", "\n    ".join(extra) + "\n    <application", 1)
+    write(mf, t)
+
 # 5. app/build.gradle
 gr = proj / "android" / "app" / "build.gradle"
 g = read(gr)

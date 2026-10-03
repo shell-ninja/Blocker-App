@@ -8,7 +8,3 @@
 # examples (delete the leading # to use them):
 # example-bad-site.com
 # some bad phrase
-
-# Blocking Developer Options
-OEM unlocking
-USB debugging

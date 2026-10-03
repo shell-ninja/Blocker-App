@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 
-export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin';
+export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
   | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule';
@@ -15,6 +15,10 @@ export interface PermissionStatus {
   usageAccess: boolean;
   deviceAdmin: boolean;
   adminLost: boolean;
+  /** true when Blocker is exempt from battery optimization (can keep running in the background) */
+  battery?: boolean;
+  /** true when WRITE_SECURE_SETTINGS was granted over adb, which enables the USB-debugging lock */
+  secureSettings?: boolean;
 }
 export interface InstalledApp {
   packageName: string;

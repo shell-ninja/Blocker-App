@@ -48,7 +48,7 @@ function wholeWordHit(text: string, keywords: Set<string>, whitelist: string[]):
 
   const isWord = (c: string) => /[a-z0-9]/i.test(c);
 
-  // 1. Check multi-word / delimited keywords first (e.g. "usb debugging", "oem unlocking")
+  // 1. Check multi-word / delimited keywords first (e.g. "live cam", "adult chat")
   for (const kw of keywords) {
     if (!kw.includes(' ') && !kw.includes('-') && !kw.includes('_')) continue;
     let from = 0;

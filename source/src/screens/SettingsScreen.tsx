@@ -54,6 +54,20 @@ export default function SettingsScreen() {
     }
   };
 
+  const allowBackground = async () => {
+    try {
+      const direct = await Native.openPermissionSettings('battery');
+      if (!direct) {
+        showAlert(
+          'Opened battery settings',
+          'Find Blocker in the list and choose \u201cDon\u2019t optimize\u201d (or \u201cUnrestricted\u201d) so it can keep running in the background.'
+        );
+      }
+    } catch (e) {
+      showAlert('Couldn\u2019t open settings', `${errMsg(e)}\n\nOpen Settings \u2192 Apps \u2192 Blocker \u2192 Battery and choose Unrestricted.`);
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
       <Card>
@@ -82,7 +96,33 @@ export default function SettingsScreen() {
         {p.perms && !p.perms.deviceAdmin && (
           <Sub>If the button doesn't open the right screen, go to Settings → Security → Device admin apps → Blocker.</Sub>
         )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <Text style={{ color: t.text }}>USB debugging lock</Text>
+          <Badge
+            label={!p.shield ? 'Off' : p.perms?.secureSettings ? 'Instant lock' : 'On'}
+            tone={p.shield ? 'ok' : 'idle'}
+          />
+        </View>
+        <Sub>
+          {p.perms?.secureSettings
+            ? 'USB and Wireless debugging are switched off the moment anything turns them on.'
+            : 'Developer options are blocked, and if USB debugging is ever found on, Blocker switches it off through Settings by itself. ' +
+              'Optional instant lock (needs a computer once): adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS'}
+        </Sub>
         <LockBar lockKey="shield" />
+      </Card>
+
+      <Card>
+        <Title icon={Icons.clock}>Background activity</Title>
+        <Sub>
+          Battery optimization can put Blocker to sleep. Setting it to unrestricted keeps blocking running in the background.
+        </Sub>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <Text style={{ color: t.text }}>Battery optimization</Text>
+          {p.perms?.battery
+            ? <Badge label="Unrestricted" tone="ok" />
+            : <Btn label="Allow" icon={Icons.shieldOn} onPress={allowBackground} />}
+        </View>
       </Card>
 
       <Card>

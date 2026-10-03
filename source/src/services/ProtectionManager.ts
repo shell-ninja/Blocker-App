@@ -36,7 +36,14 @@ export interface PersistState {
   queue: Partial<Record<LockKey, Action[]>>;
   onboarded: boolean;
   savedSchedules?: string[];
+  /** true once the built-in default app blocks have been added (so a later, delayed unblock sticks) */
+  defaultAppsSeeded?: boolean;
 }
+/** Keywords this app used to ship. They are filtered out of every list, whatever an older saved state still holds. */
+export const RETIRED_KEYWORDS = new Set(['usb debugging', 'oem unlocking', 'oem unlock']);
+const isRetired = (k: string) => RETIRED_KEYWORDS.has(k.trim().toLowerCase());
+/** Blocked out of the box (added once; removing them later goes through the normal delay timer). */
+export const DEFAULT_BLOCKED_APPS = ['com.streamdev.aiostreamer', 'org.xbmc.kodi'];
 export interface FocusState {
   active: boolean;
   until: number;
@@ -109,7 +116,7 @@ export function effectiveLists(s: PersistState = snap.state) {
   // Built-in protective phrases (e.g. "sex education") always apply; the UI only ever shows the
   // user's own additions in s.whitelist, so these never appear as removable entries there.
   const whitelist = new Set([...USER_DEFAULT_WHITELIST, ...s.whitelist]);
-  return { domains: [...domains], keywords: [...keywords], tlds: [...tlds], whitelist: [...whitelist] };
+  return { domains: [...domains], keywords: [...keywords].filter(k => !isRetired(k)), tlds: [...tlds], whitelist: [...whitelist] };
 }
 export const buildEngine = (s: PersistState = snap.state) =>
   BlocklistEngine.from({ ...effectiveLists(s), packages: s.blockedApps });
@@ -125,12 +132,24 @@ async function sync(s: PersistState = snap.state) {
 
 export async function init() {
   const raw = await Native.loadState();
-  const state: PersistState = raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+  let state: PersistState = raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+  if (state.customKeywords.some(isRetired)) {
+    state = { ...state, customKeywords: state.customKeywords.filter(k => !isRetired(k)) };
+    Native.saveState(JSON.stringify(state)).catch(() => {});
+  }
+  if (!state.defaultAppsSeeded) {
+    // adding blocks strengthens protection, so this applies immediately, with no delay timer
+    state = { ...state, blockedApps: [...new Set([...state.blockedApps, ...DEFAULT_BLOCKED_APPS])], defaultAppsSeeded: true };
+    Native.saveState(JSON.stringify(state)).catch(() => {});
+  }
   emit({ state });
   try {
     await sync(state);
   } catch {
-    // native side still holds entries pending a locked removal; keep native state
+    // native side still holds entries pending a locked removal; keep native state.
+    // sync() stops at the first refusal, so push the app lists separately (this is what delivers the default app blocks).
+    try { await Native.setBlockedApps(state.blockedApps); } catch { /* locked removal pending */ }
+    try { await Native.setExemptApps(state.exemptApps); } catch { /* locked removal pending */ }
   }
   await refresh();
   // Ensure any existing schedules already loaded on startup are marked as saved

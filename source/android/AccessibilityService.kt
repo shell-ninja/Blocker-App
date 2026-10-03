@@ -4,16 +4,19 @@ import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -93,8 +96,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         private val DIRECT_TERMS = listOf(
             "device admin apps", "special app access", "device administrators",
             "device admin", "device administrator", "admin apps",
-            "developer options", "development settings",
-            "usb debugging", "oem unlocking"
+            "developer options", "development settings"
         )
         private val APP_RISK_TERMS = listOf(
             "deactivate", "uninstall", "force stop", "accessibility", "turn off", "remove", "disable", "clear data",
@@ -202,14 +204,20 @@ class BlockerAccessibilityService : AccessibilityService() {
         private const val MAX_SCAN_CHARS = 20_000
         private const val REDIRECT_URL = "https://www.google.com"
 
-        // ── Blocker App Info guard (strict 3-keyword match) ──
+        // ── Blocker App Info guard ──
         // Static OS button labels, matched case-insensitively. Add another UI language here if you ever need one.
-        private val APP_INFO_ACTION_TEXTS = listOf("Uninstall", "Force stop")
+        // "Deactivate" covers the "Deactivate & uninstall" device-admin page that Uninstall leads to.
+        private val APP_INFO_ACTION_TEXTS = listOf("Uninstall", "Force stop", "Deactivate")
+        // Activity class fragments of the Device admin screens (list and "Deactivate & uninstall" page)
+        private val DEVICE_ADMIN_CLASS_HINTS = listOf("deviceadmin")
+        // Phrases that used to ship as blocked keywords. Ignored even if an older saved list still contains them.
+        private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
         // Activity / fragment class-name fragments that announce "this window is an App Info screen"
         private val APP_INFO_CLASS_HINTS = listOf("appinfo", "installedapp", "appdetail", "applicationdetail", "applicationsdetail")
-        private const val APP_INFO_FAST_TICK_MS = 35L      // scan cadence right after a window opens
-        private const val APP_INFO_SLOW_TICK_MS = 100L     // scan cadence while merely sitting in Settings
-        private const val APP_INFO_FRESH_MS = 700L         // how long after an opening the fast cadence lasts
+        private const val APP_INFO_FAST_TICK_MS = 25L      // scan cadence right after a window opens
+        private const val APP_INFO_SLOW_TICK_MS = 60L      // scan cadence while merely sitting in Settings
+        private const val APP_INFO_FRESH_MS = 1_500L       // how long after an opening the fast cadence lasts
+        private const val APP_INFO_IMMEDIATE_GAP_MS = 20L  // min gap between event-triggered scans
         private const val APP_INFO_HOLD_OPEN_MS = 2_500L   // keep scanning this long after a window opens
         private const val APP_INFO_HOLD_ACTIVE_MS = 600L   // ...and this long after any other Settings activity
         private const val APP_INFO_DEEP_EVERY = 6          // every Nth scan also allows the fallback walk
@@ -217,10 +225,19 @@ class BlockerAccessibilityService : AccessibilityService() {
         private const val APP_INFO_WALK_BUDGET = 200       // max nodes the fallback walk will ever visit
         private const val APP_INFO_WALK_DEPTH = 25
         private const val APP_INFO_MAX_TEXT = 120          // longer strings can't be a name / version / button label
-        private const val BIT_VERSION = 1
-        private const val BIT_ACTION = 2
-        private const val BIT_NAME = 4
-        private const val BITS_ALL = BIT_VERSION or BIT_ACTION or BIT_NAME
+        // Settings.Global flags that let a computer talk to the phone over adb (USB, and Wireless debugging)
+        private val ADB_SETTING_KEYS = listOf(Settings.Global.ADB_ENABLED, "adb_wifi_enabled")
+        private const val ADB_ENFORCE_GAP_MS = 1_000L
+        // No-computer fallback: drive Developer options itself and flip the USB debugging switch off
+        private const val ADB_ROW_LABEL = "USB debugging"
+        private const val ADB_FIX_WINDOW_MS = 14_000L      // hard limit for one attempt
+        private const val ADB_FIX_MAX_PER_10MIN = 3        // attempts per 10 minutes, so it can never loop
+        private const val ADB_FIX_MAX_SCROLLS = 20
+        private const val ADB_FIX_STEP_GAP_MS = 250L
+        private const val ADB_FIX_CLICK_GAP_MS = 1_500L
+        private const val BIT_ACTION = 1
+        private const val BIT_NAME = 2
+        private const val BITS_ALL = BIT_ACTION or BIT_NAME
 
         /** Set by BlockerDeviceAdminReceiver.onDisableRequested() to signal an instant kick. */
         @Volatile
@@ -257,6 +274,9 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var appInfoThread: HandlerThread? = null     // guarded by appInfoLock
     private var appInfoBg: Handler? = null               // guarded by appInfoLock
     private var appInfoTick = 0                          // scan thread only
+    @Volatile private var appInfoNowPending = false      // an event-triggered scan is already queued
+    @Volatile private var lastImmediateUp = 0L
+    private var lastWindowOpenUp = 0L                    // main thread only: last TYPE_WINDOW_STATE_CHANGED in Settings
     private var appInfoWatchPkg = ""                     // main thread only
     private var appInfoWatchUntil = 0L                   // main thread only
     private val appInfoLoop = object : Runnable {
@@ -274,6 +294,37 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
             scanAppInfoOnce(pkg, deep = (++appInfoTick % APP_INFO_DEEP_EVERY == 0))
             appInfoBg?.postDelayed(this, next)
+        }
+    }
+
+    private val appInfoNow = Runnable {
+        appInfoNowPending = false
+        val pkg = synchronized(appInfoLock) { appInfoCandidatePkg }
+        if (shieldEngaged()) scanAppInfoOnce(pkg, deep = false)
+    }
+
+    // USB-debugging lock state (main thread)
+    private var lastAdbEnforce = 0L
+    private var lastAdbNotice = 0L
+    private var adbPermWarned = false
+    private var adbFixUntil = 0L
+    private var adbFixScrolls = 0
+    private var lastAdbFixClick = 0L
+    private val adbFixStarts = ArrayList<Long>()
+    private val adbFixTick = object : Runnable {
+        override fun run() {
+            if (!adbFixActive()) return
+            if (!shieldEngaged() || !adbIsOn()) {
+                finishAdbUiFix()
+                return
+            }
+            stepAdbUiFix()
+            main.postDelayed(this, ADB_FIX_STEP_GAP_MS)
+        }
+    }
+    private val adbObserver = object : ContentObserver(main) {
+        override fun onChange(selfChange: Boolean) {
+            enforceAdbOff(notify = true)
         }
     }
 
@@ -316,6 +367,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (!shieldOn) {
                 settingsPollActive = false
                 outsideSettingsCount = 0
+                return
+            }
+
+            if (adbFixActive()) {                  // Blocker is switching USB debugging off itself; don't kick it out
+                main.postDelayed(this, 150)
                 return
             }
 
@@ -479,7 +535,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Developer Options
         val hasDevTitle = "developer options" in t || "development settings" in t || "developer mode" in t
-        val hasDevMarker = "usb debugging" in t || "wireless debugging" in t || "oem unlocking" in t ||
+        val hasDevMarker = "wireless debugging" in t ||
             "logger buffer" in t || "stay awake" in t || "desktop backup password" in t
         if (hasDevTitle || hasDevMarker) {
             pollKick("Developer options are locked while Protection Mode is active.")
@@ -561,14 +617,20 @@ class BlockerAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         loadAppIdentity()
+        BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
         BlockerStore.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
+        runCatching {
+            for (k in ADB_SETTING_KEYS) contentResolver.registerContentObserver(Settings.Global.getUriFor(k), false, adbObserver)
+        }
+        enforceAdbOff(notify = false)
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
         BlockerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener)
+        runCatching { contentResolver.unregisterContentObserver(adbObserver) }
         synchronized(appInfoLock) {
             appInfoBg?.removeCallbacks(appInfoLoop)
             appInfoThread?.quitSafely()
@@ -639,7 +701,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         discoveredSettingsPkgs = settingsPackages()
         neverBlock = setOf("com.android.systemui", "android") + launcherPackages() + cameraPackages()
         domains = BlockerStore.set(this, "domains")
-        keywords = BlockerStore.set(this, "keywords")
+        keywords = BlockerStore.set(this, "keywords") - RETIRED_KEYWORDS
         tlds = BlockerStore.set(this, "tlds")
         whitelist = BlockerStore.set(this, "whitelist")
         apps = BlockerStore.set(this, "apps")
@@ -649,6 +711,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
         blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
         blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        enforceAdbOff(notify = false)
     }
 
     private fun imePackages(): Set<String> = runCatching {
@@ -666,10 +729,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             main.removeCallbacks(settingsPollRunnable)
             return
         }
-        if (checkAdbDialog(pkg)) return
-        // Strict App Info guard runs BEFORE the neverBlock bail-out: some OEMs host app-info pages inside
-        // packages that also answer the HOME intent, which neverBlock would otherwise skip entirely.
+        // The App Info / device-admin guard runs FIRST and never stands aside, not even while Blocker is switching
+        // USB debugging off (a 14 s window in which every other Settings guard pauses). It also runs before the
+        // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
         guardBlockerAppInfo(ev, pkg)
+        // While Blocker itself is switching USB debugging off in Developer options, the other guards stand aside
+        if (adbFixActive() && (isSettingsPkg(pkg) || isInstallerPkg(pkg))) return
+        if (checkAdbDialog(pkg)) return
         if (pkg in neverBlock) return
         if (isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android") {
             if (checkDangerDialog(pkg, ev)) return
@@ -864,7 +930,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /**
      * Whole-word keyword match: "camera" never matches "cam", "essex" never matches "sex".
-     * Supports both single-word and multi-word keywords (e.g. "usb debugging", "oem unlocking").
+     * Supports both single-word and multi-word keywords (e.g. "live cam", "adult chat").
      * A whitelist phrase (single or multi-word, e.g. "sex education", "ai cam") shields any keyword inside it.
      */
     private fun wholeWordHit(t: String): String? {
@@ -880,7 +946,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 1. Check multi-word keywords first (e.g. "usb debugging", "oem unlocking")
+        // 1. Check multi-word keywords first (e.g. "live cam", "adult chat")
         for (kw in keywords) {
             if (!kw.contains(' ') && !kw.contains('-') && !kw.contains('_')) continue
             var from = 0
@@ -1145,10 +1211,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "development options" in fullText ||
             "developer settings" in fullText
 
-        val hasUniqueDevMarker = "usb debugging" in fullText ||
-            "revoke usb debugging" in fullText ||
-            "wireless debugging" in fullText ||
-            "oem unlocking" in fullText ||
+        val hasUniqueDevMarker = "wireless debugging" in fullText ||
             "desktop backup password" in fullText ||
             "logger buffer" in fullText ||
             "stay awake" in fullText ||
@@ -1217,21 +1280,28 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (direct || (isOurApp && hasRiskAction)) lockOutOfSettings()
     }
 
-    // ---------- Blocker App Info guard (strict 3-keyword match) ----------
+    // ---------- Blocker App Info guard ----------
     //
     // Closes the Settings > Apps > App management > App list > Blocker route (the page with Open / Uninstall /
-    // Force stop). The page is recognised only when ALL THREE are on screen at the same moment:
-    //   1. the app's name     - resolved at runtime from the app's own label (= @string/app_name)
-    //   2. the app's version  - resolved at runtime from PackageInfo.versionName (what Settings itself prints)
-    //   3. an action label    - "Uninstall" or "Force stop" (static OS strings)
-    // Name + version + action never occur together on any other screen, including other apps' App Info pages.
+    // Force stop) and the "Deactivate & uninstall" page that Uninstall leads to. A page is recognised when BOTH
+    // are on screen at the same moment:
+    //   1. the app's name   - resolved at runtime from the app's own label (= @string/app_name), exact match
+    //   2. an action label  - "Uninstall", "Force stop" or "Deactivate" (static OS strings)
+    // The version is deliberately NOT required: it is the last row Settings draws (bottom of the list) and the
+    // Deactivate & uninstall page does not show it at all, so waiting for it only delayed or missed the block.
     //
-    // Latency model: the accessibility callback only ARMS a scanner (a few field writes, no IPC). The scanner
-    // runs on its own HandlerThread, so it is never stuck behind the heavier main-thread Settings handlers, and
-    // polls every 35 ms for the first 700 ms after a window opens (100 ms afterwards) instead of waiting for
-    // the next event. Each poll is ONE targeted findAccessibilityNodeInfosByText lookup for the usual non-match
-    // (3-4 worst case). A bounded early-exit walk is kept as a fallback for screens whose framework doesn't
-    // answer text lookups (e.g. Compose) and only runs on every 6th poll.
+    // Four layers, fastest first:
+    //   a. Row tap: tapping a row labelled exactly "Blocker" inside Settings sends Home BEFORE the page opens.
+    //   b. Device admin screens: the window class (DeviceAdminAdd etc.) is checked on the event itself, no IPC.
+    //   c. Event-triggered scan: every window-open / content event queues one scan at the front of the scanner
+    //      thread's queue instead of waiting for the next tick.
+    //   d. Ticker: the scanner polls every 25 ms for 1.5 s after a window opens (60 ms afterwards).
+    //
+    // Latency model: the accessibility callback only ARMS the scanner (a few field writes, no IPC). The scanner
+    // runs on its own HandlerThread, so it is never stuck behind the heavier main-thread Settings handlers. Each
+    // poll is ONE targeted findAccessibilityNodeInfosByText lookup for the usual non-match (2 worst case). A
+    // bounded early-exit walk is kept as a fallback for screens whose framework doesn't answer text lookups
+    // (e.g. Compose) and only runs on every 6th poll.
 
     private fun shieldEngaged(): Boolean =
         BlockerStore.active(this) && BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")
@@ -1259,6 +1329,10 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** Accessibility-callback side: IPC-free gates, then arm the scanner. Never blocks, never scans. */
     private fun guardBlockerAppInfo(ev: AccessibilityEvent, pkg: String) {
+        if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            guardBlockerRowClick(ev, pkg)
+            return
+        }
         val stateChange = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         if (!stateChange && ev.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
         if (pkg == "com.android.systemui" || pkg == "android") return
@@ -1271,28 +1345,95 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val settingsLike = (isSettingsPkg(pkg) || isInstallerPkg(pkg)) && pkg !in neverBlock
         val watched = pkg == appInfoWatchPkg && nowUp < appInfoWatchUntil
+        if (settingsLike) enforceAdbOffThrottled()
         if (!settingsLike && !watched) return
         if (!shieldEngaged()) return
 
+        if (stateChange) {
+            lastWindowOpenUp = nowUp
+            // Device admin screens (list and "Deactivate & uninstall") are always off limits: decided from the
+            // event's class name alone, with no tree lookup at all.
+            val cls = ev.className?.toString()?.lowercase().orEmpty()
+            // DeviceAdminAdd is also the "Activate" page used during onboarding, so it only counts once our admin is active.
+            if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && ("deviceadminadd" !in cls || isOurAdminActive())) {
+                kickFromAppInfo()
+                return
+            }
+        }
         if (settingsLike) startSettingsPoll()
-        armAppInfoScan(pkg, fresh = stateChange, holdMs = if (stateChange) APP_INFO_HOLD_OPEN_MS else APP_INFO_HOLD_ACTIVE_MS)
+        armAppInfoScan(
+            pkg, fresh = stateChange,
+            holdMs = if (stateChange) APP_INFO_HOLD_OPEN_MS else APP_INFO_HOLD_ACTIVE_MS,
+            immediate = stateChange || nowUp - lastWindowOpenUp < APP_INFO_FRESH_MS
+        )
+    }
+
+    /**
+     * Layer a: the tap on the "Blocker" row of an app list (or search result) inside Settings. The click event
+     * arrives while the App Info page is still being launched, so Home goes out before it is ever drawn.
+     * Only taps inside Settings / installer packages count; Blocker's own screens never reach this.
+     */
+    private fun guardBlockerRowClick(ev: AccessibilityEvent, pkg: String) {
+        if (!(isSettingsPkg(pkg) || isInstallerPkg(pkg)) || pkg in neverBlock) return
+        if (!shieldEngaged()) return
+        val name = appLabel
+        if (name.isEmpty()) return
+        val ver = appVersionName
+        var hit = false
+        for (t in ev.text) if (t != null && isAppNameText(t.toString(), name, ver)) { hit = true; break }
+        if (!hit) hit = ev.contentDescription?.toString()?.let { isAppNameText(it, name, ver) } == true
+        if (!hit) {
+            val src = ev.source
+            if (src != null) {
+                hit = rowShowsName(src, name, ver, 0, intArrayOf(12))
+                runCatching { src.recycle() }
+            }
+        }
+        if (hit) kickFromAppInfo()
+    }
+
+    /** Looks for the app's exact name in a tapped row: the node itself and a few levels of children. */
+    @Suppress("DEPRECATION")
+    private fun rowShowsName(n: AccessibilityNodeInfo?, name: String, ver: String, depth: Int, budget: IntArray): Boolean {
+        if (n == null || depth > 3 || budget[0]-- <= 0) return false
+        val t = n.text?.toString()
+        val d = n.contentDescription?.toString()
+        if ((t != null && isAppNameText(t, name, ver)) || (d != null && isAppNameText(d, name, ver))) return true
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i)
+            val done = rowShowsName(c, name, ver, depth + 1, budget)
+            c?.recycle()
+            if (done) return true
+        }
+        return false
     }
 
     /** Extends the scanner's active window (starting its thread / loop if needed). Cheap and thread-safe. */
-    private fun armAppInfoScan(pkg: String, fresh: Boolean, holdMs: Long) {
+    private fun armAppInfoScan(pkg: String, fresh: Boolean, holdMs: Long, immediate: Boolean = false) {
         val now = SystemClock.uptimeMillis()
+        val h: Handler
         synchronized(appInfoLock) {
             appInfoCandidatePkg = pkg
             if (now + holdMs > appInfoHotUntil) appInfoHotUntil = now + holdMs
             if (fresh && now + APP_INFO_FRESH_MS > appInfoFreshUntil) appInfoFreshUntil = now + APP_INFO_FRESH_MS
-            if (appInfoLoopRunning) return
-            val h = appInfoBg ?: Handler(HandlerThread("BlockerAppInfoGuard").also {
+            h = appInfoBg ?: Handler(HandlerThread("BlockerAppInfoGuard").also {
                 it.start()
                 appInfoThread = it
             }.looper).also { appInfoBg = it }
-            appInfoLoopRunning = true
-            h.post(appInfoLoop)
+            if (!appInfoLoopRunning) {
+                appInfoLoopRunning = true
+                h.post(appInfoLoop)
+            }
         }
+        if (immediate) requestImmediateAppInfoScan(h, now)
+    }
+
+    /** Layer c: one scan at the FRONT of the scanner queue, so an event never waits for the next tick. */
+    private fun requestImmediateAppInfoScan(h: Handler, now: Long) {
+        if (appInfoNowPending || now - lastImmediateUp < APP_INFO_IMMEDIATE_GAP_MS) return
+        lastImmediateUp = now
+        appInfoNowPending = true
+        h.postAtFrontOfQueue(appInfoNow)
     }
 
     /** One scan of the active window (scanner thread). */
@@ -1311,20 +1452,20 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * The 3-keyword test. Cheapest/rarest lookup first, so ordinary screens leave after a single lookup.
+     * The name + action test. Rarest lookup first, so ordinary screens leave after a single lookup.
      * [deep] additionally allows the bounded walk (used for post-open settle passes only).
      */
     private fun matchesBlockerAppInfo(root: AccessibilityNodeInfo, deep: Boolean): Boolean {
         val name = appLabel
         if (name.isEmpty()) return false
-        val ver = appVersionName      // empty only if PackageManager failed; then name + action must suffice
+        val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node
         return runCatching { fastMatch(root, name, ver) || (deep && walkMatch(root, name, ver)) }.getOrDefault(false)
     }
 
     private fun fastMatch(root: AccessibilityNodeInfo, name: String, ver: String): Boolean {
-        if (ver.isNotEmpty() && !anyNodeMatches(root, ver) { containsVersion(it, ver) }) return false
-        if (!APP_INFO_ACTION_TEXTS.any { a -> anyNodeMatches(root, a) { it.contains(a, ignoreCase = true) } }) return false
-        return anyNodeMatches(root, name) { isAppNameText(it, name, ver) }
+        // name first: it is the rarest text, so ordinary screens leave after this single lookup
+        if (!anyNodeMatches(root, name) { isAppNameText(it, name, ver) }) return false
+        return APP_INFO_ACTION_TEXTS.any { a -> anyNodeMatches(root, a) { it.contains(a, ignoreCase = true) } }
     }
 
     /** One framework-side text search (a single IPC); every node it returns is verified and recycled. */
@@ -1344,11 +1485,11 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun walkMatch(root: AccessibilityNodeInfo, name: String, ver: String): Boolean {
-        val found = intArrayOf(if (ver.isEmpty()) BIT_VERSION else 0)
+        val found = intArrayOf(0)
         return walkAppInfo(root, 0, intArrayOf(APP_INFO_WALK_BUDGET), found, name, ver)
     }
 
-    /** Depth-first, node-budgeted, allocation-light; stops the moment all three keywords have been seen. */
+    /** Depth-first, node-budgeted, allocation-light; stops the moment the name and an action label have both been seen. */
     @Suppress("DEPRECATION")
     private fun walkAppInfo(
         n: AccessibilityNodeInfo?, depth: Int, budget: IntArray, found: IntArray, name: String, ver: String
@@ -1369,7 +1510,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (cs == null || cs.isEmpty() || cs.length > APP_INFO_MAX_TEXT) return 0
         val s = cs.toString()
         var bits = 0
-        if (ver.isNotEmpty() && containsVersion(s, ver)) bits = bits or BIT_VERSION
         if (APP_INFO_ACTION_TEXTS.any { s.contains(it, ignoreCase = true) }) bits = bits or BIT_ACTION
         if (isAppNameText(s, name, ver)) bits = bits or BIT_NAME
         return bits
@@ -1410,6 +1550,130 @@ class BlockerAccessibilityService : AccessibilityService() {
         Log.i("BlockerGuard", "App Info screen blocked (pkg=$appInfoCandidatePkg)")
         BlockerStore.incr(this, "tamper")
         showOverlay("🔐 Tamper Protection", "Blocker's app info page is locked while Protection Mode is active.", 5000)
+    }
+
+    // ---------- USB debugging lock ----------
+    //
+    // While Protection Mode + the uninstall shield are on, USB debugging must stay off. Two levels:
+    //
+    //  1. Works out of the box, no computer: Developer options screens are blocked (see the settings guards), and
+    //     if USB debugging is ever found switched on, Blocker opens Developer options itself, finds the
+    //     "USB debugging" row, taps it off, and returns Home (a few seconds; at most 3 attempts per 10 minutes).
+    //  2. Optional instant lock: one adb command, run once from any computer while USB debugging is on:
+    //         adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS
+    //     After that USB and Wireless debugging are switched back off the instant anything turns them on.
+    //
+    // Both stand down while the shield is off or its confirmation window is open, so a confirmed shield change
+    // lets you use adb again.
+
+    private fun hasSecureSettingsPermission(): Boolean =
+        checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
+    private fun adbIsOn(): Boolean =
+        runCatching { Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1 }.getOrDefault(false)
+
+    private fun enforceAdbOffThrottled() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastAdbEnforce < ADB_ENFORCE_GAP_MS) return
+        lastAdbEnforce = now
+        enforceAdbOff(notify = true)
+    }
+
+    private fun enforceAdbOff(notify: Boolean) {
+        if (adbFixActive() && !adbIsOn()) finishAdbUiFix()     // the tap worked
+        if (!shieldEngaged()) return
+        if (!hasSecureSettingsPermission()) {
+            if (!adbPermWarned) {
+                adbPermWarned = true
+                Log.i("BlockerGuard", "USB-debugging lock: using the Settings fallback (optional instant lock: adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS)")
+            }
+            if (adbIsOn()) startAdbUiFix()
+            return
+        }
+        var flipped = false
+        for (key in ADB_SETTING_KEYS) {
+            val on = runCatching { Settings.Global.getInt(contentResolver, key, 0) == 1 }.getOrDefault(false)
+            if (on && runCatching { Settings.Global.putInt(contentResolver, key, 0) }.getOrDefault(false)) flipped = true
+        }
+        if (!flipped) return
+        Log.i("BlockerGuard", "USB/Wireless debugging switched back off")
+        val now = SystemClock.uptimeMillis()
+        if (notify && now - lastAdbNotice > 2_000L) {
+            lastAdbNotice = now
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "USB debugging is locked while Protection Mode is active.", 4000)
+        }
+    }
+
+    // ----- no-computer fallback: switch the row off through the Developer options screen -----
+
+    private fun adbFixActive(): Boolean = SystemClock.uptimeMillis() < adbFixUntil
+
+    private fun startAdbUiFix() {
+        if (adbFixActive()) return
+        val now = SystemClock.uptimeMillis()
+        adbFixStarts.removeAll { now - it > 600_000L }
+        if (adbFixStarts.size >= ADB_FIX_MAX_PER_10MIN) return
+        adbFixStarts.add(now)
+        adbFixUntil = now + ADB_FIX_WINDOW_MS      // set BEFORE the screen opens so our own guards ignore it
+        adbFixScrolls = 0
+        lastAdbFixClick = 0L
+        val opened = runCatching {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+        if (!opened) {
+            adbFixUntil = 0L
+            return
+        }
+        Log.i("BlockerGuard", "USB debugging found on: switching it off through Developer options")
+        main.removeCallbacks(adbFixTick)
+        main.postDelayed(adbFixTick, 500L)
+    }
+
+    private fun finishAdbUiFix() {
+        val wasActive = adbFixUntil != 0L
+        adbFixUntil = 0L
+        main.removeCallbacks(adbFixTick)
+        if (!wasActive) return
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        if (!adbIsOn()) {
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "USB debugging was switched off. It stays locked while Protection Mode is active.", 4000)
+        }
+    }
+
+    /** One tick: find the "USB debugging" row (scrolling if needed) and tap it. Success is detected by the setting observer. */
+    private fun stepAdbUiFix() {
+        val root = rootInActiveWindow ?: return
+        val rootPkg = root.packageName?.toString() ?: return
+        if (rootPkg == packageName || !(isSettingsPkg(rootPkg) || isInstallerPkg(rootPkg))) return   // still opening
+        val row = root.findAccessibilityNodeInfosByText(ADB_ROW_LABEL)
+            ?.firstOrNull { it.text?.toString()?.trim().equals(ADB_ROW_LABEL, ignoreCase = true) }
+        if (row == null) {
+            if (adbFixScrolls < ADB_FIX_MAX_SCROLLS) {
+                val scroller = findScrollable(root, 0, intArrayOf(150))
+                if (scroller != null && scroller.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) adbFixScrolls++
+            }
+            return
+        }
+        var target: AccessibilityNodeInfo? = row
+        var hops = 0
+        while (target != null && !target.isClickable && hops++ < 6) target = target.parent
+        if (target == null) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastAdbFixClick < ADB_FIX_CLICK_GAP_MS) return    // give the switch time to flip before judging
+        lastAdbFixClick = now
+        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    private fun findScrollable(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): AccessibilityNodeInfo? {
+        if (n == null || depth > 20 || budget[0]-- <= 0) return null
+        if (n.isScrollable) return n
+        for (i in 0 until n.childCount) {
+            val found = findScrollable(n.getChild(i), depth + 1, budget)
+            if (found != null) return found
+        }
+        return null
     }
 
     private fun lockOutOfSettings(message: String = "Device Admin & app settings for Blocker are locked while Protection Mode is active.") {
