@@ -33,17 +33,32 @@ xml_dir = main / "res" / "xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="150"
+    android:notificationTimeout="20"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-policies>
         <force-lock/>
+    </uses-policies>
+</device-admin>
+""")
+write(xml_dir / "device_admin_policies.xml", """<?xml version="1.0" encoding="utf-8"?>
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <limit-password />
+        <watch-login />
+        <reset-password />
+        <force-lock />
+        <wipe-data />
+        <expire-password />
+        <encrypted-storage />
+        <disable-camera />
+        <disable-keyguard-features />
     </uses-policies>
 </device-admin>
 """)
@@ -130,11 +145,41 @@ if "BlockerAccessibilityService" not in t:
             <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
         </intent-filter>
     </receiver>
+
+    <receiver
+        android:name=".MyDeviceAdminReceiver"
+        android:exported="true"
+        android:permission="android.permission.BIND_DEVICE_ADMIN">
+        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
+        <intent-filter>
+            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+        </intent-filter>
+    </receiver>
     """
     if "<application" not in t or "</application>" not in t:
         sys.exit("ERROR: unexpected AndroidManifest.xml layout")
     t = t.replace("<application", head + "<application", 1)
     t = t.replace("</application>", tail + "</application>", 1)
+    write(mf, t)
+
+# 4b. Permissions added after the first release. Kept apart from the block above (which only runs once per
+# manifest) so re-running this script upgrades a manifest that was already patched.
+#  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
+#        adb shell pm grant <package> android.permission.WRITE_SECURE_SETTINGS
+#  - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets Settings > Background activity open the "allow background" dialog.
+t = read(mf)
+extra = []
+for perm, attrs in (
+    ("android.permission.WRITE_SECURE_SETTINGS", ' tools:ignore="ProtectedPermissions"'),
+    ("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", ""),
+):
+    if perm not in t:
+        extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
+if extra:
+    if "xmlns:tools" not in t:
+        t = t.replace('xmlns:android="http://schemas.android.com/apk/res/android"',
+                      'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
+    t = t.replace("<application", "\n    ".join(extra) + "\n    <application", 1)
     write(mf, t)
 
 # 5. app/build.gradle

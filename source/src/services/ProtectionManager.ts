@@ -35,7 +35,15 @@ export interface PersistState {
   granularFocus?: GranularFocusToggles;
   queue: Partial<Record<LockKey, Action[]>>;
   onboarded: boolean;
+  savedSchedules?: string[];
+  /** true once the built-in default app blocks have been added (so a later, delayed unblock sticks) */
+  defaultAppsSeeded?: boolean;
 }
+/** Keywords this app used to ship. They are filtered out of every list, whatever an older saved state still holds. */
+export const RETIRED_KEYWORDS = new Set(['usb debugging', 'oem unlocking', 'oem unlock']);
+const isRetired = (k: string) => RETIRED_KEYWORDS.has(k.trim().toLowerCase());
+/** Blocked out of the box (added once; removing them later goes through the normal delay timer). */
+export const DEFAULT_BLOCKED_APPS = ['com.streamdev.aiostreamer', 'org.xbmc.kodi'];
 export interface FocusState {
   active: boolean;
   until: number;
@@ -67,7 +75,7 @@ export type Outcome = 'applied' | 'queued' | 'restarted';
 const EMPTY: PersistState = {
   categories: {}, customDomains: [], customKeywords: [], whitelist: [], blockedApps: [], exemptApps: [],
   granularFocus: DEFAULT_GRANULAR,
-  queue: {}, onboarded: false
+  queue: {}, onboarded: false, savedSchedules: []
 };
 
 let snap: Snapshot = {
@@ -108,7 +116,7 @@ export function effectiveLists(s: PersistState = snap.state) {
   // Built-in protective phrases (e.g. "sex education") always apply; the UI only ever shows the
   // user's own additions in s.whitelist, so these never appear as removable entries there.
   const whitelist = new Set([...USER_DEFAULT_WHITELIST, ...s.whitelist]);
-  return { domains: [...domains], keywords: [...keywords], tlds: [...tlds], whitelist: [...whitelist] };
+  return { domains: [...domains], keywords: [...keywords].filter(k => !isRetired(k)), tlds: [...tlds], whitelist: [...whitelist] };
 }
 export const buildEngine = (s: PersistState = snap.state) =>
   BlocklistEngine.from({ ...effectiveLists(s), packages: s.blockedApps });
@@ -124,14 +132,33 @@ async function sync(s: PersistState = snap.state) {
 
 export async function init() {
   const raw = await Native.loadState();
-  const state: PersistState = raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+  let state: PersistState = raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+  if (state.customKeywords.some(isRetired)) {
+    state = { ...state, customKeywords: state.customKeywords.filter(k => !isRetired(k)) };
+    Native.saveState(JSON.stringify(state)).catch(() => {});
+  }
+  if (!state.defaultAppsSeeded) {
+    // adding blocks strengthens protection, so this applies immediately, with no delay timer
+    state = { ...state, blockedApps: [...new Set([...state.blockedApps, ...DEFAULT_BLOCKED_APPS])], defaultAppsSeeded: true };
+    Native.saveState(JSON.stringify(state)).catch(() => {});
+  }
   emit({ state });
   try {
     await sync(state);
   } catch {
-    // native side still holds entries pending a locked removal; keep native state
+    // native side still holds entries pending a locked removal; keep native state.
+    // sync() stops at the first refusal, so push the app lists separately (this is what delivers the default app blocks).
+    try { await Native.setBlockedApps(state.blockedApps); } catch { /* locked removal pending */ }
+    try { await Native.setExemptApps(state.exemptApps); } catch { /* locked removal pending */ }
   }
   await refresh();
+  // Ensure any existing schedules already loaded on startup are marked as saved
+  if (!state.savedSchedules || state.savedSchedules.length === 0) {
+    if (snap.schedules.length > 0) {
+      const savedSchedules = snap.schedules.map(s => s.id);
+      persist({ ...snap.state, savedSchedules });
+    }
+  }
   emit({ ready: true });
 }
 
@@ -207,6 +234,7 @@ export async function confirm(key: LockKey) {
   if (!snap.locks[key]?.open) await Native.confirmSettingChange(key);
   let s = snap.state;
   let focusApps = snap.focus.apps;
+  let savedSchedules = s.savedSchedules ?? [];
   for (const a of s.queue[key] ?? []) {
     if (a.t === 'protection_off') await Native.setProtectionActive(false);
     else if (a.t === 'shield_off') await Native.setShieldEnabled(false);
@@ -215,9 +243,10 @@ export async function confirm(key: LockKey) {
     else if (a.t === 'focus_shorten') await Native.shortenFocus(a.n!);
     else if (a.t === 'schedule_update') {
       const p = a.schedule!;
-      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled).catch(() => {});
+      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled);
     } else if (a.t === 'schedule_delete') {
-      await Native.deleteSchedule(a.v!).catch(() => {});
+      await Native.deleteSchedule(a.v!);
+      savedSchedules = savedSchedules.filter(x => x !== a.v);
     } else if (a.t === 'focus_add_app') {
       focusApps = [...new Set([...focusApps, a.v!])];
       await Native.setFocusApps(focusApps);
@@ -225,9 +254,11 @@ export async function confirm(key: LockKey) {
       await Native.setGranularFocusToggle(a.v as GranularFocusKey, false).catch(() => {});
     } else s = reduce(s, a);
   }
+  s = { ...s, savedSchedules };
   if (key === 'remove_apps') await sync(s);
   if (key === 'remove_blocklist' || key === 'whitelist') await sync(s);
   if (key === 'exempt_apps') await sync(s);
+  if (key === 'schedule') await refresh(); // schedules already applied above, just re-read them
   const queue = { ...s.queue };
   delete queue[key];
   persist({ ...s, queue });
@@ -324,39 +355,59 @@ export async function removeFocusApp(pkg: string) {
 
 const windowLen = (start: number, end: number) => (start <= end ? end - start : 1440 - start + end);
 
-export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean) {
-  await Native.addSchedule(label, startMin, endMin, enabled);
+export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean): Promise<string> {
+  const id = await Native.addSchedule(label, startMin, endMin, enabled);
   await refresh();
+  return id;
 }
 
-/** Enabling, widening, or editing an inactive schedule is immediate. Shrinking or disabling one
- *  that's currently running waits for the delay timer. */
-/** Enabling, widening, or editing an inactive schedule is immediate. Shrinking or disabling one
- *  that's currently running waits for the delay timer. Refreshes first so "is this active/shrinking"
- *  reflects the real current time rather than a stale poll. */
+/** Enabling or widening a schedule is always immediate.
+ *  Disabling, shrinking, or modifying an already-saved schedule waits for the delay timer whenever
+ *  protection is active. The very first time a newly created schedule is configured/saved, it applies
+ *  immediately and becomes locked for subsequent edits. */
 export async function updateSchedule(id: string, patch: SchedulePatch): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) throw new Error('That schedule no longer exists.');
-  const shrinking = old.activeNow && (!patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin));
-  if (!shrinking) {
+
+  const isSaved = (snap.state.savedSchedules ?? []).includes(id);
+  // Setting for the first time: apply immediately without delay timer, and mark as saved
+  if (!isSaved) {
+    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
+    const savedSchedules = [...new Set([...(snap.state.savedSchedules ?? []), id])];
+    persist({ ...snap.state, savedSchedules });
+    await refresh();
+    return 'applied';
+  }
+
+  // From the 2nd time onward: modifying times or disabling requires delay timer while active
+  const timesChanged = patch.startMin !== old.startMin || patch.endMin !== old.endMin;
+  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin) || timesChanged;
+  if (!weakening || !snap.active || snap.locks.schedule?.open) {
     await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
     await refresh();
     return 'applied';
   }
-  return queueAction('focus', { t: 'schedule_update', v: id, schedule: patch, label: `Update "${old.label}"` });
+  return queueAction('schedule', { t: 'schedule_update', v: id, schedule: patch, label: `Update "${old.label}"` });
 }
 
 export async function deleteSchedule(id: string): Promise<Outcome> {
   await refresh();
   const old = snap.schedules.find(x => x.id === id);
   if (!old) return 'applied';
-  if (!old.activeNow) {
+
+  const isSaved = (snap.state.savedSchedules ?? []).includes(id);
+  // Unsaved new schedule can be deleted immediately without delay timer
+  if (!isSaved || !snap.active || snap.locks.schedule?.open) {
     await Native.deleteSchedule(id);
+    if (isSaved) {
+      const savedSchedules = (snap.state.savedSchedules ?? []).filter(x => x !== id);
+      persist({ ...snap.state, savedSchedules });
+    }
     await refresh();
     return 'applied';
   }
-  return queueAction('focus', { t: 'schedule_delete', v: id, label: `Delete "${old.label}"` });
+  return queueAction('schedule', { t: 'schedule_delete', v: id, label: `Delete "${old.label}"` });
 }
 
 // ---------- blocklist, whitelist & apps ----------
@@ -398,13 +449,15 @@ export const isCategoryOn = (id: string) => {
   return catOn(snap.state, id, c?.defaultOn ?? false);
 };
 
-/** Whitelisting a word/phrase creates an exception, so adding one is gated while protection is on;
- *  removing one only tightens things, so it's immediate. Only the user's own entries ever show up
- *  here \u2014 built-in protective phrases are applied in the background and never listed. */
+/** Whitelisting a word/phrase creates an exception, so adding one is gated while protection is on
+ *  OR while any daily schedule exists — schedules are a commitment to future protection, so they
+ *  count the same as protection being active for weakening changes.
+ *  Removing one only tightens things, so it's immediate. Only the user's own entries ever show up
+ *  here — built-in protective phrases are applied in the background and never listed. */
 export async function addWhitelist(phrase: string): Promise<Outcome> {
   const p = phrase.trim().toLowerCase().replace(/\s+/g, ' ');
   if (!p || snap.state.whitelist.includes(p) || USER_DEFAULT_WHITELIST.includes(p)) return 'applied';
-  if (!snap.active) {
+  if (!snap.active && snap.schedules.length === 0) {
     const s = { ...snap.state, whitelist: [...snap.state.whitelist, p] };
     await sync(s);
     persist(s);

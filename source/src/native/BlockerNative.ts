@@ -1,12 +1,12 @@
 import { NativeModules, Platform } from 'react-native';
 
-export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin';
+export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
-  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus';
+  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule';
 export const LOCK_KEYS: LockKey[] = [
   'protection', 'shield', 'delay_duration', 'remove_apps', 'remove_blocklist',
-  'whitelist', 'exempt_apps', 'focus', 'granular_focus'
+  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule'
 ];
 
 export interface PermissionStatus {
@@ -15,6 +15,10 @@ export interface PermissionStatus {
   usageAccess: boolean;
   deviceAdmin: boolean;
   adminLost: boolean;
+  /** true when Blocker is exempt from battery optimization (can keep running in the background) */
+  battery?: boolean;
+  /** true when WRITE_SECURE_SETTINGS was granted over adb, which enables the USB-debugging lock */
+  secureSettings?: boolean;
 }
 export interface InstalledApp {
   packageName: string;
@@ -98,3 +102,13 @@ interface BlockerNativeSpec {
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;
 export const Native = NativeModules.BlockerNative as BlockerNativeSpec;
+
+export interface ProtectionStatus {
+  isDeviceOwner: boolean;
+  uninstallBlocked: boolean;
+}
+export interface ProtectionNativeSpec {
+  getStatus(): Promise<ProtectionStatus>;
+  setProtectionMode(enabled: boolean): Promise<boolean>;
+}
+export const ProtectionNative = NativeModules.ProtectionModule as ProtectionNativeSpec;

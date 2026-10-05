@@ -71,11 +71,12 @@ function TimeButton({ minute, onChange }: { minute: number; onChange: (m: number
 }
 
 /** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
-function ScheduleRow({ s }: { s: Schedule }) {
+function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean }) {
   const t = useTheme();
   const p = useProtection();
-  const [open, setOpen] = useState(false);
-  const rotate = useRef(new Animated.Value(0)).current;
+  const isSaved = (p.state.savedSchedules ?? []).includes(s.id);
+  const [open, setOpen] = useState(initialOpen || !isSaved);
+  const rotate = useRef(new Animated.Value(initialOpen || !isSaved ? 1 : 0)).current;
   const rotateInterp = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
   const [label_, setLabel] = useState(s.label);
   const [start, setStart] = useState(s.startMin);
@@ -87,15 +88,18 @@ function ScheduleRow({ s }: { s: Schedule }) {
   }, [s.label, s.startMin, s.endMin]);
 
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
-  const dirty = label_ !== s.label || start !== s.startMin || end !== s.endMin;
+  const dirty = !isSaved || label_ !== s.label || start !== s.startMin || end !== s.endMin;
   const guard = (fn: () => Promise<unknown>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
 
   const patch: SchedulePatch = { label: label_.trim() || 'Schedule', startMin: start, endMin: end, enabled: s.enabled };
 
   const save = () => guard(async () => {
+    const wasSaved = isSaved;
     const r = await updateSchedule(s.id, patch);
     if (r !== 'applied') {
       showAlert('Change requested', `That change applies only after ${delayText} and confirming, since the schedule is currently active.`);
+    } else if (!wasSaved) {
+      showAlert('Schedule saved', `"${patch.label}" is saved and active. Future changes will be protected.`);
     }
   });
 
@@ -103,7 +107,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
     guard(async () => {
       const r = await updateSchedule(s.id, { ...patch, enabled });
       if (r !== 'applied') {
-        showAlert('Change requested', `Turning this off applies only after ${delayText} and confirming, since it's currently active.`);
+        showAlert('Change requested', `Turning this off applies only after ${delayText} and confirming.`);
       }
     });
   };
@@ -114,7 +118,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
       text: 'Delete', style: 'destructive', onPress: () => guard(async () => {
         const r = await deleteSchedule(s.id);
         if (r !== 'applied') {
-          showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming, since it's currently active.`);
+          showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming.`);
         }
       })
     }
@@ -137,6 +141,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
         <Animated.View style={{ transform: [{ rotate: rotateInterp }] }}>
           <ChevronDown size={18} color={t.sub} />
         </Animated.View>
+        {!isSaved && <Badge label="New" tone="warn" />}
         {s.activeNow && <Badge label="Active" tone="ok" />}
         <Switch value={s.enabled} onValueChange={toggleEnabled} trackColor={{ true: t.accent }} />
       </Pressable>
@@ -165,7 +170,7 @@ function ScheduleRow({ s }: { s: Schedule }) {
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            {dirty && <View style={{ flex: 1 }}><Btn label="Save" icon={Icons.clock} onPress={save} /></View>}
+            {dirty && <View style={{ flex: 1 }}><Btn label={isSaved ? "Save" : "Save schedule"} icon={Icons.clock} onPress={save} /></View>}
             <View style={dirty ? undefined : { flex: 1 }}>
               <Btn label="Delete" kind="danger" icon={Trash2} onPress={remove} />
             </View>
@@ -180,11 +185,14 @@ function SchedulesCard() {
   const t = useTheme();
   const p = useProtection();
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
+  const [newestId, setNewestId] = useState<string | null>(null);
 
   const addNew = () => {
     const start = nextRoundedHour();
     const end = (start + 60) % 1440;
-    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true).catch(e => showAlert('Blocker', errMsg(e)));
+    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true)
+      .then(id => setNewestId(id))
+      .catch(e => showAlert('Blocker', errMsg(e)));
   };
 
   return (
@@ -197,9 +205,9 @@ function SchedulesCard() {
         <Btn label="Add" icon={Icons.plus} onPress={addNew} />
       </View>
       {p.schedules.length === 0 && <Sub>No schedules yet — tap Add, or the + button, to create one.</Sub>}
-      {p.schedules.map(s => <ScheduleRow key={s.id} s={s} />)}
-      <Sub>Turning one on, widening it, or adding a new one applies now. Shrinking or turning off one that's currently active waits for {delayText}.</Sub>
-      <LockBar lockKey="focus" />
+      {p.schedules.map(s => <ScheduleRow key={s.id} s={s} initialOpen={s.id === newestId} />)}
+      <Sub>First-time schedule setup is saved immediately. Once saved, editing, shrinking or turning one off waits for {delayText}.</Sub>
+      <LockBar lockKey="schedule" />
     </Card>
   );
 }

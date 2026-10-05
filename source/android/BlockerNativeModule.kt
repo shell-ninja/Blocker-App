@@ -9,10 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
@@ -27,6 +29,9 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+
+/** Keywords this app used to ship. They are dropped from saved lists without the delay timer. */
+private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
 
 /** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00. */
 data class FocusSchedule(val id: String, val label: String, val startMin: Int, val endMin: Int, val enabled: Boolean) {
@@ -59,6 +64,16 @@ object BlockerStore {
     }
     fun set(c: Context, key: String): Set<String> = prefs(c).getStringSet(key, emptySet())?.toSet() ?: emptySet()
     fun putSet(c: Context, key: String, v: Set<String>) = prefs(c).edit().putStringSet(key, v).apply()
+
+    /** Apps blocked out of the box. Mirrored by DEFAULT_BLOCKED_APPS in ProtectionManager.ts. */
+    val DEFAULT_BLOCKED_APPS = setOf("com.streamdev.aiostreamer", "org.xbmc.kodi")
+
+    /** Adds the default blocks exactly once, so a later (delayed) unblock is not undone. Safe to call repeatedly. */
+    fun seedDefaultApps(c: Context) {
+        val p = prefs(c)
+        if (p.getBoolean("default_apps_seeded_v1", false)) return
+        p.edit().putStringSet("apps", set(c, "apps") + DEFAULT_BLOCKED_APPS).putBoolean("default_apps_seeded_v1", true).apply()
+    }
 
     val DEFAULT_FOCUS_APPS = setOf("com.whatsapp", "com.facebook.orca", "com.google.android.apps.translate")
     fun focusApps(c: Context): Set<String> =
@@ -137,8 +152,14 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putBoolean("usageAccess", hasUsageAccess())
             putBoolean("deviceAdmin", dpm.isAdminActive(admin))
             putBoolean("adminLost", BlockerStore.prefs(ctx).getBoolean("admin_lost", false))
+            putBoolean("battery", isIgnoringBatteryOptimizations())
+            putBoolean("secureSettings", ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
         })
     }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean = runCatching {
+        (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    }.getOrDefault(false)
 
     private fun isAccessibilityOn(): Boolean {
         val me = ComponentName(ctx, BlockerAccessibilityService::class.java)
@@ -174,6 +195,12 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             "usageAccess" -> listOf(
                 Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).putExtra("package", ctx.packageName),
                 Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            )
+            // direct system dialog first, then the full battery-optimization list, then this app's own info page
+            "battery" -> listOf(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")),
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
             )
             "deviceAdmin" -> listOf(
                 Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
@@ -312,8 +339,10 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         val k = normalize(keywords)
         val tl = normalize(tlds)
         val wl = normalize(whitelist)
+        // Dropping a retired keyword (one this app itself stopped shipping) is an app update, not a user bypass,
+        // so it never needs the delay timer. Without this, an update over an older install kept the old phrase forever.
         val removing = (BlockerStore.set(ctx, "domains") - d).isNotEmpty() ||
-            (BlockerStore.set(ctx, "keywords") - k).isNotEmpty() ||
+            (BlockerStore.set(ctx, "keywords") - k - RETIRED_KEYWORDS).isNotEmpty() ||
             (BlockerStore.set(ctx, "tlds") - tl).isNotEmpty()
         val addingWhitelist = (wl - BlockerStore.set(ctx, "whitelist")).isNotEmpty()
         if (BlockerStore.active(ctx)) {
@@ -546,7 +575,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         val new = FocusSchedule(id, label.trim().ifEmpty { "Schedule" }, startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled)
         val wasActive = BlockerStore.scheduleIsActiveNow(old)
         val shrinking = wasActive && (!new.enabled || windowLen(new.startMin, new.endMin) < windowLen(old.startMin, old.endMin))
-        if (shrinking && !BlockerStore.guardOpen(ctx, "focus")) {
+        if (shrinking && !BlockerStore.guardOpen(ctx, "schedule") && !BlockerStore.guardOpen(ctx, "focus")) {
             promise.reject("LOCKED", "Shortening or disabling an active schedule requires the delay timer.")
             return
         }
@@ -561,7 +590,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             promise.resolve(true) // already gone
             return
         }
-        if (BlockerStore.scheduleIsActiveNow(old) && !BlockerStore.guardOpen(ctx, "focus")) {
+        if (BlockerStore.scheduleIsActiveNow(old) && !BlockerStore.guardOpen(ctx, "schedule") && !BlockerStore.guardOpen(ctx, "focus")) {
             promise.reject("LOCKED", "Deleting an active schedule requires the delay timer.")
             return
         }
@@ -658,6 +687,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 }
 
 class BlockerPackage : ReactPackage {
-    override fun createNativeModules(rc: ReactApplicationContext): List<NativeModule> = listOf(BlockerNativeModule(rc))
+    override fun createNativeModules(rc: ReactApplicationContext): List<NativeModule> =
+        listOf(BlockerNativeModule(rc), ProtectionModule(rc))
     override fun createViewManagers(rc: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }

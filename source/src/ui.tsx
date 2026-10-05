@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useSyncExternalStore } from 'react';
-import { Animated, Image, LayoutAnimation, Modal, Pressable, StyleProp, Switch, Text, View, ViewStyle, useColorScheme } from 'react-native';
+import { Animated, Easing, Image, LayoutAnimation, Modal, Pressable, StyleProp, StyleSheet, Switch, Text, View, ViewStyle, useColorScheme } from 'react-native';
 import {
   AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, Circle, Clock, Loader2, LucideIcon, Plus, ShieldOff, XCircle
 } from 'lucide-react-native';
@@ -7,6 +7,7 @@ import type { LockKey } from './native/BlockerNative';
 import { useNow, useProtection } from './hooks/useProtection';
 import { cancel, confirm } from './services/ProtectionManager';
 import { APP_ICON_DATA_URI } from './data/appIcon';
+import { BG_PATTERN_DATA_URI } from './data/bgPattern';
 
 // Purple-on-dark, glassmorphism-inspired. Cards use a translucent purple tint over the base
 // background (true backdrop blur needs a native blur library, which isn't wired into this build).
@@ -27,6 +28,33 @@ export const useTheme = (): Theme => (useColorScheme() === 'light' ? LIGHT : DAR
 export const errMsg = (e: unknown) => (e as Error)?.message ?? String(e);
 export { Icons } from './icons';
 export type { IconName } from './icons';
+
+/**
+ * Meaningful cybersecurity and lock background texture with very low opacity.
+ * Symbolizes lock, blockage, and technical security without any AI aesthetics.
+ * Zero CPU / animation overhead — completely hardware-accelerated static rendering.
+ */
+export function AppBackground() {
+  const t = useTheme();
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Image
+        source={{ uri: BG_PATTERN_DATA_URI }}
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            width: '100%',
+            height: '100%',
+            opacity: 0.16,
+          },
+        ]}
+        resizeMode="cover"
+      />
+    </View>
+  );
+}
+
+export const AmbientBackground = AppBackground;
 
 /** App-wide top bar: uncropped icon + "Blocker" in the theme accent color. */
 export function Header() {
@@ -148,7 +176,8 @@ export function Card({ children, style }: { children: React.ReactNode; style?: S
       style={[
         {
           backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 20, padding: 16,
-          marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }
+          marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+          overflow: 'hidden'
         },
         style
       ]}>
@@ -163,9 +192,9 @@ export function Title({
   const t = useTheme();
   const color = tone === 'ok' ? t.ok : tone === 'danger' ? t.danger : tone === 'warn' ? t.warn : t.accent;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 }}>
       {Icon && <Icon size={size + 2} color={color} strokeWidth={2.25} />}
-      <Text style={{ color: t.text, fontSize: size, fontWeight: '700' }}>{children}</Text>
+      <Text style={{ color: t.text, fontSize: size, fontWeight: '700', flexShrink: 1 }}>{children}</Text>
     </View>
   );
 }
@@ -210,7 +239,8 @@ export function Badge({ label, tone, icon = true }: { label: string; tone: 'ok' 
   return (
     <View style={{
       flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: toneSoft(t, tone),
-      borderColor: c, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4
+      borderColor: c, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
+      flexShrink: 0
     }}>
       {icon && <Ico size={12} color={c} strokeWidth={3} />}
       <Text style={{ color: c, fontSize: 12, fontWeight: '700' }}>{label}</Text>

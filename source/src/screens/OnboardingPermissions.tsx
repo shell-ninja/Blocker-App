@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
-import { AppState, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { AppState, ScrollView, Switch, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { PermissionKind, Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { markOnboarded, refresh } from '../services/ProtectionManager';
+import { markOnboarded, refresh, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 
 const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: string; how: string }[] = [
@@ -40,6 +40,10 @@ const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: strin
 export default function OnboardingPermissions({ onDone }: { onDone: () => void }) {
   const t = useTheme();
   const { perms } = useProtection();
+  const [step, setStep] = useState<'permissions' | 'defaults'>('permissions');
+  const [enableProtection, setEnableProtection] = useState(true);
+  const [enableShield, setEnableShield] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const i = setInterval(() => refresh().catch(() => {}), 1500);
@@ -65,6 +69,88 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
     }
   };
 
+  const allowBackground = async () => {
+    try {
+      await Native.openPermissionSettings('battery');
+    } catch (e) {
+      showAlert('Couldn\u2019t open settings', errMsg(e));
+    }
+  };
+
+  const finishSetup = async () => {
+    setLoading(true);
+    try {
+      if (enableProtection) await setProtection(true);
+      if (enableShield) await setShield(true);
+      markOnboarded();
+      onDone();
+    } catch (e) {
+      showAlert('Setup error', errMsg(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: Guide user on which buttons to enable by default
+  if (step === 'defaults') {
+    const batteryOk = !!perms?.battery;
+    return (
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Title size={26} icon={Icons.shieldOn}>Recommended Defaults</Title>
+        <Text style={{ color: t.sub, marginTop: 6, marginBottom: 20, lineHeight: 20 }}>
+          Permissions granted! Enable these recommended buttons by default to ensure full protection:
+        </Text>
+
+        {/* 1. Master Protection */}
+        <Card style={{ borderColor: enableProtection ? t.accent : t.cardBorder, borderWidth: 1.5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Title icon={Icons.shieldOn} tone={enableProtection ? 'ok' : 'accent'}>1. Master Protection</Title>
+              <Sub>Recommended: ON. Blocks adult websites, search keywords, and blacklisted apps.</Sub>
+            </View>
+            <Switch value={enableProtection} onValueChange={setEnableProtection} trackColor={{ true: t.ok }} />
+          </View>
+        </Card>
+
+        {/* 2. Anti-Tamper & Uninstall Shield */}
+        <Card style={{ borderColor: enableShield ? t.accent : t.cardBorder, borderWidth: 1.5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Title icon={Icons.lock} tone={enableShield ? 'ok' : 'accent'}>2. Uninstall & Settings Shield</Title>
+              <Sub>Recommended: ON. Locks Developer options, Device Admin, and Settings to prevent bypass.</Sub>
+            </View>
+            <Switch value={enableShield} onValueChange={setEnableShield} trackColor={{ true: t.ok }} />
+          </View>
+        </Card>
+
+        {/* 3. Background Unrestricted Battery */}
+        <Card style={{ borderColor: batteryOk ? t.ok : t.border, borderWidth: 1.5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Title icon={Icons.clock} tone={batteryOk ? 'ok' : 'accent'}>3. Unrestricted Background</Title>
+              <Sub>Recommended: Unrestricted. Prevents Android from killing Blocker in the background.</Sub>
+            </View>
+            {batteryOk ? (
+              <Badge label="Unrestricted" tone="ok" />
+            ) : (
+              <Btn label="Allow" kind="primary" onPress={allowBackground} />
+            )}
+          </View>
+        </Card>
+
+        <View style={{ marginTop: 14 }}>
+          <Btn
+            label={loading ? 'Applying...' : 'Enable Recommended Defaults & Start'}
+            disabled={loading}
+            icon={Icons.play}
+            onPress={finishSetup}
+          />
+        </View>
+      </ScrollView>
+    );
+  }
+
+  // Step 1: Required system permissions
   return (
     <ScrollView contentContainerStyle={{ padding: 20 }}>
       <Title size={26} icon={Icons.shieldOn}>Set up Blocker</Title>
@@ -77,8 +163,10 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
         const current = next?.kind === s.kind;
         return (
           <Card key={s.kind} style={current ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Title icon={s.icon} tone={ok ? 'ok' : 'accent'}>{i + 1}. {s.title}</Title>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flex: 1, paddingRight: 6 }}>
+                <Title icon={s.icon} tone={ok ? 'ok' : 'accent'}>{i + 1}. {s.title}</Title>
+              </View>
               <Badge label={ok ? 'Granted' : 'Missing'} tone={ok ? 'ok' : 'danger'} />
             </View>
             <Sub>{s.why}</Sub>
@@ -93,13 +181,10 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
       })}
 
       <Btn
-        label={all ? 'Continue' : 'Grant all permissions to continue'}
+        label={all ? 'Next: Recommended Defaults' : 'Grant all permissions to continue'}
         disabled={!all}
-        icon={Icons.play}
-        onPress={() => {
-          markOnboarded();
-          onDone();
-        }}
+        icon={Icons.chevronRight}
+        onPress={() => setStep('defaults')}
       />
     </ScrollView>
   );

@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
 import { ScrollView, Switch, Text, View } from 'react-native';
+import { Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { refresh, setProtection } from '../services/ProtectionManager';
-import { Badge, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
+import { refresh, setProtection, setShield } from '../services/ProtectionManager';
+import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 
 export default function HomeScreen() {
   const t = useTheme();
@@ -39,8 +40,106 @@ export default function HomeScreen() {
     ['Bypass attempts', p.stats?.tamperAttemptsToday ?? 0]
   ];
 
+  const recMasterOn = p.active;
+  const recShieldOn = p.shield;
+  const recBatteryOn = !!p.perms?.battery;
+  const recommendedScore = (recMasterOn ? 1 : 0) + (recShieldOn ? 1 : 0) + (recBatteryOn ? 1 : 0);
+  const allRecommendedActive = recommendedScore === 3;
+
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
+      {/* Recommended Setup Guide - only shown when recommended protections need attention */}
+      {!allRecommendedActive && (
+        <Card style={{ borderColor: t.accent, borderWidth: 1.5 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+            <View style={{ flex: 1, paddingRight: 6 }}>
+              <Title icon={Icons.sparkles} tone="accent">Setup Guide</Title>
+            </View>
+            <Badge label={`${recommendedScore}/3 Active`} tone="warn" />
+          </View>
+          <Sub>For maximum security, ensure these recommended buttons are enabled:</Sub>
+
+          <View style={{ marginTop: 12, gap: 10 }}>
+            {/* 1. Master Protection */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>1. Master Protection</Text>
+                <Text style={{ color: t.sub, fontSize: 11 }}>Blocks adult sites, keywords & blacklisted apps</Text>
+              </View>
+              {recMasterOn ? (
+                <Badge label="Enabled" tone="ok" />
+              ) : (
+                <Btn label="Turn On" kind="primary" onPress={() => onToggle(true)} />
+              )}
+            </View>
+
+            {/* 2. Anti-Tamper & Uninstall Shield */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>2. Uninstall & Settings Shield</Text>
+                <Text style={{ color: t.sub, fontSize: 11 }}>Prevents bypass via Settings or Device Admin</Text>
+              </View>
+              {recShieldOn ? (
+                <Badge label="Enabled" tone="ok" />
+              ) : (
+                <Btn
+                  label="Turn On"
+                  kind="primary"
+                  onPress={async () => {
+                    try {
+                      await setShield(true);
+                      refresh();
+                    } catch (e) {
+                      showAlert('Shield', errMsg(e));
+                    }
+                  }}
+                />
+              )}
+            </View>
+
+            {/* 3. Background Unrestricted Battery */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>3. Background Activity</Text>
+                <Text style={{ color: t.sub, fontSize: 11 }}>Stops Android from killing background protection</Text>
+              </View>
+              {recBatteryOn ? (
+                <Badge label="Unrestricted" tone="ok" />
+              ) : (
+                <Btn
+                  label="Allow"
+                  kind="ghost"
+                  onPress={async () => {
+                    try {
+                      await Native.openPermissionSettings('battery');
+                    } catch (e) {
+                      showAlert('Battery Settings', errMsg(e));
+                    }
+                  }}
+                />
+              )}
+            </View>
+          </View>
+
+          <View style={{ marginTop: 14 }}>
+            <Btn
+              label="Enable All Recommended"
+              icon={Icons.shieldOn}
+              onPress={async () => {
+                try {
+                  if (!recMasterOn) await setProtection(true);
+                  if (!recShieldOn) await setShield(true);
+                  if (!recBatteryOn) await Native.openPermissionSettings('battery');
+                  refresh();
+                } catch (e) {
+                  showAlert('Setup', errMsg(e));
+                }
+              }}
+            />
+          </View>
+        </Card>
+      )}
+
       <Card>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1, paddingRight: 12 }}>

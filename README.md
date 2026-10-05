@@ -6,7 +6,42 @@
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
+
 Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetry, and no account required. It blocks distracting websites, full-screen short-form video players (YouTube Shorts, Instagram Reels, Facebook Reels), and adult domains across browsers and apps.
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="20%">
+      <img src="ScreenShots/ss1.jpg" width="160" alt="Home screen" /><br/>
+      <b>Home</b><br/>
+      <sub>Live stats — sites redirected, apps blocked, screen closes, and bypass attempts for the day. System health shows all four required permissions at a glance.</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="ScreenShots/ss2.jpg" width="160" alt="Focus mode" /><br/>
+      <b>Focus mode</b><br/>
+      <sub>Start a one-off focus session with a preset or custom duration. Daily schedules let focus mode turn on automatically at the same time every day.</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="ScreenShots/ss3.jpg" width="160" alt="Apps screen" /><br/>
+      <b>Apps</b><br/>
+      <sub>Block any installed app outright. The eye icon exempts a specific app from on-screen keyword scanning without lifting its other blocks.</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="ScreenShots/ss4.jpg" width="160" alt="Web & keywords" /><br/>
+      <b>Web &amp; keywords</b><br/>
+      <sub>Manage the built-in block list, add your own domains or keywords, and whitelist phrases that should never trigger blocking even if they contain a blocked word.</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="ScreenShots/ss5.jpg" width="160" alt="Settings" /><br/>
+      <b>Settings</b><br/>
+      <sub>Master protection switch, uninstall shield, and the delay timer — how long any weakening change must wait before it takes effect (24 h to 30 days).</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 

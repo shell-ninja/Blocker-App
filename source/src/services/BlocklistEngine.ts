@@ -45,7 +45,28 @@ function wholeWordHit(text: string, keywords: Set<string>, whitelist: string[]):
       from = i + 1;
     }
   }
+
   const isWord = (c: string) => /[a-z0-9]/i.test(c);
+
+  // 1. Check multi-word / delimited keywords first (e.g. "live cam", "adult chat")
+  for (const kw of keywords) {
+    if (!kw.includes(' ') && !kw.includes('-') && !kw.includes('_')) continue;
+    let from = 0;
+    while (from < text.length) {
+      const idx = text.indexOf(kw, from);
+      if (idx < 0) break;
+      const endIdx = idx + kw.length;
+      const startBoundary = idx === 0 || !isWord(text[idx - 1]);
+      const endBoundary = endIdx === text.length || !isWord(text[endIdx]);
+      if (startBoundary && endBoundary) {
+        const isSafe = safe.some(([a, b]) => !(endIdx <= a || idx >= b));
+        if (!isSafe) return kw;
+      }
+      from = idx + 1;
+    }
+  }
+
+  // 2. Check single-word keywords with token scanning
   let i = 0;
   while (i < text.length) {
     if (!isWord(text[i])) {

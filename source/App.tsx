@@ -3,7 +3,7 @@ import { Animated, AppState, Platform, Pressable, StatusBar, Text, UIManager, Vi
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
-import { AlertHost, Header, Icons, useTheme } from './src/ui';
+import { AlertHost, AmbientBackground, Header, Icons, useTheme } from './src/ui';
 import HomeScreen from './src/screens/HomeScreen';
 import AppBlockerScreen from './src/screens/AppBlockerScreen';
 import FocusScreen from './src/screens/FocusScreen';
@@ -76,6 +76,7 @@ export default function App() {
     return (
       <View style={shell}>
         <StatusBar barStyle="light-content" backgroundColor={t.bg} />
+        <AmbientBackground />
         <Header />
         <FocusScreen />
         <AlertHost />
@@ -89,6 +90,7 @@ export default function App() {
     return (
       <View style={shell}>
         <StatusBar barStyle="light-content" backgroundColor={t.bg} />
+        <AmbientBackground />
         <Header />
         <OnboardingPermissions onDone={() => {}} />
         <AlertHost />
@@ -100,6 +102,7 @@ export default function App() {
   return (
     <View style={shell}>
       <StatusBar barStyle="light-content" backgroundColor={t.bg} />
+      <AmbientBackground />
       <Header />
       <Animated.View style={{ flex: 1, opacity: fade, transform: [{ translateY }] }}><Active /></Animated.View>
       <View style={{
