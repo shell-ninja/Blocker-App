@@ -1,5 +1,5 @@
 import {
-  Ban, Clock, Eye, EyeOff, Globe, Grid2x2, Home, KeyRound, ListChecks, Lock, LucideIcon, Play,
+  Ban, ChevronRight, Clock, Eye, EyeOff, Globe, Grid2x2, Home, KeyRound, ListChecks, Lock, LucideIcon, Play,
   Plus, Search, Settings as SettingsIcon, Shield, ShieldAlert, ShieldCheck, ShieldOff, Sparkles,
   Target, Trash2, Unlock
 } from 'lucide-react-native';
@@ -7,7 +7,7 @@ import {
 export type IconName =
   | 'home' | 'apps' | 'web' | 'focus' | 'settings' | 'shield' | 'shieldOn' | 'shieldOff'
   | 'lock' | 'unlock' | 'clock' | 'eye' | 'eyeOff' | 'plus' | 'trash' | 'search' | 'ban'
-  | 'sparkles' | 'play' | 'key' | 'list';
+  | 'sparkles' | 'play' | 'key' | 'list' | 'chevronRight';
 
 export const Icons: Record<IconName, LucideIcon> = {
   home: Home,
@@ -30,5 +30,6 @@ export const Icons: Record<IconName, LucideIcon> = {
   sparkles: Sparkles,
   play: Play,
   key: KeyRound,
-  list: ListChecks
+  list: ListChecks,
+  chevronRight: ChevronRight
 };

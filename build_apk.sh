@@ -127,7 +127,7 @@ mkdir -p "${APK_DIR}"
 # Store target files in an array for clean, scalable management
 TARGET_APKS=(
     "${APK_DIR}/Blocker-release-${APP_VER}.apk"
-    "${APK_DIR}/Blocker-release-debug${APP_VER}.apk"
+    "${APK_DIR}/Blocker-release-debug-${APP_VER}.apk"
 )
 
 # Process each APK independently

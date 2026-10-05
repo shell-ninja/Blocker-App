@@ -14,8 +14,14 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
         BlockerStore.prefs(context).edit().putBoolean("admin_lost", false).apply()
     }
 
+    // Both Protection and the Uninstall & settings shield must be on for any kick/cancel action here —
+    // this is what lets the app be uninstalled normally once the user has deliberately turned both off.
+    private fun guardEngaged(context: Context): Boolean =
+        BlockerStore.active(context) && BlockerStore.shield(context) && !BlockerStore.guardOpen(context, "shield")
+
     // Shown in the system's deactivation confirmation dialog. Android does not allow vetoing here.
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+        if (!guardEngaged(context)) return "Deactivate this device admin app?"
         BlockerStore.incr(context, "tamper")
         // Signal the AccessibilityService via static flag (zero latency, same process)
         BlockerAccessibilityService.pendingAdminKick = true
@@ -32,14 +38,13 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
         runCatching { context.startActivity(homeIntent) }
         runCatching { BlockerAccessibilityService.instance?.kickToHomeAndCancel() }
 
-        return if (BlockerStore.active(context) && !BlockerStore.guardOpen(context, "shield"))
-            "Blocker protection is locked. Deactivating admin will be logged and requires the delay timer."
-        else "Deactivating will disable Blocker's uninstall protection."
+        return "Blocker protection is locked. Deactivating admin will be logged and requires the delay timer."
     }
 
     override fun onDisabled(context: Context, intent: Intent) {
         val p = BlockerStore.prefs(context)
         p.edit().putBoolean("admin_lost", true).apply()
+        if (!guardEngaged(context)) return   // let the OS's own uninstall flow continue unimpeded
         // Kick to home immediately — the package installer uninstall dialog may follow
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
@@ -53,7 +58,6 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
             .putBoolean("admin_disable_requested", true)
             .putLong("admin_disable_requested_ts", System.currentTimeMillis())
             .apply()
-        if (!BlockerStore.active(context)) return
         BlockerStore.incr(context, "tamper")
         runCatching {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
