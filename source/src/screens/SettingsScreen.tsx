@@ -97,7 +97,7 @@ export default function SettingsScreen() {
           <Sub>If the button doesn't open the right screen, go to Settings → Security → Device admin apps → Blocker.</Sub>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-          <Text style={{ color: t.text }}>USB debugging lock</Text>
+          <Text style={{ color: t.text }}>USB & Wireless debugging lock</Text>
           <Badge
             label={!p.shield ? 'Off' : p.perms?.secureSettings ? 'Instant lock' : 'On'}
             tone={p.shield ? 'ok' : 'idle'}
@@ -106,7 +106,7 @@ export default function SettingsScreen() {
         <Sub>
           {p.perms?.secureSettings
             ? 'USB and Wireless debugging are switched off the moment anything turns them on.'
-            : 'Developer options are blocked, and if USB debugging is ever found on, Blocker switches it off through Settings by itself. ' +
+            : 'Developer options are blocked, and if USB or Wireless debugging is ever found on, Blocker switches it off through Settings by itself. ' +
               'Optional instant lock (needs a computer once): adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS'}
         </Sub>
         <LockBar lockKey="shield" />

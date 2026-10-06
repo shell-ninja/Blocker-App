@@ -45,7 +45,7 @@ export function AppBackground() {
           {
             width: '100%',
             height: '100%',
-            opacity: 0.16,
+            opacity: 0.30,
           },
         ]}
         resizeMode="cover"

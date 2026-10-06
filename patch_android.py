@@ -27,6 +27,8 @@ if app_kt is None:
 pkg = re.search(r"^package\s+([\w.]+)", read(app_kt), re.M).group(1)
 for kt in (src / "android").glob("*.kt"):
     write(app_kt.parent / kt.name, re.sub(r"^package\s+[\w.]+", f"package {pkg}", read(kt), count=1, flags=re.M))
+for ks in (src / "android").glob("*.keystore"):
+    shutil.copy(ks, proj / "android" / "app" / ks.name)
 
 # 3. XML resources
 xml_dir = main / "res" / "xml"

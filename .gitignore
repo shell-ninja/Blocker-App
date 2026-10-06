@@ -27,3 +27,7 @@ local.properties
 *.log
 .idea/
 .vscode/
+
+# Other MD files
+blocked_messages.md
+BLOCKED_MESSAGES.md

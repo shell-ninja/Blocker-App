@@ -227,8 +227,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Settings.Global flags that let a computer talk to the phone over adb (USB, and Wireless debugging)
         private val ADB_SETTING_KEYS = listOf(Settings.Global.ADB_ENABLED, "adb_wifi_enabled")
         private const val ADB_ENFORCE_GAP_MS = 1_000L
-        // No-computer fallback: drive Developer options itself and flip the USB debugging switch off
+        // No-computer fallback: drive Developer options itself and flip the USB/Wireless debugging switch off
         private const val ADB_ROW_LABEL = "USB debugging"
+        private const val ADB_WIFI_ROW_LABEL = "Wireless debugging"
         private const val ADB_FIX_WINDOW_MS = 14_000L      // hard limit for one attempt
         private const val ADB_FIX_MAX_PER_10MIN = 3        // attempts per 10 minutes, so it can never loop
         private const val ADB_FIX_MAX_SCROLLS = 20
@@ -488,7 +489,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (now - lastPollKick < 500) return
         lastPollKick = now
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", message, 5000)
+        showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
     /**
@@ -860,7 +861,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         when {
             pkg in apps -> {
                 if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                    hit("apps", "🚫 App blocked", "This app is on your block list.")
+                    hit(
+                        "apps",
+                        "Fear Allah",
+                        "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:36)",
+                        "Do not destroy your Akhirah"
+                    )
                 }
                 return
             }
@@ -890,7 +896,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             lastHit = now
             BlockerStore.incr(this, "focus")
             performGlobalAction(GLOBAL_ACTION_HOME)
-            showOverlay("🎯 Focus mode", "Only your essential apps are available.\n${leftText()} left.", 3000)
+            showOverlay(
+                "Focus Mode Active",
+                "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, and your free time before your preoccupation.”\n— Hadith",
+                3500,
+                "Guard your time for what benefits you",
+                "Astaghfirullah"
+            )
         }
         return true
     }
@@ -911,7 +923,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             val text = root.findAccessibilityNodeInfosByViewId(id).firstOrNull()?.text?.toString()
             val rule = if (!text.isNullOrBlank()) matchAddress(text) else null
             if (rule != null) {
-                redirectBrowser(pkg, "sites", "🚫 Site blocked", "\"$rule\" is on your block list, so Blocker redirected this tab.")
+                redirectBrowser(
+                    pkg,
+                    "sites",
+                    "Fear Allah",
+                    "“$rule” was blocked to safeguard your modesty and purity.\n\n“Does he not know that Allah sees?”\n— Surah Al-Alaq (96:14)",
+                    "Do not destroy your Akhirah"
+                )
                 return true
             }
         }
@@ -1019,20 +1037,32 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (pkg in BROWSER_URL_IDS) {
             BlockerStore.incr(this, "screen")
             if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
-            showOverlay("🛡️ Page redirected", "\"$kw\" appeared on this page, so Blocker redirected it.", 5000)
+            showOverlay(
+                "Fear Allah",
+                "Inappropriate content was detected and redirected.\n\n“Tell the believing men to lower their gaze and guard their modesty. That is purer for them. Indeed, Allah is aware of what they do.”\n— Surah An-Nur (24:30)",
+                5000,
+                "Do not destroy your Akhirah",
+                "Astaghfirullah"
+            )
             return
         }
         BlockerStore.incr(this, "screen")
         performGlobalAction(GLOBAL_ACTION_HOME)
-        showOverlay("🛡️ App closed", "\"$kw\" appeared on screen in ${labelOf(pkg)}, so it was closed.", 5000)
+        showOverlay(
+            "Fear Allah",
+            "Inappropriate content appeared in ${labelOf(pkg)}, so it was closed.\n\n“Indeed, Allah is ever, over you, an Observer.”\n— Surah An-Nisa (4:1)",
+            5000,
+            "Do not destroy your Akhirah",
+            "Astaghfirullah"
+        )
     }
 
     /** Sends the current tab straight to google.com. Browsers are never locked or held open. */
-    private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String) {
+    private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String, subheading: String? = null) {
         quietUntil[pkg] = System.currentTimeMillis() + 2000
         BlockerStore.incr(this, kind)
         if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
-        showOverlay(heading, body, 5000)
+        showOverlay(heading, body, 5000, subheading, "Astaghfirullah")
     }
 
     @SuppressLint("NewApi")
@@ -1073,25 +1103,29 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun checkAdbDialog(pkg: String): Boolean {
         if (!BlockerStore.active(this) || !BlockerStore.shield(this) || BlockerStore.guardOpen(this, "shield")) return false
-        if (pkg != "com.android.systemui" && pkg != "android") return false
+        if (pkg != "com.android.systemui" && pkg != "android" && !isSettingsPkg(pkg)) return false
         val root = rootInActiveWindow ?: return false
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(100))
         val t = sb.toString().lowercase()
-        if ("allow usb debugging" in t || ("usb debugging" in t && ("fingerprint" in t || "rsa" in t || "always allow" in t))) {
+        val isUsbAuth = "allow usb debugging" in t || ("usb debugging" in t && ("fingerprint" in t || "rsa" in t || "always allow" in t))
+        val isWifiAuth = "allow wireless debugging" in t || ("wireless debugging" in t && ("fingerprint" in t || "always allow" in t || "pair" in t || "pairing" in t))
+        if (isUsbAuth || isWifiAuth) {
             val now = System.currentTimeMillis()
             if (now - lastHit < 700) return true
             lastHit = now
             BlockerStore.incr(this, "tamper")
             val cancelBtn = root.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
                 ?: root.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText("cancel").firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText("CANCEL").firstOrNull()
             if (cancelBtn != null) {
                 cancelBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 cancelBtn.recycle()
             } else {
                 performGlobalAction(GLOBAL_ACTION_BACK)
             }
-            showOverlay("🔐 Tamper Protection", "USB debugging authorization is locked while Protection Mode is active.", 5000)
+            showOverlay("🔐 Tamper Protection", "Debugging authorization is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
             return true
         }
         return false
@@ -1632,16 +1666,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastAppInfoKick = now
         Log.i("BlockerGuard", "App Info screen blocked (pkg=$appInfoCandidatePkg)")
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", "Blocker's app info page is locked while Protection Mode is active.", 5000)
+        showOverlay("🔐 Tamper Protection", "Blocker's app info page is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
-    // ---------- USB debugging lock ----------
+    // ---------- USB & Wireless debugging lock ----------
     //
-    // While Protection Mode + the uninstall shield are on, USB debugging must stay off. Two levels:
+    // While Protection Mode + the uninstall shield are on, USB and Wireless debugging must stay off. Two levels:
     //
     //  1. Works out of the box, no computer: Developer options screens are blocked (see the settings guards), and
-    //     if USB debugging is ever found switched on, Blocker opens Developer options itself, finds the
-    //     "USB debugging" row, taps it off, and returns Home (a few seconds; at most 3 attempts per 10 minutes).
+    //     if USB or Wireless debugging is ever found switched on, Blocker opens Developer options itself, finds the
+    //     "USB debugging" or "Wireless debugging" row, taps it off, and returns Home (a few seconds; at most 3 attempts per 10 minutes).
     //  2. Optional instant lock: one adb command, run once from any computer while USB debugging is on:
     //         adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS
     //     After that USB and Wireless debugging are switched back off the instant anything turns them on.
@@ -1652,8 +1686,13 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun hasSecureSettingsPermission(): Boolean =
         checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
-    private fun adbIsOn(): Boolean =
+    private fun usbAdbIsOn(): Boolean =
         runCatching { Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1 }.getOrDefault(false)
+
+    private fun wifiAdbIsOn(): Boolean =
+        runCatching { Settings.Global.getInt(contentResolver, "adb_wifi_enabled", 0) == 1 }.getOrDefault(false)
+
+    private fun adbIsOn(): Boolean = usbAdbIsOn() || wifiAdbIsOn()
 
     private fun enforceAdbOffThrottled() {
         val now = SystemClock.uptimeMillis()
@@ -1668,7 +1707,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!hasSecureSettingsPermission()) {
             if (!adbPermWarned) {
                 adbPermWarned = true
-                Log.i("BlockerGuard", "USB-debugging lock: using the Settings fallback (optional instant lock: adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS)")
+                Log.i("BlockerGuard", "USB/Wireless debugging lock: using the Settings fallback (optional instant lock: adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS)")
             }
             if (adbIsOn()) startAdbUiFix()
             return
@@ -1684,7 +1723,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (notify && now - lastAdbNotice > 2_000L) {
             lastAdbNotice = now
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB debugging is locked while Protection Mode is active.", 4000)
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 4000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
@@ -1708,7 +1747,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             adbFixUntil = 0L
             return
         }
-        Log.i("BlockerGuard", "USB debugging found on: switching it off through Developer options")
+        Log.i("BlockerGuard", "USB/Wireless debugging found on: switching it off through Developer options")
         main.removeCallbacks(adbFixTick)
         main.postDelayed(adbFixTick, 500L)
     }
@@ -1721,32 +1760,86 @@ class BlockerAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
         if (!adbIsOn()) {
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB debugging was switched off. It stays locked while Protection Mode is active.", 4000)
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging were switched off. They stay locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 4000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
-    /** One tick: find the "USB debugging" row (scrolling if needed) and tap it. Success is detected by the setting observer. */
+    /** One tick: find the "USB debugging" or "Wireless debugging" row (scrolling if needed) and tap it. Success is detected by the setting observer. */
     private fun stepAdbUiFix() {
         val root = rootInActiveWindow ?: return
         val rootPkg = root.packageName?.toString() ?: return
         if (rootPkg == packageName || !(isSettingsPkg(rootPkg) || isInstallerPkg(rootPkg))) return   // still opening
-        val row = root.findAccessibilityNodeInfosByText(ADB_ROW_LABEL)
-            ?.firstOrNull { it.text?.toString()?.trim().equals(ADB_ROW_LABEL, ignoreCase = true) }
-        if (row == null) {
+
+        val targetLabels = mutableListOf<String>()
+        if (usbAdbIsOn()) {
+            targetLabels.add(ADB_ROW_LABEL)
+        }
+        if (wifiAdbIsOn()) {
+            targetLabels.add(ADB_WIFI_ROW_LABEL)
+            targetLabels.add("Use wireless debugging")
+        }
+        if (targetLabels.isEmpty()) {
+            finishAdbUiFix()
+            return
+        }
+
+        var matchedRow: AccessibilityNodeInfo? = null
+        for (label in targetLabels) {
+            val found = root.findAccessibilityNodeInfosByText(label)
+                ?.firstOrNull { it.text?.toString()?.trim().equals(label, ignoreCase = true) }
+            if (found != null) {
+                matchedRow = found
+                break
+            }
+        }
+
+        if (matchedRow == null) {
             if (adbFixScrolls < ADB_FIX_MAX_SCROLLS) {
                 val scroller = findScrollable(root, 0, intArrayOf(150))
                 if (scroller != null && scroller.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) adbFixScrolls++
             }
             return
         }
-        var target: AccessibilityNodeInfo? = row
+
+        val now = SystemClock.uptimeMillis()
+        if (now - lastAdbFixClick < ADB_FIX_CLICK_GAP_MS) return    // give the switch time to flip before judging
+
+        // First attempt: try finding a Switch widget in the same row container (up to 3 levels up)
+        var switchNode: AccessibilityNodeInfo? = null
+        var container: AccessibilityNodeInfo? = matchedRow
+        var depth = 0
+        while (container != null && depth++ < 3) {
+            switchNode = findSwitchInNode(container)
+            if (switchNode != null) break
+            container = container.parent
+        }
+
+        if (switchNode != null && switchNode.isClickable) {
+            lastAdbFixClick = now
+            switchNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            return
+        }
+
+        // Fallback: click the clickable parent of the row or the switch's parent
+        var target: AccessibilityNodeInfo? = switchNode ?: matchedRow
         var hops = 0
         while (target != null && !target.isClickable && hops++ < 6) target = target.parent
         if (target == null) return
-        val now = SystemClock.uptimeMillis()
-        if (now - lastAdbFixClick < ADB_FIX_CLICK_GAP_MS) return    // give the switch time to flip before judging
         lastAdbFixClick = now
         target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    private fun findSwitchInNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val cls = node.className?.toString() ?: ""
+        if (node.isCheckable || cls.contains("Switch", ignoreCase = true) || cls.contains("CompoundButton", ignoreCase = true)) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val s = findSwitchInNode(node.getChild(i))
+            if (s != null) return s
+        }
+        return null
     }
 
     private fun findScrollable(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): AccessibilityNodeInfo? {
@@ -1766,7 +1859,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (now - lastHit < 500) return
         lastHit = now
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", message, 5000)
+        showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
     // ---------- Granular focus interception (Reels / Shorts / Search) ----------
@@ -1922,13 +2015,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun hit(kind: String, heading: String, msg: String) {
+    private fun hit(kind: String, heading: String, msg: String, subheading: String? = null) {
         val now = System.currentTimeMillis()
         if (now - lastHit < 700) return
         lastHit = now
         BlockerStore.incr(this, kind)
         performGlobalAction(GLOBAL_ACTION_HOME)
-        showOverlay(heading, msg, 3000)
+        showOverlay(heading, msg, 4000, subheading, "Astaghfirullah")
     }
 
     // ---------- Popup ----------
@@ -1937,7 +2030,13 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private var scrim: View? = null
 
-    private fun showOverlay(heading: String, body: String, ms: Long) {
+    private fun showOverlay(
+        heading: String,
+        body: String,
+        ms: Long,
+        subheading: String? = null,
+        buttonText: String = "Astaghfirullah"
+    ) {
         main.post {
             if (overlay != null) return@post
             val svc = this@BlockerAccessibilityService
@@ -1945,7 +2044,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             val accentDeep = 0xFF7C3AED.toInt()
 
             // dim scrim behind the card so it reads as a proper modal, matching the app's own dialogs
-            val dim = View(svc).apply { setBackgroundColor(0x8A0B0A16.toInt()) }
+            val dim = View(svc).apply { setBackgroundColor(0xB3070512.toInt()) }
             val dimLp = WindowManager.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -1954,15 +2053,18 @@ class BlockerAccessibilityService : AccessibilityService() {
             )
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).addView(dim, dimLp); scrim = dim }
 
+            val isFearAllah = heading == "Fear Allah"
+
             val badge = LinearLayout(svc).apply {
                 gravity = Gravity.CENTER
                 background = GradientDrawable().apply {
-                    setColor(0x33A78BFA)
+                    setColor(if (isFearAllah) 0x33DC2626.toInt() else 0x33A78BFA)
                     cornerRadius = dp(22).toFloat()
+                    if (isFearAllah) setStroke(dp(1), 0x88EF4444.toInt())
                 }
             }
             badge.addView(TextView(svc).apply {
-                text = "\uD83D\uDEE1\uFE0F" // shield emoji, used as a lightweight icon badge
+                text = if (isFearAllah) "\uD83D\uDEE1\uFE0F" else "\uD83D\uDD12"
                 textSize = 20f
                 gravity = Gravity.CENTER
             })
@@ -1971,12 +2073,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            headingRow.addView(badge, LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(12) })
+            headingRow.addView(badge, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
             headingRow.addView(TextView(svc).apply {
                 text = heading
-                setTextColor(0xFFF6F3FF.toInt())
-                textSize = 19f
+                setTextColor(if (isFearAllah) 0xFFFFFFFF.toInt() else 0xFFF6F3FF.toInt())
+                textSize = if (isFearAllah) 22f else 19f
                 typeface = Typeface.DEFAULT_BOLD
+                letterSpacing = 0.02f
             })
 
             val card = LinearLayout(svc).apply {
@@ -1984,21 +2087,33 @@ class BlockerAccessibilityService : AccessibilityService() {
                 setPadding(dp(22), dp(22), dp(22), dp(20))
                 background = GradientDrawable(
                     GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(0xFF221A3D.toInt(), 0xFF160F2B.toInt())
+                    intArrayOf(0xFF221A3D.toInt(), 0xFF140D26.toInt())
                 ).apply {
                     cornerRadius = dp(26).toFloat()
-                    setStroke(dp(1), 0x66C7AFFF)
+                    setStroke(dp(2), if (isFearAllah) 0x99C084FC.toInt() else 0x66C7AFFF.toInt())
                 }
-                elevation = dp(16).toFloat()
+                elevation = dp(18).toFloat()
             }
             card.addView(headingRow)
+
+            if (!subheading.isNullOrBlank()) {
+                card.addView(TextView(svc).apply {
+                    text = subheading
+                    setTextColor(0xFFE9D5FF.toInt()) // Vibrant soft purple highlight
+                    textSize = 15.5f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    setPadding(0, dp(10), 0, dp(2))
+                })
+            }
+
             card.addView(TextView(svc).apply {
                 text = body
-                setTextColor(0xFFC3BCDE.toInt())
-                textSize = 15f
-                setPadding(0, dp(12), 0, dp(18))
-                setLineSpacing(dp(2).toFloat(), 1f)
+                setTextColor(0xFFD1C8EC.toInt())
+                textSize = 14.5f
+                setPadding(0, if (!subheading.isNullOrBlank()) dp(6) else dp(12), 0, dp(18))
+                setLineSpacing(dp(3).toFloat(), 1.05f)
             })
+
             val progressTrack = View(svc).apply { setBackgroundColor(0x26FFFFFF) }
             val progressFill = View(svc).apply {
                 setBackgroundColor(accent)
@@ -2010,11 +2125,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             card.addView(trackWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
                 bottomMargin = dp(16)
             })
+
             card.addView(Button(svc).apply {
-                text = "Got it"
+                text = buttonText
                 setAllCaps(false)
                 setTextColor(Color.WHITE)
-                textSize = 15.5f
+                textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
                 background = GradientDrawable(
                     GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(accentDeep, accent)
