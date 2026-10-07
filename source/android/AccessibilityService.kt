@@ -186,7 +186,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.google.android.permissioncontroller", "com.android.intentresolver", "com.android.documentsui",
             "com.google.android.documentsui", "com.google.android.providers.media.module", "com.google.android.gms"
         )
-        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "active", "shield", "admin_disable_requested")
+        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "active", "shield", "admin_disable_requested", "app_limits")
         // Window titles (as shown on screen) that signal a dangerous settings screen — OEM-agnostic
         private val ADMIN_SCREEN_TITLES = setOf(
             "device admin apps", "device administrators", "device admin",
@@ -210,7 +210,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Activity class fragments of the Device admin screens (list and "Deactivate & uninstall" page)
         private val DEVICE_ADMIN_CLASS_HINTS = listOf("deviceadmin")
         // Phrases that used to ship as blocked keywords. Ignored even if an older saved list still contains them.
-        private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
+        private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
         // Activity / fragment class-name fragments that announce "this window is an App Info screen"
         private val APP_INFO_CLASS_HINTS = listOf("appinfo", "installedapp", "appdetail", "applicationdetail", "applicationsdetail")
         private const val APP_INFO_FAST_TICK_MS = 15L      // scan cadence right after a window opens
@@ -227,8 +227,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Settings.Global flags that let a computer talk to the phone over adb (USB, and Wireless debugging)
         private val ADB_SETTING_KEYS = listOf(Settings.Global.ADB_ENABLED, "adb_wifi_enabled")
         private const val ADB_ENFORCE_GAP_MS = 1_000L
-        // No-computer fallback: drive Developer options itself and flip the USB debugging switch off
+        // No-computer fallback: drive Developer options itself and flip the USB/Wireless debugging switch off
         private const val ADB_ROW_LABEL = "USB debugging"
+        private const val ADB_WIFI_ROW_LABEL = "Wireless debugging"
         private const val ADB_FIX_WINDOW_MS = 14_000L      // hard limit for one attempt
         private const val ADB_FIX_MAX_PER_10MIN = 3        // attempts per 10 minutes, so it can never loop
         private const val ADB_FIX_MAX_SCROLLS = 20
@@ -335,6 +336,12 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun autoCancelDialog(root: android.view.accessibility.AccessibilityNodeInfo?) {
+        if (root != null) {
+            val rPkg = root.packageName?.toString().orEmpty()
+            if (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = root)) {
+                return // NEVER auto-cancel an installation or update dialog!
+            }
+        }
         val targets = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
         if (root != null) targets.add(root)
         runCatching {
@@ -343,6 +350,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
         for (node in targets) {
+            val nPkg = node.packageName?.toString().orEmpty()
+            if (isInstallerPkg(nPkg) || isInstallOrUpdateDialog(root = node)) {
+                continue // Do not cancel installer buttons
+            }
+            // Double check: if node contains Install or Update or Staging, NEVER cancel!
+            val nodeText = StringBuilder()
+            collectText(node, nodeText, 0, intArrayOf(60))
+            val nTxt = nodeText.toString().lowercase()
+            if ("uninstall" !in nTxt && ("install" in nTxt || "update" in nTxt || "staging" in nTxt)) {
+                continue
+            }
             val cancelBtn = node.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("cancel").firstOrNull()
@@ -449,6 +467,15 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val isOurApp = "blocker" in wt || packageName.lowercase() in wt
                     val recentlyActive = System.currentTimeMillis() < viewingBlockerSettingsUntil
 
+                    // Skip installer windows if they are not uninstall attempts
+                    if (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = r)) {
+                        val isUninstall = "uninstall" in wt || "do you want to uninstall" in wt
+                        if (!isUninstall) {
+                            runCatching { r.recycle() }
+                            continue
+                        }
+                    }
+
                     // Uninstall dialog: catch by isOurApp OR by timer context (any settings/installer
                     // window recently associated with Blocker's own admin/app-info screens).
                     val isUninstallDialog = "do you want to uninstall" in wt ||
@@ -488,7 +515,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (now - lastPollKick < 500) return
         lastPollKick = now
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", message, 5000)
+        showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
     /**
@@ -501,7 +528,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg) && rootPkg != "android") return
 
         // If PackageInstaller is in foreground, only block if it's an UNINSTALL dialog (allow updates/installs!)
-        if (isInstallerPkg(rootPkg)) {
+        if (isInstallerPkg(rootPkg) || isInstallOrUpdateDialog(root = root)) {
             val sb = StringBuilder()
             collectText(root, sb, 0, intArrayOf(200))
             val raw = sb.toString().lowercase()
@@ -511,7 +538,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Keeps the App Info scanner alive for as long as the user is sitting inside Settings, even if no
         // accessibility event arrives (e.g. when a slow handler delayed it).
-        if (rootPkg.isNotEmpty() && isSettingsPkg(rootPkg)) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
+        if (rootPkg.isNotEmpty() && isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg)) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
         val cls = root.className?.toString().orEmpty()
 
         // ── Device Admin list (any OEM) ──
@@ -560,8 +587,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app.
-        val isOurApp = "blocker" in t || packageName.lowercase() in t
+        // Blocker-specific: ignore .apk files (e.g. file manager / downloads)
+        val isOurApp = ("blocker" in t || packageName.lowercase() in t) && !t.contains(".apk")
 
         // ── Uninstall attempt in settings / package manager ──
         // Also fires without "blocker" text present, as long as we recently saw Blocker-specific
@@ -577,9 +604,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app.
-        // This covers App Info, Storage, Force Stop, Uninstall — all in one sweep.
-        if (isOurApp) {
+        // Blocker-specific: only kick if screen actually has App Info danger actions
+        // (Force Stop, Clear data, Storage, Uninstall), NOT merely file lists or permission granting.
+        val hasAppInfoDanger = APP_INFO_ACTION_TEXTS.any { it.lowercase() in t } ||
+            "force stop" in t || "clear" in t || "delete" in t || "storage" in t
+        if (isOurApp && hasAppInfoDanger) {
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             autoCancelDialog(root)
             pollKick("Blocker app settings and storage are locked while Protection Mode is active.")
@@ -609,6 +638,19 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var apps: Set<String> = emptySet()
     @Volatile private var exempt: Set<String> = emptySet()
     @Volatile private var focusAllowed: Set<String> = emptySet()
+    @Volatile private var appLimits: Map<String, Int> = emptyMap()
+    @Volatile private var currentFgPkg: String? = null
+    @Volatile private var fgStartTime: Long = 0L
+
+    private val appLimitWatchdog = object : Runnable {
+        override fun run() {
+            val pkg = currentFgPkg
+            if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                checkAppUsageLimit(pkg)
+            }
+            main.postDelayed(this, 5000L)
+        }
+    }
 
     @Volatile private var blockFbReels = false
     @Volatile private var blockInstaReels = false
@@ -643,9 +685,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             for (k in ADB_SETTING_KEYS) contentResolver.registerContentObserver(Settings.Global.getUriFor(k), false, adbObserver)
         }
         enforceAdbOff(notify = false)
+        main.post(appLimitWatchdog)
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(appLimitWatchdog)
         if (instance === this) instance = null
         BlockerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener)
         runCatching { contentResolver.unregisterContentObserver(adbObserver) }
@@ -691,12 +735,71 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isInstallerPkg(pkg: String): Boolean {
         val lower = pkg.lowercase()
-        return lower.contains("packageinstaller") || lower.contains("packagemanager")
+        return lower.contains("packageinstaller") ||
+            lower.contains("packagemanager") ||
+            lower.contains("installer") ||
+            lower == "com.google.android.permissioncontroller" ||
+            lower == "com.android.permissioncontroller" ||
+            lower == "com.vivo.abe" ||
+            lower == "com.huawei.appmarket"
+    }
+
+    private fun isInstallOrUpdateDialog(ev: AccessibilityEvent? = null, root: AccessibilityNodeInfo? = null): Boolean {
+        val evCls = ev?.className?.toString().orEmpty().lowercase()
+        val rootCls = root?.className?.toString().orEmpty().lowercase()
+
+        val sb = StringBuilder()
+        if (root != null) collectText(root, sb, 0, intArrayOf(120))
+        if (ev != null) {
+            for (t in ev.text) if (t != null) sb.append(' ').append(t)
+            ev.contentDescription?.let { sb.append(' ').append(it) }
+        }
+        val text = sb.toString().lowercase()
+
+        // If it explicitly asks to uninstall or deactivate, it is NOT an install/update dialog
+        if ("uninstall" in text || "deactivate" in text || "do you want to uninstall" in text) return false
+
+        // Check text hints
+        val hasInstallText = "do you want to update" in text ||
+            "do you want to install" in text ||
+            "update this app" in text ||
+            "install this app" in text ||
+            "update this application" in text ||
+            "install this application" in text ||
+            "staging app" in text ||
+            "staging" in text ||
+            "installing…" in text ||
+            "installing..." in text ||
+            "app installed" in text ||
+            "package installer" in text ||
+            "packageinstaller" in text ||
+            "scanning for risks" in text ||
+            "install anyway" in text ||
+            "install unknown" in text ||
+            "unknown sources" in text ||
+            "allow from this source" in text ||
+            (("install" in text || "update" in text) && ("cancel" in text || "done" in text || "open" in text))
+
+        if (hasInstallText) return true
+
+        val isInstallClass = evCls.contains("install") || rootCls.contains("install") ||
+            evCls.contains("packageinstaller") || rootCls.contains("packageinstaller") ||
+            evCls.contains("staging") || rootCls.contains("staging")
+        if (isInstallClass && ("update" in text || "install" in text || "cancel" in text)) return true
+
+        return false
     }
 
     private fun isSettingsPkg(pkg: String): Boolean {
-        if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
+        if (isInstallerPkg(pkg)) return false
         val lower = pkg.lowercase()
+        // Never treat file managers, document pickers, or downloaders as settings
+        if (lower.contains("file") || lower.contains("explorer") || lower.contains("document") ||
+            lower.contains("download") || lower.contains("archive") || lower.contains("commander") ||
+            lower.contains("totalcmd") || lower.contains("zarchiver") || lower.contains("nbu.files")) {
+            return false
+        }
+        if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
         return lower.contains("settings") ||
             lower.contains("safecenter") ||
             lower.contains("securitycenter") ||
@@ -707,7 +810,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             lower.contains("securitycom") ||
             lower.contains("scorpio") ||
             lower.contains("ossettingsext") ||
-            lower.contains("permissioncontroller") ||
             lower.contains("securitypermission") ||
             lower.contains("managedprovisioning") ||
             lower.contains("engineermode") ||
@@ -728,7 +830,43 @@ class BlockerAccessibilityService : AccessibilityService() {
         blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
         blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
         blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        appLimits = BlockerStore.appLimits(this)
         enforceAdbOff(notify = false)
+    }
+
+    private fun getEffectiveUsageMillis(pkg: String): Long {
+        val base = BlockerStore.getTodayUsageMillis(this, pkg)
+        val activeSession = if (currentFgPkg == pkg && fgStartTime > 0L) {
+            (System.currentTimeMillis() - fgStartTime).coerceAtLeast(0L)
+        } else 0L
+        return base + activeSession
+    }
+
+    private fun formatLimitDuration(min: Int): String = when {
+        min >= 60 -> {
+            val h = min / 60
+            val m = min % 60
+            if (m > 0) "${h}h ${m}m" else "${h}h"
+        }
+        else -> "${min}m"
+    }
+
+    private fun checkAppUsageLimit(pkg: String): Boolean {
+        val limitMin = appLimits[pkg] ?: return false
+        if (limitMin <= 0) return false
+        val usedMs = getEffectiveUsageMillis(pkg)
+        val limitMs = limitMin * 60_000L
+        if (usedMs >= limitMs) {
+            val limitStr = formatLimitDuration(limitMin)
+            hit(
+                "apps",
+                "Fear Allah",
+                "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
+                "Do not destroy your Akhirah"
+            )
+            return true
+        }
+        return false
     }
 
     private fun imePackages(): Set<String> = runCatching {
@@ -739,6 +877,25 @@ class BlockerAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         val ev = e ?: return
         val pkg = ev.packageName?.toString() ?: return
+
+        if (pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+            if (currentFgPkg != pkg) {
+                if (currentFgPkg != null && fgStartTime > 0L) {
+                    val delta = System.currentTimeMillis() - fgStartTime
+                    BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
+                }
+                currentFgPkg = pkg
+                fgStartTime = System.currentTimeMillis()
+            }
+        } else if (pkg in neverBlock) {
+            if (currentFgPkg != null && fgStartTime > 0L) {
+                val delta = System.currentTimeMillis() - fgStartTime
+                BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
+            }
+            currentFgPkg = null
+            fgStartTime = 0L
+        }
+
         if (pkg == packageName) {
             viewingBlockerSettingsUntil = 0L
             settingsPollActive = false
@@ -746,7 +903,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             main.removeCallbacks(settingsPollRunnable)
             return
         }
-        if (isInstallerPkg(pkg)) {
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) {
             // PackageInstaller is installing/updating or uninstalling an app.
             // If it's an UNINSTALL attempt for Blocker, block it immediately!
             // If it's an INSTALL or UPDATE attempt for Blocker, ALLOW it!
@@ -768,7 +925,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!BlockerStore.active(this)) return
 
         // OEM-agnostic proactive intercept: fires on the window-open event BEFORE the screen is visible
-        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield") && isSettingsPkg(pkg)) {
+        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield") && isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
             val evCls = ev.className?.toString().orEmpty()
             val rootCls = runCatching { rootInActiveWindow?.className?.toString().orEmpty() }.getOrDefault(evCls)
             val winTitle = ev.text.joinToString(" ").trim().lowercase()  // screen title Samsung/AOSP use ev.text[0]
@@ -801,6 +958,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 evCls.contains("InstalledApp", ignoreCase = true) || rootCls.contains("InstalledApp", ignoreCase = true)
 
             if (isAppInfoTitle || isAppInfoCls) {
+                if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
                 // If title itself is Blocker, lock out immediately with zero delay
                 if (titleMatchesBlocker) {
                     viewingBlockerSettingsUntil = now + 30_000L
@@ -860,7 +1018,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         when {
             pkg in apps -> {
                 if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                    hit("apps", "🚫 App blocked", "This app is on your block list.")
+                    hit(
+                        "apps",
+                        "Fear Allah",
+                        "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:36)",
+                        "Do not destroy your Akhirah"
+                    )
                 }
                 return
             }
@@ -874,6 +1037,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (checkGranularInterception(pkg, ev)) return
             }
         }
+        if (checkAppUsageLimit(pkg)) return
         if (pkg !in exempt) scanScreen(pkg)
     }
 
@@ -890,7 +1054,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             lastHit = now
             BlockerStore.incr(this, "focus")
             performGlobalAction(GLOBAL_ACTION_HOME)
-            showOverlay("🎯 Focus mode", "Only your essential apps are available.\n${leftText()} left.", 3000)
+            showOverlay(
+                "Focus Mode Active",
+                "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
+                5000,
+                "Guard your time for what benefits you",
+                "Astaghfirullah"
+            )
         }
         return true
     }
@@ -911,7 +1081,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             val text = root.findAccessibilityNodeInfosByViewId(id).firstOrNull()?.text?.toString()
             val rule = if (!text.isNullOrBlank()) matchAddress(text) else null
             if (rule != null) {
-                redirectBrowser(pkg, "sites", "🚫 Site blocked", "\"$rule\" is on your block list, so Blocker redirected this tab.")
+                redirectBrowser(
+                    pkg,
+                    "sites",
+                    "Fear Allah",
+                    "“$rule” was blocked to safeguard your modesty and purity.\n\n“Does he not know that Allah sees?”\n— Surah Al-Alaq (96:14)",
+                    "Do not destroy your Akhirah"
+                )
                 return true
             }
         }
@@ -1019,20 +1195,32 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (pkg in BROWSER_URL_IDS) {
             BlockerStore.incr(this, "screen")
             if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
-            showOverlay("🛡️ Page redirected", "\"$kw\" appeared on this page, so Blocker redirected it.", 5000)
+            showOverlay(
+                "Fear Allah",
+                "Inappropriate content was detected and redirected.\n\n“Tell the believing men to lower their gaze and guard their modesty. That is purer for them. Indeed, Allah is aware of what they do.”\n— Surah An-Nur (24:30)",
+                5000,
+                "Do not destroy your Akhirah",
+                "Astaghfirullah"
+            )
             return
         }
         BlockerStore.incr(this, "screen")
         performGlobalAction(GLOBAL_ACTION_HOME)
-        showOverlay("🛡️ App closed", "\"$kw\" appeared on screen in ${labelOf(pkg)}, so it was closed.", 5000)
+        showOverlay(
+            "Fear Allah",
+            "Inappropriate content appeared in ${labelOf(pkg)}, so it was closed.\n\n“Indeed, Allah is ever, over you, an Observer.”\n— Surah An-Nisa (4:1)",
+            5000,
+            "Do not destroy your Akhirah",
+            "Astaghfirullah"
+        )
     }
 
     /** Sends the current tab straight to google.com. Browsers are never locked or held open. */
-    private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String) {
-        quietUntil[pkg] = System.currentTimeMillis() + 2000
+    private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String, subheading: String? = null) {
+        quietUntil[pkg] = System.currentTimeMillis() + 5000L
         BlockerStore.incr(this, kind)
         if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
-        showOverlay(heading, body, 5000)
+        showOverlay(heading, body, 5000, subheading, "Astaghfirullah")
     }
 
     @SuppressLint("NewApi")
@@ -1073,25 +1261,29 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun checkAdbDialog(pkg: String): Boolean {
         if (!BlockerStore.active(this) || !BlockerStore.shield(this) || BlockerStore.guardOpen(this, "shield")) return false
-        if (pkg != "com.android.systemui" && pkg != "android") return false
+        if (pkg != "com.android.systemui" && pkg != "android" && !isSettingsPkg(pkg)) return false
         val root = rootInActiveWindow ?: return false
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(100))
         val t = sb.toString().lowercase()
-        if ("allow usb debugging" in t || ("usb debugging" in t && ("fingerprint" in t || "rsa" in t || "always allow" in t))) {
+        val isUsbAuth = "allow usb debugging" in t || ("usb debugging" in t && ("fingerprint" in t || "rsa" in t || "always allow" in t))
+        val isWifiAuth = "allow wireless debugging" in t || ("wireless debugging" in t && ("fingerprint" in t || "always allow" in t || "pair" in t || "pairing" in t))
+        if (isUsbAuth || isWifiAuth) {
             val now = System.currentTimeMillis()
             if (now - lastHit < 700) return true
             lastHit = now
             BlockerStore.incr(this, "tamper")
             val cancelBtn = root.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
                 ?: root.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText("cancel").firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText("CANCEL").firstOrNull()
             if (cancelBtn != null) {
                 cancelBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 cancelBtn.recycle()
             } else {
                 performGlobalAction(GLOBAL_ACTION_BACK)
             }
-            showOverlay("🔐 Tamper Protection", "USB debugging authorization is locked while Protection Mode is active.", 5000)
+            showOverlay("🔐 Tamper Protection", "Debugging authorization is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
             return true
         }
         return false
@@ -1116,8 +1308,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isOurApp = "blocker" in t || packageName.lowercase() in t
         val now = System.currentTimeMillis()
 
-        // If this is PackageInstaller, strictly distinguish between Uninstall vs Update/Install:
-        if (isInstallerPkg(pkg) || isInstallerPkg(rootPkg)) {
+        // If this is PackageInstaller or an install/update dialog, strictly distinguish between Uninstall vs Update/Install:
+        if (isInstallerPkg(pkg) || isInstallerPkg(rootPkg) || isInstallOrUpdateDialog(ev, root)) {
             val evCls = ev.className?.toString().orEmpty().lowercase()
             val isUninstall = "do you want to uninstall" in t ||
                 ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t)) ||
@@ -1292,7 +1484,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasRiskAction = APP_RISK_TERMS.any { it in fullText } || isStorageRisk
 
         // If currently viewing Blocker's settings or app details
-        if (isOurApp && (hasRiskAction || "storage" in fullText || "app info" in fullText || "installed" in fullText || "version" in fullText)) {
+        if (isOurApp && !fullText.contains(".apk") && (hasRiskAction || "storage" in fullText || "app info" in fullText || "installed" in fullText || "version" in fullText)) {
+            if (isInstallOrUpdateDialog(ev, root)) return
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
             return
@@ -1376,7 +1569,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** Accessibility-callback side: instant kick if title is Blocker, otherwise arm the scanner. */
     private fun guardBlockerAppInfo(ev: AccessibilityEvent, pkg: String) {
-        if (isInstallerPkg(pkg)) return // PackageInstaller is NOT App Info; installation/update dialogs must be allowed!
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return // PackageInstaller is NOT App Info; installation/update dialogs must be allowed!
+        // App Info ONLY ever exists inside Settings packages! Never intercept file managers, browsers, or other apps:
+        if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             guardBlockerRowClick(ev, pkg)
             return
@@ -1389,7 +1584,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val titleMatches = titleIsAppName(ev)
         val announced = stateChange && (looksLikeAppInfoClass(ev.className) || titleMatches)
         if (announced) {
-            appInfoWatchPkg = pkg                      // e.g. an OEM hosting App Info inside a non-Settings package
+            appInfoWatchPkg = pkg
             appInfoWatchUntil = nowUp + 5_000L
         }
         val settingsLike = isSettingsPkg(pkg) && pkg !in neverBlock
@@ -1408,8 +1603,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 kickFromAppInfo()
                 return
             }
-            // If the window opening in Settings is Blocker App Info by title, kick immediately!
+            // If the window opening in Settings is Blocker App Info by title, verify it is not an install dialog before kicking
             if (titleMatches) {
+                if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
                 kickFromAppInfo()
                 return
             }
@@ -1430,11 +1626,20 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun guardBlockerRowClick(ev: AccessibilityEvent, pkg: String) {
         if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (!shieldEngaged()) return
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
         var hit = false
-        for (t in ev.text) if (t != null && isAppNameText(t.toString(), name, ver)) { hit = true; break }
-        if (!hit) hit = ev.contentDescription?.toString()?.let { isAppNameText(it, name, ver) } == true
+        for (t in ev.text) {
+            val s = t?.toString().orEmpty()
+            if (s.endsWith(".apk", ignoreCase = true) || s.contains(".apk", ignoreCase = true)) return
+            if (isAppNameText(s, name, ver)) { hit = true; break }
+        }
+        if (!hit) {
+            val cd = ev.contentDescription?.toString().orEmpty()
+            if (cd.endsWith(".apk", ignoreCase = true) || cd.contains(".apk", ignoreCase = true)) return
+            hit = isAppNameText(cd, name, ver)
+        }
         if (!hit) {
             val src = ev.source
             if (src != null) {
@@ -1442,9 +1647,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val nodes = src.findAccessibilityNodeInfosByText(name)
                 if (!nodes.isNullOrEmpty()) {
                     for (n in nodes) {
-                        val t = n.text?.toString()
-                        val d = n.contentDescription?.toString()
-                        if ((t != null && isAppNameText(t, name, ver)) || (d != null && isAppNameText(d, name, ver))) {
+                        val nt = n.text?.toString().orEmpty()
+                        val nd = n.contentDescription?.toString().orEmpty()
+                        if (nt.contains(".apk", ignoreCase = true) || nd.contains(".apk", ignoreCase = true)) {
+                            nodes.forEach { it.recycle() }
+                            runCatching { src.recycle() }
+                            return
+                        }
+                        if ((nt.isNotEmpty() && isAppNameText(nt, name, ver)) || (nd.isNotEmpty() && isAppNameText(nd, name, ver))) {
                             hit = true
                         }
                         n.recycle()
@@ -1506,9 +1716,10 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** One scan of the active window (scanner thread). */
     private fun scanAppInfoOnce(pkg: String, deep: Boolean) {
-        if (pkg.isEmpty()) return
+        if (pkg.isEmpty() || isInstallerPkg(pkg)) return
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
-        if (root.packageName?.toString() != pkg) return
+        val rPkg = root.packageName?.toString().orEmpty()
+        if (rPkg != pkg || isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = root)) return
         if (!matchesBlockerAppInfo(root, deep)) return
         kickFromAppInfo()
         val now = SystemClock.uptimeMillis()
@@ -1604,8 +1815,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     /** Exact name, or name followed by newline/version/size (e.g. "Blocker\n56.56 MB"). Never matches "Ad Blocker". */
     private fun isAppNameText(text: String, name: String, ver: String): Boolean {
         val t = text.trim()
+        if (t.endsWith(".apk", ignoreCase = true) || t.contains(".apk", ignoreCase = true)) return false
         if (t.equals(name, ignoreCase = true)) return true
         val firstLine = t.lines().firstOrNull()?.trim().orEmpty()
+        if (firstLine.endsWith(".apk", ignoreCase = true) || firstLine.contains(".apk", ignoreCase = true)) return false
         if (firstLine.equals(name, ignoreCase = true)) return true
         if (t.length > name.length && t.startsWith(name, ignoreCase = true)) {
             val sep = t[name.length]
@@ -1632,16 +1845,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastAppInfoKick = now
         Log.i("BlockerGuard", "App Info screen blocked (pkg=$appInfoCandidatePkg)")
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", "Blocker's app info page is locked while Protection Mode is active.", 5000)
+        showOverlay("🔐 Tamper Protection", "Blocker's app info page is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
-    // ---------- USB debugging lock ----------
+    // ---------- USB & Wireless debugging lock ----------
     //
-    // While Protection Mode + the uninstall shield are on, USB debugging must stay off. Two levels:
+    // While Protection Mode + the uninstall shield are on, USB and Wireless debugging must stay off. Two levels:
     //
     //  1. Works out of the box, no computer: Developer options screens are blocked (see the settings guards), and
-    //     if USB debugging is ever found switched on, Blocker opens Developer options itself, finds the
-    //     "USB debugging" row, taps it off, and returns Home (a few seconds; at most 3 attempts per 10 minutes).
+    //     if USB or Wireless debugging is ever found switched on, Blocker opens Developer options itself, finds the
+    //     "USB debugging" or "Wireless debugging" row, taps it off, and returns Home (a few seconds; at most 3 attempts per 10 minutes).
     //  2. Optional instant lock: one adb command, run once from any computer while USB debugging is on:
     //         adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS
     //     After that USB and Wireless debugging are switched back off the instant anything turns them on.
@@ -1652,8 +1865,13 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun hasSecureSettingsPermission(): Boolean =
         checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
-    private fun adbIsOn(): Boolean =
+    private fun usbAdbIsOn(): Boolean =
         runCatching { Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1 }.getOrDefault(false)
+
+    private fun wifiAdbIsOn(): Boolean =
+        runCatching { Settings.Global.getInt(contentResolver, "adb_wifi_enabled", 0) == 1 }.getOrDefault(false)
+
+    private fun adbIsOn(): Boolean = usbAdbIsOn() || wifiAdbIsOn()
 
     private fun enforceAdbOffThrottled() {
         val now = SystemClock.uptimeMillis()
@@ -1668,7 +1886,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!hasSecureSettingsPermission()) {
             if (!adbPermWarned) {
                 adbPermWarned = true
-                Log.i("BlockerGuard", "USB-debugging lock: using the Settings fallback (optional instant lock: adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS)")
+                Log.i("BlockerGuard", "USB/Wireless debugging lock: using the Settings fallback (optional instant lock: adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS)")
             }
             if (adbIsOn()) startAdbUiFix()
             return
@@ -1684,7 +1902,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (notify && now - lastAdbNotice > 2_000L) {
             lastAdbNotice = now
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB debugging is locked while Protection Mode is active.", 4000)
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
@@ -1708,7 +1926,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             adbFixUntil = 0L
             return
         }
-        Log.i("BlockerGuard", "USB debugging found on: switching it off through Developer options")
+        Log.i("BlockerGuard", "USB/Wireless debugging found on: switching it off through Developer options")
         main.removeCallbacks(adbFixTick)
         main.postDelayed(adbFixTick, 500L)
     }
@@ -1721,32 +1939,86 @@ class BlockerAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
         if (!adbIsOn()) {
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB debugging was switched off. It stays locked while Protection Mode is active.", 4000)
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging were switched off. They stay locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
-    /** One tick: find the "USB debugging" row (scrolling if needed) and tap it. Success is detected by the setting observer. */
+    /** One tick: find the "USB debugging" or "Wireless debugging" row (scrolling if needed) and tap it. Success is detected by the setting observer. */
     private fun stepAdbUiFix() {
         val root = rootInActiveWindow ?: return
         val rootPkg = root.packageName?.toString() ?: return
         if (rootPkg == packageName || !(isSettingsPkg(rootPkg) || isInstallerPkg(rootPkg))) return   // still opening
-        val row = root.findAccessibilityNodeInfosByText(ADB_ROW_LABEL)
-            ?.firstOrNull { it.text?.toString()?.trim().equals(ADB_ROW_LABEL, ignoreCase = true) }
-        if (row == null) {
+
+        val targetLabels = mutableListOf<String>()
+        if (usbAdbIsOn()) {
+            targetLabels.add(ADB_ROW_LABEL)
+        }
+        if (wifiAdbIsOn()) {
+            targetLabels.add(ADB_WIFI_ROW_LABEL)
+            targetLabels.add("Use wireless debugging")
+        }
+        if (targetLabels.isEmpty()) {
+            finishAdbUiFix()
+            return
+        }
+
+        var matchedRow: AccessibilityNodeInfo? = null
+        for (label in targetLabels) {
+            val found = root.findAccessibilityNodeInfosByText(label)
+                ?.firstOrNull { it.text?.toString()?.trim().equals(label, ignoreCase = true) }
+            if (found != null) {
+                matchedRow = found
+                break
+            }
+        }
+
+        if (matchedRow == null) {
             if (adbFixScrolls < ADB_FIX_MAX_SCROLLS) {
                 val scroller = findScrollable(root, 0, intArrayOf(150))
                 if (scroller != null && scroller.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) adbFixScrolls++
             }
             return
         }
-        var target: AccessibilityNodeInfo? = row
+
+        val now = SystemClock.uptimeMillis()
+        if (now - lastAdbFixClick < ADB_FIX_CLICK_GAP_MS) return    // give the switch time to flip before judging
+
+        // First attempt: try finding a Switch widget in the same row container (up to 3 levels up)
+        var switchNode: AccessibilityNodeInfo? = null
+        var container: AccessibilityNodeInfo? = matchedRow
+        var depth = 0
+        while (container != null && depth++ < 3) {
+            switchNode = findSwitchInNode(container)
+            if (switchNode != null) break
+            container = container.parent
+        }
+
+        if (switchNode != null && switchNode.isClickable) {
+            lastAdbFixClick = now
+            switchNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            return
+        }
+
+        // Fallback: click the clickable parent of the row or the switch's parent
+        var target: AccessibilityNodeInfo? = switchNode ?: matchedRow
         var hops = 0
         while (target != null && !target.isClickable && hops++ < 6) target = target.parent
         if (target == null) return
-        val now = SystemClock.uptimeMillis()
-        if (now - lastAdbFixClick < ADB_FIX_CLICK_GAP_MS) return    // give the switch time to flip before judging
         lastAdbFixClick = now
         target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    private fun findSwitchInNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val cls = node.className?.toString() ?: ""
+        if (node.isCheckable || cls.contains("Switch", ignoreCase = true) || cls.contains("CompoundButton", ignoreCase = true)) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val s = findSwitchInNode(node.getChild(i))
+            if (s != null) return s
+        }
+        return null
     }
 
     private fun findScrollable(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): AccessibilityNodeInfo? {
@@ -1766,7 +2038,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (now - lastHit < 500) return
         lastHit = now
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", message, 5000)
+        showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
     }
 
     // ---------- Granular focus interception (Reels / Shorts / Search) ----------
@@ -1922,13 +2194,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun hit(kind: String, heading: String, msg: String) {
+    private fun hit(kind: String, heading: String, msg: String, subheading: String? = null) {
         val now = System.currentTimeMillis()
         if (now - lastHit < 700) return
         lastHit = now
         BlockerStore.incr(this, kind)
         performGlobalAction(GLOBAL_ACTION_HOME)
-        showOverlay(heading, msg, 3000)
+        showOverlay(heading, msg, 5000, subheading, "Astaghfirullah")
     }
 
     // ---------- Popup ----------
@@ -1937,7 +2209,14 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private var scrim: View? = null
 
-    private fun showOverlay(heading: String, body: String, ms: Long) {
+    private fun showOverlay(
+        heading: String,
+        body: String,
+        ms: Long = 5000L,
+        subheading: String? = null,
+        buttonText: String = "Astaghfirullah"
+    ) {
+        val displayMs = ms.coerceAtLeast(5000L)
         main.post {
             if (overlay != null) return@post
             val svc = this@BlockerAccessibilityService
@@ -1945,7 +2224,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             val accentDeep = 0xFF7C3AED.toInt()
 
             // dim scrim behind the card so it reads as a proper modal, matching the app's own dialogs
-            val dim = View(svc).apply { setBackgroundColor(0x8A0B0A16.toInt()) }
+            val dim = View(svc).apply { setBackgroundColor(0xB3070512.toInt()) }
             val dimLp = WindowManager.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -1954,15 +2233,18 @@ class BlockerAccessibilityService : AccessibilityService() {
             )
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).addView(dim, dimLp); scrim = dim }
 
+            val isFearAllah = heading == "Fear Allah"
+
             val badge = LinearLayout(svc).apply {
                 gravity = Gravity.CENTER
                 background = GradientDrawable().apply {
-                    setColor(0x33A78BFA)
+                    setColor(if (isFearAllah) 0x33DC2626.toInt() else 0x33A78BFA)
                     cornerRadius = dp(22).toFloat()
+                    if (isFearAllah) setStroke(dp(1), 0x88EF4444.toInt())
                 }
             }
             badge.addView(TextView(svc).apply {
-                text = "\uD83D\uDEE1\uFE0F" // shield emoji, used as a lightweight icon badge
+                text = if (isFearAllah) "\uD83D\uDEE1\uFE0F" else "\uD83D\uDD12"
                 textSize = 20f
                 gravity = Gravity.CENTER
             })
@@ -1971,12 +2253,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            headingRow.addView(badge, LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(12) })
+            headingRow.addView(badge, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
             headingRow.addView(TextView(svc).apply {
                 text = heading
-                setTextColor(0xFFF6F3FF.toInt())
-                textSize = 19f
+                setTextColor(if (isFearAllah) 0xFFFFFFFF.toInt() else 0xFFF6F3FF.toInt())
+                textSize = if (isFearAllah) 22f else 19f
                 typeface = Typeface.DEFAULT_BOLD
+                letterSpacing = 0.02f
             })
 
             val card = LinearLayout(svc).apply {
@@ -1984,21 +2267,33 @@ class BlockerAccessibilityService : AccessibilityService() {
                 setPadding(dp(22), dp(22), dp(22), dp(20))
                 background = GradientDrawable(
                     GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(0xFF221A3D.toInt(), 0xFF160F2B.toInt())
+                    intArrayOf(0xFF221A3D.toInt(), 0xFF140D26.toInt())
                 ).apply {
                     cornerRadius = dp(26).toFloat()
-                    setStroke(dp(1), 0x66C7AFFF)
+                    setStroke(dp(2), if (isFearAllah) 0x99C084FC.toInt() else 0x66C7AFFF.toInt())
                 }
-                elevation = dp(16).toFloat()
+                elevation = dp(18).toFloat()
             }
             card.addView(headingRow)
+
+            if (!subheading.isNullOrBlank()) {
+                card.addView(TextView(svc).apply {
+                    text = subheading
+                    setTextColor(0xFFE9D5FF.toInt()) // Vibrant soft purple highlight
+                    textSize = 15.5f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    setPadding(0, dp(10), 0, dp(2))
+                })
+            }
+
             card.addView(TextView(svc).apply {
                 text = body
-                setTextColor(0xFFC3BCDE.toInt())
-                textSize = 15f
-                setPadding(0, dp(12), 0, dp(18))
-                setLineSpacing(dp(2).toFloat(), 1f)
+                setTextColor(0xFFD1C8EC.toInt())
+                textSize = 14.5f
+                setPadding(0, if (!subheading.isNullOrBlank()) dp(6) else dp(12), 0, dp(18))
+                setLineSpacing(dp(3).toFloat(), 1.05f)
             })
+
             val progressTrack = View(svc).apply { setBackgroundColor(0x26FFFFFF) }
             val progressFill = View(svc).apply {
                 setBackgroundColor(accent)
@@ -2010,11 +2305,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             card.addView(trackWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
                 bottomMargin = dp(16)
             })
+
             card.addView(Button(svc).apply {
-                text = "Got it"
+                text = buttonText
                 setAllCaps(false)
                 setTextColor(Color.WHITE)
-                textSize = 15.5f
+                textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
                 background = GradientDrawable(
                     GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(accentDeep, accent)
@@ -2036,10 +2332,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                 (getSystemService(WINDOW_SERVICE) as WindowManager).addView(card, lp)
                 overlay = card
                 card.animate().alpha(1f).translationY(0f).setDuration(180).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-                progressFill.animate().scaleX(0f).setDuration(ms).setInterpolator(LinearInterpolator()).start()
+                progressFill.animate().scaleX(0f).setDuration(displayMs).setInterpolator(LinearInterpolator()).start()
             }
             main.removeCallbacks(hideRunnable)
-            main.postDelayed(hideRunnable, ms)
+            main.postDelayed(hideRunnable, displayMs)
         }
     }
 

@@ -10,7 +10,7 @@ export type ActionType =
   | 'protection_off' | 'shield_off' | 'delay' | 'rm_app' | 'rm_domain' | 'rm_keyword' | 'cat_off'
   | 'add_whitelist' | 'exempt_app'
   | 'focus_end' | 'focus_shorten' | 'focus_add_app' | 'schedule_update' | 'schedule_delete'
-  | 'granular_focus_disable';
+  | 'granular_focus_disable' | 'app_limit_set';
 export interface SchedulePatch {
   label: string;
   startMin: number;
@@ -32,6 +32,7 @@ export interface PersistState {
   whitelist: string[];
   blockedApps: string[];
   exemptApps: string[];
+  appLimits?: Record<string, number>;
   granularFocus?: GranularFocusToggles;
   queue: Partial<Record<LockKey, Action[]>>;
   onboarded: boolean;
@@ -40,7 +41,7 @@ export interface PersistState {
   defaultAppsSeeded?: boolean;
 }
 /** Keywords this app used to ship. They are filtered out of every list, whatever an older saved state still holds. */
-export const RETIRED_KEYWORDS = new Set(['usb debugging', 'oem unlocking', 'oem unlock']);
+export const RETIRED_KEYWORDS = new Set(['usb debugging', 'oem unlocking', 'oem unlock', 'bare']);
 const isRetired = (k: string) => RETIRED_KEYWORDS.has(k.trim().toLowerCase());
 /** Blocked out of the box (added once; removing them later goes through the normal delay timer). */
 export const DEFAULT_BLOCKED_APPS = ['com.streamdev.aiostreamer', 'org.xbmc.kodi'];
@@ -69,11 +70,14 @@ export interface Snapshot {
   locks: Partial<Record<LockKey, SettingLock>>;
   perms: PermissionStatus | null;
   stats: Stats | null;
+  appLimits: Record<string, number>;
+  appUsageToday: Record<string, number>;
 }
 export type Outcome = 'applied' | 'queued' | 'restarted';
 
 const EMPTY: PersistState = {
   categories: {}, customDomains: [], customKeywords: [], whitelist: [], blockedApps: [], exemptApps: [],
+  appLimits: {},
   granularFocus: DEFAULT_GRANULAR,
   queue: {}, onboarded: false, savedSchedules: []
 };
@@ -82,7 +86,8 @@ let snap: Snapshot = {
   ready: false, state: EMPTY, active: false, shield: true, delayDays: 1,
   focus: { active: false, until: 0, remainingMs: 0, apps: [] },
   granularFocus: DEFAULT_GRANULAR,
-  schedules: [], locks: {}, perms: null, stats: null
+  schedules: [], locks: {}, perms: null, stats: null,
+  appLimits: {}, appUsageToday: {}
 };
 const listeners = new Set<() => void>();
 const emit = (patch: Partial<Snapshot>) => {
@@ -163,9 +168,11 @@ export async function init() {
 }
 
 export async function refresh() {
-  const [perms, stats, delayDays, locks, schedules, granularFocus] = await Promise.all([
+  const [perms, stats, delayDays, locks, schedules, granularFocus, appLimits, appUsageToday] = await Promise.all([
     Native.getPermissionStatus(), Native.getStats(), Native.getDelayDays(), Native.getSettingLocks(LOCK_KEYS),
-    Native.getSchedules(), Native.getGranularFocusToggles().catch(() => DEFAULT_GRANULAR)
+    Native.getSchedules(), Native.getGranularFocusToggles().catch(() => DEFAULT_GRANULAR),
+    Native.getAppUsageLimits().catch(() => ({})),
+    Native.getAppUsageToday().catch(() => ({}))
   ]);
   // a pending focus change is pointless once focus mode has ended by itself
   if (!stats.focusActive && (locks.focus?.pending || locks.focus?.open)) {
@@ -184,7 +191,7 @@ export async function refresh() {
   }
   if (dirty) persist({ ...snap.state, queue });
   emit({
-    perms, stats, delayDays, locks, schedules, granularFocus, active: stats.active, shield: stats.shield,
+    perms, stats, delayDays, locks, schedules, granularFocus, appLimits, appUsageToday, active: stats.active, shield: stats.shield,
     focus: { active: stats.focusActive, until: stats.focusUntil, remainingMs: stats.focusRemainingMs, apps: stats.focusApps }
   });
 }
@@ -252,18 +259,56 @@ export async function confirm(key: LockKey) {
       await Native.setFocusApps(focusApps);
     } else if (a.t === 'granular_focus_disable') {
       await Native.setGranularFocusToggle(a.v as GranularFocusKey, false).catch(() => {});
+    } else if (a.t === 'app_limit_set') {
+      const nextLimits = { ...(s.appLimits ?? {}) };
+      if ((a.n ?? 0) > 0) {
+        nextLimits[a.v!] = a.n!;
+      } else {
+        delete nextLimits[a.v!];
+      }
+      s = { ...s, appLimits: nextLimits };
+      await Native.setAppUsageLimit(a.v!, a.n ?? 0).catch(() => {});
     } else s = reduce(s, a);
   }
   s = { ...s, savedSchedules };
   if (key === 'remove_apps') await sync(s);
   if (key === 'remove_blocklist' || key === 'whitelist') await sync(s);
   if (key === 'exempt_apps') await sync(s);
-  if (key === 'schedule') await refresh(); // schedules already applied above, just re-read them
+  if (key === 'schedule' || key === 'app_limits') await refresh();
   const queue = { ...s.queue };
   delete queue[key];
   persist({ ...s, queue });
   await Native.cancelSettingChange(key);
   await refresh();
+}
+
+export async function setAppUsageLimit(pkg: string, limitMinutes: number, label?: string): Promise<Outcome> {
+  const currentLimit = snap.state.appLimits?.[pkg] ?? 0;
+  const weakening = (limitMinutes === 0 && currentLimit > 0) || (limitMinutes > currentLimit && currentLimit > 0);
+
+  if (snap.active && weakening) {
+    const formatted = limitMinutes > 0
+      ? (limitMinutes >= 60 ? `${Math.floor(limitMinutes / 60)}h${limitMinutes % 60 ? ` ${limitMinutes % 60}m` : ''}` : `${limitMinutes}m`)
+      : 'no limit';
+    return queueAction('app_limits', {
+      t: 'app_limit_set',
+      v: pkg,
+      n: limitMinutes,
+      label: `${label ?? pkg}: limit to ${formatted}`
+    });
+  }
+
+  const nextLimits = { ...(snap.state.appLimits ?? {}) };
+  if (limitMinutes > 0) {
+    nextLimits[pkg] = limitMinutes;
+  } else {
+    delete nextLimits[pkg];
+  }
+  const nextState = { ...snap.state, appLimits: nextLimits };
+  persist(nextState);
+  await Native.setAppUsageLimit(pkg, limitMinutes).catch(() => {});
+  await refresh();
+  return 'applied';
 }
 
 export async function cancel(key: LockKey) {

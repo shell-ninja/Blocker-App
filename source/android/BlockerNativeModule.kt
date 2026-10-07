@@ -1,8 +1,12 @@
 package com.blocker
 
 import android.app.AppOpsManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.app.admin.DevicePolicyManager
+import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
@@ -18,12 +22,20 @@ import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
+import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.uimanager.ViewManager
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -31,7 +43,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /** Keywords this app used to ship. They are dropped from saved lists without the delay timer. */
-private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
+private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
 
 /** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00. */
 data class FocusSchedule(val id: String, val label: String, val startMin: Int, val endMin: Int, val enabled: Boolean) {
@@ -131,6 +143,116 @@ object BlockerStore {
     fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, false)
     fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
         prefs(c).edit().putBoolean(key, enabled).apply()
+
+    fun appLimits(c: Context): Map<String, Int> = runCatching {
+        val json = prefs(c).getString("app_limits", "{}") ?: "{}"
+        val obj = JSONObject(json)
+        val map = mutableMapOf<String, Int>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val v = obj.optInt(key, 0)
+            if (v > 0) map[key] = v
+        }
+        map
+    }.getOrDefault(emptyMap())
+
+    fun putAppLimits(c: Context, limits: Map<String, Int>) {
+        val obj = JSONObject()
+        limits.forEach { (k, v) ->
+            if (v > 0) obj.put(k, v)
+        }
+        prefs(c).edit().putString("app_limits", obj.toString()).apply()
+    }
+
+    fun setAppLimit(c: Context, pkg: String, limitMinutes: Int) {
+        val m = appLimits(c).toMutableMap()
+        if (limitMinutes > 0) {
+            m[pkg] = limitMinutes
+        } else {
+            m.remove(pkg)
+        }
+        putAppLimits(c, m)
+    }
+
+    fun addAppUsageMillis(c: Context, pkg: String, deltaMs: Long) {
+        if (deltaMs <= 0L) return
+        val k = "usage_${day()}_$pkg"
+        val p = prefs(c)
+        val cur = p.getLong(k, 0L)
+        p.edit().putLong(k, cur + deltaMs).apply()
+    }
+
+    fun getStoredTodayUsageMillis(c: Context, pkg: String): Long {
+        val k = "usage_${day()}_$pkg"
+        return prefs(c).getLong(k, 0L)
+    }
+
+    fun getAllStoredTodayUsageMillis(c: Context): Map<String, Long> {
+        val prefix = "usage_${day()}_"
+        val all = prefs(c).all
+        val res = mutableMapOf<String, Long>()
+        all.forEach { (k, v) ->
+            if (k.startsWith(prefix)) {
+                val value = (v as? Number)?.toLong() ?: 0L
+                if (value > 0L) {
+                    val pkg = k.removePrefix(prefix)
+                    res[pkg] = value
+                }
+            }
+        }
+        return res
+    }
+
+    fun getTodayUsageMillis(c: Context, pkg: String): Long {
+        var usmTotal = 0L
+        runCatching {
+            val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            if (usm != null) {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val startOfDay = cal.timeInMillis
+                val now = System.currentTimeMillis()
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                if (!list.isNullOrEmpty()) {
+                    usmTotal = list.filter { it.packageName == pkg }.sumOf { it.totalTimeInForeground }
+                }
+            }
+        }
+        val stored = getStoredTodayUsageMillis(c, pkg)
+        return maxOf(usmTotal, stored)
+    }
+
+    fun getAllTodayUsageMillis(c: Context): Map<String, Long> {
+        val res = getAllStoredTodayUsageMillis(c).toMutableMap()
+        runCatching {
+            val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            if (usm != null) {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val startOfDay = cal.timeInMillis
+                val now = System.currentTimeMillis()
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                if (!list.isNullOrEmpty()) {
+                    for (s in list) {
+                        if (s.totalTimeInForeground > 0) {
+                            val prev = res[s.packageName] ?: 0L
+                            res[s.packageName] = maxOf(prev, s.totalTimeInForeground)
+                        }
+                    }
+                }
+            }
+        }
+        return res
+    }
 }
 
 class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContextBaseJavaModule(rc) {
@@ -138,6 +260,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     private val io = Executors.newSingleThreadExecutor()
     private val ctx: Context get() = rc.applicationContext
     private val admin get() = ComponentName(ctx, BlockerDeviceAdminReceiver::class.java)
+
+    init {
+        io.execute {
+            try {
+                val pInfo = rc.packageManager.getPackageInfo(rc.packageName, 0)
+                val currentVersion = pInfo.versionName ?: ""
+                deleteObsoleteApks(currentVersion)
+            } catch (_: Exception) {}
+        }
+    }
 
     override fun getName() = "BlockerNative"
 
@@ -419,6 +551,43 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         })
     }
 
+    // ---------- Individual App Usage Limits ----------
+
+    @ReactMethod
+    fun getAppUsageLimits(promise: Promise) {
+        val limits = BlockerStore.appLimits(ctx)
+        val map = Arguments.createMap()
+        limits.forEach { (pkg, limit) ->
+            map.putInt(pkg, limit)
+        }
+        promise.resolve(map)
+    }
+
+    @ReactMethod
+    fun setAppUsageLimit(pkg: String, limitMinutes: Int, promise: Promise) {
+        val curLimits = BlockerStore.appLimits(ctx)
+        val cur = curLimits[pkg] ?: 0
+        val weakening = (limitMinutes == 0 && cur > 0) || (limitMinutes > cur && cur > 0)
+        if (BlockerStore.active(ctx) && weakening && !BlockerStore.guardOpen(ctx, "app_limits")) {
+            promise.reject("LOCKED", "Increasing or removing an app usage limit requires the delay timer.")
+            return
+        }
+        BlockerStore.setAppLimit(ctx, pkg, limitMinutes)
+        if (weakening) BlockerStore.consumeGuard(ctx, "app_limits")
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun getAppUsageToday(promise: Promise) {
+        val map = Arguments.createMap()
+        val stats = BlockerStore.getAllTodayUsageMillis(ctx)
+        stats.forEach { (pkg, millis) ->
+            val minutes = (millis / 60_000L).toInt()
+            map.putInt(pkg, minutes)
+        }
+        promise.resolve(map)
+    }
+
     // ---------- Per-setting delay timers ----------
 
     @ReactMethod
@@ -683,6 +852,360 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putBoolean("active", BlockerStore.active(ctx))
             putBoolean("shield", BlockerStore.shield(ctx))
         })
+    }
+
+    // ---------- Event Emitter support ----------
+
+    private fun sendEvent(eventName: String, params: WritableMap?) {
+        try {
+            if (rc.hasActiveReactInstance()) {
+                rc.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                    .emit(eventName, params)
+            }
+        } catch (_: Exception) {}
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for React Native EventEmitter
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for React Native EventEmitter
+    }
+
+    // ---------- In-App Updates ----------
+
+    @ReactMethod
+    fun checkCanInstallPackages(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                promise.resolve(rc.packageManager.canRequestPackageInstalls())
+            } else {
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            promise.resolve(true)
+        }
+    }
+
+    @ReactMethod
+    fun openInstallPermissionSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${rc.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                rc.startActivity(intent)
+                promise.resolve(true)
+            } else {
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            promise.reject("ERR_SETTINGS", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun getUpdateCheckTimestamp(promise: Promise) {
+        promise.resolve(BlockerStore.prefs(ctx).getLong("last_update_check_ts", 0L).toDouble())
+    }
+
+    @ReactMethod
+    fun setUpdateCheckTimestamp(timestamp: Double, promise: Promise) {
+        BlockerStore.prefs(ctx).edit().putLong("last_update_check_ts", timestamp.toLong()).apply()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun getLastNotifiedVersion(promise: Promise) {
+        promise.resolve(BlockerStore.prefs(ctx).getString("last_notified_version", null))
+    }
+
+    @ReactMethod
+    fun setLastNotifiedVersion(version: String, promise: Promise) {
+        BlockerStore.prefs(ctx).edit().putString("last_notified_version", version).apply()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun showUpdateNotification(title: String, message: String, version: String, promise: Promise) {
+        try {
+            val channelId = "blocker_updates"
+            val notificationManager = rc.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Blocker Updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications for new releases and updates"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            val launchIntent = rc.packageManager.getLaunchIntentForPackage(rc.packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("open_update", true)
+                putExtra("update_version", version)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                rc,
+                1002,
+                launchIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val builder = NotificationCompat.Builder(rc, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+            notificationManager.notify(1002, builder.build())
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("ERR_NOTIFICATION", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun downloadAndInstallApk(downloadUrl: String, version: String, promise: Promise) {
+        Executors.newSingleThreadExecutor().execute {
+            try {
+                // SECURITY: Sanitize version to prevent path traversal
+                val safeVersion = version.trim()
+                if (!safeVersion.matches(Regex("^[a-zA-Z0-9._-]+$"))) {
+                    promise.reject("INVALID_VERSION", "Invalid version string format")
+                    return@execute
+                }
+
+                // SECURITY: Enforce HTTPS scheme and trusted GitHub hosts
+                val initialUrl = URL(downloadUrl)
+                if (!initialUrl.protocol.equals("https", ignoreCase = true)) {
+                    promise.reject("INSECURE_URL", "Only HTTPS downloads are permitted")
+                    return@execute
+                }
+                val host = initialUrl.host.lowercase()
+                val isTrustedHost = host == "github.com" ||
+                                    host.endsWith(".github.com") ||
+                                    host.endsWith(".githubusercontent.com")
+                if (!isTrustedHost) {
+                    promise.reject("UNTRUSTED_HOST", "Updates can only be downloaded from official GitHub domains")
+                    return@execute
+                }
+
+                val updatesDir = File(rc.cacheDir, "updates")
+                if (!updatesDir.exists()) updatesDir.mkdirs()
+                val apkFile = File(updatesDir, "Blocker-$safeVersion.apk")
+
+                // SECURITY: Verify canonical path remains within the updates cache directory
+                if (!apkFile.canonicalFile.startsWith(updatesDir.canonicalFile)) {
+                    promise.reject("PATH_TRAVERSAL", "Invalid destination file path")
+                    return@execute
+                }
+                if (apkFile.exists()) apkFile.delete()
+
+                var conn = initialUrl.openConnection() as HttpURLConnection
+                conn.connectTimeout = 30000
+                conn.readTimeout = 30000
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("User-Agent", "Blocker-App-Android")
+                conn.connect()
+
+                var responseCode = conn.responseCode
+                var redirects = 0
+                while ((responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                        responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                        responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+                        responseCode == 307 || responseCode == 308) && redirects < 5) {
+                    val newUrl = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    if (newUrl.isNullOrEmpty()) break
+
+                    val nextUrl = URL(newUrl)
+                    // SECURITY: Ensure redirects remain strictly on HTTPS and trusted GitHub hosts
+                    if (!nextUrl.protocol.equals("https", ignoreCase = true)) {
+                        promise.reject("INSECURE_REDIRECT", "Redirected to non-HTTPS URL")
+                        return@execute
+                    }
+                    val redirectHost = nextUrl.host.lowercase()
+                    val isRedirectTrusted = redirectHost == "github.com" ||
+                                            redirectHost.endsWith(".github.com") ||
+                                            redirectHost.endsWith(".githubusercontent.com")
+                    if (!isRedirectTrusted) {
+                        promise.reject("UNTRUSTED_REDIRECT", "Redirected to untrusted host: $redirectHost")
+                        return@execute
+                    }
+
+                    conn = nextUrl.openConnection() as HttpURLConnection
+                    conn.connectTimeout = 30000
+                    conn.readTimeout = 30000
+                    conn.setRequestProperty("User-Agent", "Blocker-App-Android")
+                    conn.connect()
+                    responseCode = conn.responseCode
+                    redirects++
+                }
+
+                if (responseCode !in 200..299) {
+                    promise.reject("DOWNLOAD_FAILED", "Server returned HTTP $responseCode")
+                    return@execute
+                }
+
+                // SECURITY: Cap maximum allowed download size (200MB max) to prevent DOS/disk exhaustion
+                val maxAllowedBytes = 200L * 1024L * 1024L
+                val totalBytes = conn.contentLength.toLong()
+                if (totalBytes > maxAllowedBytes) {
+                    conn.disconnect()
+                    promise.reject("FILE_TOO_LARGE", "Update file exceeds size limit")
+                    return@execute
+                }
+
+                var downloadedBytes = 0L
+                val input = BufferedInputStream(conn.inputStream)
+                val output = FileOutputStream(apkFile)
+                val buffer = ByteArray(16384)
+                var bytesRead: Int
+                var lastProgressEmit = 0L
+
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    downloadedBytes += bytesRead
+                    if (downloadedBytes > maxAllowedBytes) {
+                        output.close()
+                        input.close()
+                        conn.disconnect()
+                        if (apkFile.exists()) apkFile.delete()
+                        promise.reject("FILE_TOO_LARGE", "Downloaded APK exceeded size limit")
+                        return@execute
+                    }
+                    output.write(buffer, 0, bytesRead)
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressEmit > 120 || downloadedBytes == totalBytes) {
+                        lastProgressEmit = now
+                        val progress = if (totalBytes > 0) (downloadedBytes.toDouble() / totalBytes) else 0.0
+                        val map = Arguments.createMap().apply {
+                            putDouble("progress", progress)
+                            putDouble("downloadedBytes", downloadedBytes.toDouble())
+                            putDouble("totalBytes", totalBytes.toDouble())
+                        }
+                        sendEvent("apkDownloadProgress", map)
+                    }
+                }
+                output.flush()
+                output.close()
+                input.close()
+                conn.disconnect()
+
+                // SECURITY: Verify download wasn't truncated or empty
+                if (totalBytes > 0 && downloadedBytes < totalBytes) {
+                    if (apkFile.exists()) apkFile.delete()
+                    promise.reject("INCOMPLETE_DOWNLOAD", "Download incomplete: received $downloadedBytes of $totalBytes bytes")
+                    return@execute
+                }
+                if (downloadedBytes <= 1024) {
+                    if (apkFile.exists()) apkFile.delete()
+                    promise.reject("INVALID_APK", "Downloaded file is too small to be a valid APK")
+                    return@execute
+                }
+
+                launchInstallIntent(apkFile)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed downloading APK")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun installDownloadedApk(version: String, promise: Promise) {
+        try {
+            val safeVersion = version.trim()
+            if (!safeVersion.matches(Regex("^[a-zA-Z0-9._-]+$"))) {
+                promise.reject("INVALID_VERSION", "Invalid version string format")
+                return
+            }
+            val updatesDir = File(rc.cacheDir, "updates")
+            val apkFile = File(updatesDir, "Blocker-$safeVersion.apk")
+            if (!apkFile.canonicalFile.startsWith(updatesDir.canonicalFile)) {
+                promise.reject("PATH_TRAVERSAL", "Invalid file path")
+                return
+            }
+            if (!apkFile.exists() || apkFile.length() <= 1024) {
+                promise.reject("ERR_NOT_FOUND", "Downloaded APK file not found or invalid")
+                return
+            }
+            launchInstallIntent(apkFile)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("ERR_INSTALL", e.message)
+        }
+    }
+
+    private fun launchInstallIntent(apkFile: File) {
+        val apkUri = FileProvider.getUriForFile(
+            rc,
+            "${rc.packageName}.fileprovider",
+            apkFile
+        )
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        rc.startActivity(installIntent)
+    }
+
+    @ReactMethod
+    fun cleanupOldUpdateApks(currentVersion: String, promise: Promise) {
+        io.execute {
+            try {
+                val count = deleteObsoleteApks(currentVersion)
+                promise.resolve(count)
+            } catch (e: Exception) {
+                promise.resolve(0)
+            }
+        }
+    }
+
+    private fun compareSemVer(v1: String, v2: String): Int {
+        val parse = { v: String ->
+            v.trim().removePrefix("v").removePrefix("V")
+                .split("-")[0].split("+")[0]
+                .split(".")
+                .map { it.toIntOrNull() ?: 0 }
+        }
+        val p1 = parse(v1)
+        val p2 = parse(v2)
+        val maxLen = maxOf(p1.size, p2.size)
+        for (i in 0 until maxLen) {
+            val num1 = p1.getOrElse(i) { 0 }
+            val num2 = p2.getOrElse(i) { 0 }
+            if (num1 > num2) return 1
+            if (num1 < num2) return -1
+        }
+        return 0
+    }
+
+    private fun deleteObsoleteApks(currentVersion: String): Int {
+        var deletedCount = 0
+        try {
+            val updatesDir = File(rc.cacheDir, "updates")
+            if (!updatesDir.exists() || !updatesDir.isDirectory) return 0
+            val files = updatesDir.listFiles() ?: return 0
+            for (file in files) {
+                if (file.isFile && file.name.startsWith("Blocker-") && file.name.endsWith(".apk")) {
+                    val apkVer = file.name.removePrefix("Blocker-").removeSuffix(".apk")
+                    if (currentVersion.isNotEmpty() && compareSemVer(currentVersion, apkVer) >= 0) {
+                        if (file.delete()) deletedCount++
+                    } else if (file.length() <= 1024L) {
+                        if (file.delete()) deletedCount++
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return deletedCount
     }
 }
 

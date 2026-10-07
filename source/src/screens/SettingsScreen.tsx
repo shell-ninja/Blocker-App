@@ -1,12 +1,15 @@
-import React from 'react';
-import { Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { Code, ExternalLink } from 'lucide-react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { ArrowDownToLine, Code, ExternalLink, RotateCw } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
+import { useAppUpdate } from '../hooks/useAppUpdate';
 import { setDelay, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
+import { compareSemVer, UpdateService } from '../services/UpdateService';
+import UpdateModal from './UpdateModal';
 
 const DAYS = [1, 2, 3, 7, 14, 30];
 const NAMES: Record<LockKey, string> = {
@@ -19,13 +22,37 @@ const NAMES: Record<LockKey, string> = {
   exempt_apps: 'Scan exemptions',
   focus: 'Focus mode',
   granular_focus: 'Distraction shield changes',
-  schedule: 'Daily schedules'
+  schedule: 'Daily schedules',
+  app_limits: 'App usage timers'
 };
 
 export default function SettingsScreen() {
   const t = useTheme();
   const p = useProtection();
   const now = useNow();
+  const update = useAppUpdate();
+  const [modalVisible, setModalVisible] = useState(false);
+  const isAhead = update.release ? compareSemVer(APP_VERSION, update.release.version) > 0 : false;
+
+  const checkUpdatesManual = async () => {
+    try {
+      const rel = await update.checkForUpdate(true);
+      const state = UpdateService.getState();
+      if (state.hasUpdate) {
+        setModalVisible(true);
+      } else {
+        const isAhead = rel ? compareSemVer(APP_VERSION, rel.version) > 0 : false;
+        showAlert(
+          'Blocker is Up to Date',
+          isAhead
+            ? `You are running v${APP_VERSION} (build ${BUILD_NUMBER}), which is ahead of GitHub's latest release (${rel?.tagName}).`
+            : `You are on the latest version (v${APP_VERSION}).`
+        );
+      }
+    } catch (e) {
+      showAlert('Check Failed', errMsg(e));
+    }
+  };
 
   const run = async (fn: () => Promise<string>, what: string) => {
     try {
@@ -97,7 +124,7 @@ export default function SettingsScreen() {
           <Sub>If the button doesn't open the right screen, go to Settings → Security → Device admin apps → Blocker.</Sub>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-          <Text style={{ color: t.text }}>USB debugging lock</Text>
+          <Text style={{ color: t.text }}>USB & Wireless debugging lock</Text>
           <Badge
             label={!p.shield ? 'Off' : p.perms?.secureSettings ? 'Instant lock' : 'On'}
             tone={p.shield ? 'ok' : 'idle'}
@@ -106,7 +133,7 @@ export default function SettingsScreen() {
         <Sub>
           {p.perms?.secureSettings
             ? 'USB and Wireless debugging are switched off the moment anything turns them on.'
-            : 'Developer options are blocked, and if USB debugging is ever found on, Blocker switches it off through Settings by itself. ' +
+            : 'Developer options are blocked, and if USB or Wireless debugging is ever found on, Blocker switches it off through Settings by itself. ' +
               'Optional instant lock (needs a computer once): adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS'}
         </Sub>
         <LockBar lockKey="shield" />
@@ -177,6 +204,103 @@ export default function SettingsScreen() {
         <LockBar lockKey="whitelist" />
         <LockBar lockKey="exempt_apps" />
       </Card>
+
+      <Card style={update.hasUpdate ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Title icon={Icons.download}>App Updates</Title>
+          <Badge
+            label={
+              update.hasUpdate
+                ? `v${update.release?.version} Available`
+                : isAhead
+                ? `v${APP_VERSION} (Dev)`
+                : `v${APP_VERSION} (Latest)`
+            }
+            tone={update.hasUpdate ? 'warn' : 'ok'}
+          />
+        </View>
+        <Sub>
+          Check GitHub releases for updates, changelogs, bug fixes, and install directly.
+        </Sub>
+
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Row
+            label="Installed Version"
+            right={<Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>v{APP_VERSION} (build {BUILD_NUMBER})</Text>}
+          />
+          {update.release && (
+            <Row
+              label="Latest on GitHub"
+              right={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text
+                    style={{
+                      color: update.hasUpdate ? t.accent : t.text,
+                      fontWeight: '700',
+                      fontSize: 13
+                    }}>
+                    {update.release.tagName}
+                  </Text>
+                  {update.hasUpdate ? (
+                    <Badge label="Update" tone="warn" icon={false} />
+                  ) : isAhead ? (
+                    <Badge label="Public" tone="idle" icon={false} />
+                  ) : (
+                    <Badge label="Up to date" tone="ok" icon={false} />
+                  )}
+                </View>
+              }
+            />
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            {update.hasUpdate ? (
+              <>
+                <Btn
+                  style={{ flex: 1 }}
+                  label="View & Install"
+                  kind="primary"
+                  icon={Icons.download}
+                  onPress={() => setModalVisible(true)}
+                />
+                <Btn
+                  style={{ flex: 1 }}
+                  label={update.checking ? 'Checking...' : 'Check Again'}
+                  kind="ghost"
+                  icon={RotateCw}
+                  disabled={update.checking}
+                  onPress={checkUpdatesManual}
+                />
+              </>
+            ) : (
+              <>
+                <Btn
+                  style={{ flex: 1 }}
+                  label={update.checking ? 'Checking...' : 'Check Updates'}
+                  kind="primary"
+                  icon={update.checking ? RotateCw : Icons.clock}
+                  disabled={update.checking}
+                  onPress={checkUpdatesManual}
+                />
+                {update.release && (
+                  <Btn
+                    style={{ flex: 1 }}
+                    label="Release Notes"
+                    kind="ghost"
+                    icon={Icons.list}
+                    onPress={() => setModalVisible(true)}
+                  />
+                )}
+              </>
+            )}
+          </View>
+        </View>
+      </Card>
+
+      <UpdateModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+      />
 
       <View style={{ alignItems: 'center', marginTop: 14, marginBottom: 28, gap: 12 }}>
         <Pressable

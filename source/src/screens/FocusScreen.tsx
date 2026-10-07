@@ -313,7 +313,7 @@ function GranularFocusCard() {
           onValueChange={v => onToggle('block_yt_shorts', v)}
         />
         <AnimatedToggleRow
-          icon={Icons.sparkles}
+          icon={Icons.film}
           label="Block Instagram Reels"
           sub="Instantly exit Reels tab & player back to main feed"
           value={gf.block_insta_reels}

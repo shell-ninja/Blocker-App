@@ -31,7 +31,7 @@ const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: strin
   {
     kind: 'overlay',
     title: 'Display over other apps',
-    icon: Icons.sparkles,
+    icon: Icons.layers,
     why: 'Shows the blocking screen on top of blocked content.',
     how: 'Allow display over other apps for Blocker.'
   }

@@ -25,7 +25,6 @@ if [ -z "$APK" ]; then
   BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
 
   # Determine target mode:
-  # If user runs 'release' without --final, install the release-debug test version first
   TARGET_MODE="$MODE"
   if [ "$MODE" = "release" ] && [ "$FLAG" != "--final" ] && [ "$FLAG" != "-f" ]; then
     TARGET_MODE="release-debug"

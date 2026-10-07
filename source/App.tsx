@@ -3,6 +3,7 @@ import { Animated, AppState, Platform, Pressable, StatusBar, Text, UIManager, Vi
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
+import { UpdateService } from './src/services/UpdateService';
 import { AlertHost, AmbientBackground, Header, Icons, useTheme } from './src/ui';
 import HomeScreen from './src/screens/HomeScreen';
 import AppBlockerScreen from './src/screens/AppBlockerScreen';
@@ -49,6 +50,7 @@ export default function App() {
   useEffect(() => {
     if (!isSupported) return;
     init().catch(() => {});
+    UpdateService.checkOnLaunch().catch(() => {});
     const i = setInterval(() => refresh().catch(() => {}), 5000);
     const sub = AppState.addEventListener('change', s => s === 'active' && refresh().catch(() => {}));
     return () => {

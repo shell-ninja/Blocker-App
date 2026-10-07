@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useSyncExternalStore } from 'react';
-import { Animated, Easing, Image, LayoutAnimation, Modal, Pressable, StyleProp, StyleSheet, Switch, Text, View, ViewStyle, useColorScheme } from 'react-native';
+import { Animated, Easing, Image, LayoutAnimation, Modal, Pressable, StyleProp, StyleSheet, Switch, Text, TextStyle, View, ViewStyle, useColorScheme } from 'react-native';
 import {
   AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, Circle, Clock, Loader2, LucideIcon, Plus, ShieldOff, XCircle
 } from 'lucide-react-native';
@@ -45,7 +45,7 @@ export function AppBackground() {
           {
             width: '100%',
             height: '100%',
-            opacity: 0.16,
+            opacity: 0.30,
           },
         ]}
         resizeMode="cover"
@@ -203,8 +203,16 @@ export function Sub({ children }: { children: React.ReactNode }) {
   return <Text style={{ color: t.sub, fontSize: 13, marginTop: 2, lineHeight: 18 }}>{children}</Text>;
 }
 
-export function Btn({ label, onPress, kind = 'primary', disabled, icon: Icon }: {
-  label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; disabled?: boolean; icon?: LucideIcon;
+export function Btn({
+  label, onPress, kind = 'primary', disabled, icon: Icon, style, textStyle
+}: {
+  label: string;
+  onPress: () => void;
+  kind?: 'primary' | 'ghost' | 'danger';
+  disabled?: boolean;
+  icon?: LucideIcon;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
 }) {
   const t = useTheme();
   const bg = kind === 'primary' ? t.accent : kind === 'danger' ? t.danger : t.glass;
@@ -213,14 +221,30 @@ export function Btn({ label, onPress, kind = 'primary', disabled, icon: Icon }: 
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [{
-        backgroundColor: bg, opacity: disabled ? 0.4 : pressed ? 0.8 : 1, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 16,
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-        borderWidth: kind === 'ghost' ? 1 : 0, borderColor: t.border,
-        transform: [{ scale: pressed ? 0.98 : 1 }]
-      }]}>
-      {Icon && <Icon size={16} color={fg} strokeWidth={2.5} />}
-      <Text style={{ color: fg, fontWeight: '700' }}>{label}</Text>
+      style={({ pressed }) => [
+        {
+          backgroundColor: bg,
+          opacity: disabled ? 0.4 : pressed ? 0.8 : 1,
+          borderRadius: 14,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          borderWidth: kind === 'ghost' ? 1 : 0,
+          borderColor: t.border,
+          transform: [{ scale: pressed ? 0.98 : 1 }]
+        },
+        style
+      ]}>
+      {Icon && <Icon size={15} color={fg} strokeWidth={2.4} />}
+      <Text
+        style={[{ color: fg, fontWeight: '700', fontSize: 13 }, textStyle]}
+        numberOfLines={1}
+        ellipsizeMode="tail">
+        {label}
+      </Text>
     </Pressable>
   );
 }
