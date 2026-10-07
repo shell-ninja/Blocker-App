@@ -354,6 +354,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (isInstallerPkg(nPkg) || isInstallOrUpdateDialog(root = node)) {
                 continue // Do not cancel installer buttons
             }
+            // Double check: if node contains Install or Update or Staging, NEVER cancel!
+            val nodeText = StringBuilder()
+            collectText(node, nodeText, 0, intArrayOf(60))
+            val nTxt = nodeText.toString().lowercase()
+            if ("uninstall" !in nTxt && ("install" in nTxt || "update" in nTxt || "staging" in nTxt)) {
+                continue
+            }
             val cancelBtn = node.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("cancel").firstOrNull()
@@ -580,8 +587,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app.
-        val isOurApp = "blocker" in t || packageName.lowercase() in t
+        // Blocker-specific: ignore .apk files (e.g. file manager / downloads)
+        val isOurApp = ("blocker" in t || packageName.lowercase() in t) && !t.contains(".apk")
 
         // ── Uninstall attempt in settings / package manager ──
         // Also fires without "blocker" text present, as long as we recently saw Blocker-specific
@@ -597,9 +604,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app.
-        // This covers App Info, Storage, Force Stop, Uninstall — all in one sweep.
-        if (isOurApp) {
+        // Blocker-specific: only kick if screen actually has App Info danger actions
+        // (Force Stop, Clear data, Storage, Uninstall), NOT merely file lists or permission granting.
+        val hasAppInfoDanger = APP_INFO_ACTION_TEXTS.any { it.lowercase() in t } ||
+            "force stop" in t || "clear" in t || "delete" in t || "storage" in t
+        if (isOurApp && hasAppInfoDanger) {
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             autoCancelDialog(root)
             pollKick("Blocker app settings and storage are locked while Protection Mode is active.")
@@ -730,7 +739,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             lower.contains("packagemanager") ||
             lower.contains("installer") ||
             lower == "com.google.android.permissioncontroller" ||
-            lower == "com.android.permissioncontroller"
+            lower == "com.android.permissioncontroller" ||
+            lower == "com.vivo.abe" ||
+            lower == "com.huawei.appmarket"
     }
 
     private fun isInstallOrUpdateDialog(ev: AccessibilityEvent? = null, root: AccessibilityNodeInfo? = null): Boolean {
@@ -745,8 +756,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val text = sb.toString().lowercase()
 
-        // If it explicitly asks to uninstall, it is NOT an install/update dialog
-        if ("uninstall" in text) return false
+        // If it explicitly asks to uninstall or deactivate, it is NOT an install/update dialog
+        if ("uninstall" in text || "deactivate" in text || "do you want to uninstall" in text) return false
 
         // Check text hints
         val hasInstallText = "do you want to update" in text ||
@@ -756,17 +767,24 @@ class BlockerAccessibilityService : AccessibilityService() {
             "update this application" in text ||
             "install this application" in text ||
             "staging app" in text ||
+            "staging" in text ||
             "installing…" in text ||
             "installing..." in text ||
             "app installed" in text ||
             "package installer" in text ||
+            "packageinstaller" in text ||
             "scanning for risks" in text ||
-            "install anyway" in text
+            "install anyway" in text ||
+            "install unknown" in text ||
+            "unknown sources" in text ||
+            "allow from this source" in text ||
+            (("install" in text || "update" in text) && ("cancel" in text || "done" in text || "open" in text))
 
         if (hasInstallText) return true
 
         val isInstallClass = evCls.contains("install") || rootCls.contains("install") ||
-            evCls.contains("packageinstaller") || rootCls.contains("packageinstaller")
+            evCls.contains("packageinstaller") || rootCls.contains("packageinstaller") ||
+            evCls.contains("staging") || rootCls.contains("staging")
         if (isInstallClass && ("update" in text || "install" in text || "cancel" in text)) return true
 
         return false
@@ -774,8 +792,14 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isSettingsPkg(pkg: String): Boolean {
         if (isInstallerPkg(pkg)) return false
-        if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
         val lower = pkg.lowercase()
+        // Never treat file managers, document pickers, or downloaders as settings
+        if (lower.contains("file") || lower.contains("explorer") || lower.contains("document") ||
+            lower.contains("download") || lower.contains("archive") || lower.contains("commander") ||
+            lower.contains("totalcmd") || lower.contains("zarchiver") || lower.contains("nbu.files")) {
+            return false
+        }
+        if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
         return lower.contains("settings") ||
             lower.contains("safecenter") ||
             lower.contains("securitycenter") ||
@@ -934,6 +958,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 evCls.contains("InstalledApp", ignoreCase = true) || rootCls.contains("InstalledApp", ignoreCase = true)
 
             if (isAppInfoTitle || isAppInfoCls) {
+                if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
                 // If title itself is Blocker, lock out immediately with zero delay
                 if (titleMatchesBlocker) {
                     viewingBlockerSettingsUntil = now + 30_000L
@@ -1283,8 +1308,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isOurApp = "blocker" in t || packageName.lowercase() in t
         val now = System.currentTimeMillis()
 
-        // If this is PackageInstaller, strictly distinguish between Uninstall vs Update/Install:
-        if (isInstallerPkg(pkg) || isInstallerPkg(rootPkg)) {
+        // If this is PackageInstaller or an install/update dialog, strictly distinguish between Uninstall vs Update/Install:
+        if (isInstallerPkg(pkg) || isInstallerPkg(rootPkg) || isInstallOrUpdateDialog(ev, root)) {
             val evCls = ev.className?.toString().orEmpty().lowercase()
             val isUninstall = "do you want to uninstall" in t ||
                 ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t)) ||
@@ -1459,7 +1484,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasRiskAction = APP_RISK_TERMS.any { it in fullText } || isStorageRisk
 
         // If currently viewing Blocker's settings or app details
-        if (isOurApp && (hasRiskAction || "storage" in fullText || "app info" in fullText || "installed" in fullText || "version" in fullText)) {
+        if (isOurApp && !fullText.contains(".apk") && (hasRiskAction || "storage" in fullText || "app info" in fullText || "installed" in fullText || "version" in fullText)) {
+            if (isInstallOrUpdateDialog(ev, root)) return
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
             return
@@ -1544,6 +1570,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     /** Accessibility-callback side: instant kick if title is Blocker, otherwise arm the scanner. */
     private fun guardBlockerAppInfo(ev: AccessibilityEvent, pkg: String) {
         if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return // PackageInstaller is NOT App Info; installation/update dialogs must be allowed!
+        // App Info ONLY ever exists inside Settings packages! Never intercept file managers, browsers, or other apps:
+        if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             guardBlockerRowClick(ev, pkg)
             return
@@ -1556,7 +1584,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val titleMatches = titleIsAppName(ev)
         val announced = stateChange && (looksLikeAppInfoClass(ev.className) || titleMatches)
         if (announced) {
-            appInfoWatchPkg = pkg                      // e.g. an OEM hosting App Info inside a non-Settings package
+            appInfoWatchPkg = pkg
             appInfoWatchUntil = nowUp + 5_000L
         }
         val settingsLike = isSettingsPkg(pkg) && pkg !in neverBlock
@@ -1575,8 +1603,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 kickFromAppInfo()
                 return
             }
-            // If the window opening in Settings is Blocker App Info by title, kick immediately!
+            // If the window opening in Settings is Blocker App Info by title, verify it is not an install dialog before kicking
             if (titleMatches) {
+                if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
                 kickFromAppInfo()
                 return
             }
@@ -1597,11 +1626,20 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun guardBlockerRowClick(ev: AccessibilityEvent, pkg: String) {
         if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (!shieldEngaged()) return
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
         var hit = false
-        for (t in ev.text) if (t != null && isAppNameText(t.toString(), name, ver)) { hit = true; break }
-        if (!hit) hit = ev.contentDescription?.toString()?.let { isAppNameText(it, name, ver) } == true
+        for (t in ev.text) {
+            val s = t?.toString().orEmpty()
+            if (s.endsWith(".apk", ignoreCase = true) || s.contains(".apk", ignoreCase = true)) return
+            if (isAppNameText(s, name, ver)) { hit = true; break }
+        }
+        if (!hit) {
+            val cd = ev.contentDescription?.toString().orEmpty()
+            if (cd.endsWith(".apk", ignoreCase = true) || cd.contains(".apk", ignoreCase = true)) return
+            hit = isAppNameText(cd, name, ver)
+        }
         if (!hit) {
             val src = ev.source
             if (src != null) {
@@ -1609,9 +1647,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val nodes = src.findAccessibilityNodeInfosByText(name)
                 if (!nodes.isNullOrEmpty()) {
                     for (n in nodes) {
-                        val t = n.text?.toString()
-                        val d = n.contentDescription?.toString()
-                        if ((t != null && isAppNameText(t, name, ver)) || (d != null && isAppNameText(d, name, ver))) {
+                        val nt = n.text?.toString().orEmpty()
+                        val nd = n.contentDescription?.toString().orEmpty()
+                        if (nt.contains(".apk", ignoreCase = true) || nd.contains(".apk", ignoreCase = true)) {
+                            nodes.forEach { it.recycle() }
+                            runCatching { src.recycle() }
+                            return
+                        }
+                        if ((nt.isNotEmpty() && isAppNameText(nt, name, ver)) || (nd.isNotEmpty() && isAppNameText(nd, name, ver))) {
                             hit = true
                         }
                         n.recycle()
@@ -1772,8 +1815,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     /** Exact name, or name followed by newline/version/size (e.g. "Blocker\n56.56 MB"). Never matches "Ad Blocker". */
     private fun isAppNameText(text: String, name: String, ver: String): Boolean {
         val t = text.trim()
+        if (t.endsWith(".apk", ignoreCase = true) || t.contains(".apk", ignoreCase = true)) return false
         if (t.equals(name, ignoreCase = true)) return true
         val firstLine = t.lines().firstOrNull()?.trim().orEmpty()
+        if (firstLine.endsWith(".apk", ignoreCase = true) || firstLine.contains(".apk", ignoreCase = true)) return false
         if (firstLine.equals(name, ignoreCase = true)) return true
         if (t.length > name.length && t.startsWith(name, ignoreCase = true)) {
             val sep = t[name.length]
