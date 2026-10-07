@@ -64,6 +64,13 @@ write(xml_dir / "device_admin_policies.xml", """<?xml version="1.0" encoding="ut
     </uses-policies>
 </device-admin>
 """)
+write(xml_dir / "file_paths.xml", """<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="apk_cache" path="."/>
+    <external-cache-path name="apk_external_cache" path="."/>
+    <files-path name="apk_files" path="."/>
+</paths>
+""")
 strings = main / "res" / "values" / "strings.xml"
 s = read(strings)
 if "a11y_desc" not in s:
@@ -167,13 +174,16 @@ if "BlockerAccessibilityService" not in t:
 # 4b. Permissions added after the first release. Kept apart from the block above (which only runs once per
 # manifest) so re-running this script upgrades a manifest that was already patched.
 #  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
+#  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
 #        adb shell pm grant <package> android.permission.WRITE_SECURE_SETTINGS
 #  - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets Settings > Background activity open the "allow background" dialog.
+#  - REQUEST_INSTALL_PACKAGES: lets the app trigger in-app updates to download and install new versions.
 t = read(mf)
 extra = []
 for perm, attrs in (
     ("android.permission.WRITE_SECURE_SETTINGS", ' tools:ignore="ProtectedPermissions"'),
     ("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", ""),
+    ("android.permission.REQUEST_INSTALL_PACKAGES", ""),
 ):
     if perm not in t:
         extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
@@ -182,6 +192,22 @@ if extra:
         t = t.replace('xmlns:android="http://schemas.android.com/apk/res/android"',
                       'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
     t = t.replace("<application", "\n    ".join(extra) + "\n    <application", 1)
+    write(mf, t)
+
+# FileProvider for in-app APK installer
+t = read(mf)
+if "androidx.core.content.FileProvider" not in t:
+    provider_xml = """    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+    </provider>
+    """
+    t = t.replace("</application>", provider_xml + "</application>", 1)
     write(mf, t)
 
 # 5. app/build.gradle

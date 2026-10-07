@@ -1,6 +1,9 @@
 package com.blocker
 
 import android.app.AppOpsManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.app.admin.DevicePolicyManager
 import android.app.usage.UsageStatsManager
@@ -19,12 +22,20 @@ import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
+import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.uimanager.ViewManager
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -831,6 +842,229 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putBoolean("active", BlockerStore.active(ctx))
             putBoolean("shield", BlockerStore.shield(ctx))
         })
+    }
+
+    // ---------- Event Emitter support ----------
+
+    private fun sendEvent(eventName: String, params: WritableMap?) {
+        try {
+            if (rc.hasActiveReactInstance()) {
+                rc.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                    .emit(eventName, params)
+            }
+        } catch (_: Exception) {}
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for React Native EventEmitter
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for React Native EventEmitter
+    }
+
+    // ---------- In-App Updates ----------
+
+    @ReactMethod
+    fun checkCanInstallPackages(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                promise.resolve(rc.packageManager.canRequestPackageInstalls())
+            } else {
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            promise.resolve(true)
+        }
+    }
+
+    @ReactMethod
+    fun openInstallPermissionSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${rc.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                rc.startActivity(intent)
+                promise.resolve(true)
+            } else {
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            promise.reject("ERR_SETTINGS", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun getUpdateCheckTimestamp(promise: Promise) {
+        promise.resolve(BlockerStore.prefs(ctx).getLong("last_update_check_ts", 0L).toDouble())
+    }
+
+    @ReactMethod
+    fun setUpdateCheckTimestamp(timestamp: Double, promise: Promise) {
+        BlockerStore.prefs(ctx).edit().putLong("last_update_check_ts", timestamp.toLong()).apply()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun getLastNotifiedVersion(promise: Promise) {
+        promise.resolve(BlockerStore.prefs(ctx).getString("last_notified_version", null))
+    }
+
+    @ReactMethod
+    fun setLastNotifiedVersion(version: String, promise: Promise) {
+        BlockerStore.prefs(ctx).edit().putString("last_notified_version", version).apply()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun showUpdateNotification(title: String, message: String, version: String, promise: Promise) {
+        try {
+            val channelId = "blocker_updates"
+            val notificationManager = rc.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Blocker Updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications for new releases and updates"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            val launchIntent = rc.packageManager.getLaunchIntentForPackage(rc.packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("open_update", true)
+                putExtra("update_version", version)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                rc,
+                1002,
+                launchIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val builder = NotificationCompat.Builder(rc, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+            notificationManager.notify(1002, builder.build())
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("ERR_NOTIFICATION", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun downloadAndInstallApk(downloadUrl: String, version: String, promise: Promise) {
+        Executors.newSingleThreadExecutor().execute {
+            try {
+                val updatesDir = File(rc.cacheDir, "updates")
+                if (!updatesDir.exists()) updatesDir.mkdirs()
+                val apkFile = File(updatesDir, "Blocker-$version.apk")
+                if (apkFile.exists()) apkFile.delete()
+
+                val url = URL(downloadUrl)
+                var conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 30000
+                conn.readTimeout = 30000
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("User-Agent", "Blocker-App-Android")
+                conn.connect()
+
+                var responseCode = conn.responseCode
+                var redirects = 0
+                while ((responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                        responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                        responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+                        responseCode == 307 || responseCode == 308) && redirects < 5) {
+                    val newUrl = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    val nextUrl = URL(newUrl)
+                    conn = nextUrl.openConnection() as HttpURLConnection
+                    conn.connectTimeout = 30000
+                    conn.readTimeout = 30000
+                    conn.setRequestProperty("User-Agent", "Blocker-App-Android")
+                    conn.connect()
+                    responseCode = conn.responseCode
+                    redirects++
+                }
+
+                if (responseCode !in 200..299) {
+                    promise.reject("DOWNLOAD_FAILED", "Server returned HTTP $responseCode")
+                    return@execute
+                }
+
+                val totalBytes = conn.contentLength.toLong()
+                var downloadedBytes = 0L
+
+                val input = BufferedInputStream(conn.inputStream)
+                val output = FileOutputStream(apkFile)
+                val buffer = ByteArray(16384)
+                var bytesRead: Int
+                var lastProgressEmit = 0L
+
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    downloadedBytes += bytesRead
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressEmit > 120 || downloadedBytes == totalBytes) {
+                        lastProgressEmit = now
+                        val progress = if (totalBytes > 0) (downloadedBytes.toDouble() / totalBytes) else 0.0
+                        val map = Arguments.createMap().apply {
+                            putDouble("progress", progress)
+                            putDouble("downloadedBytes", downloadedBytes.toDouble())
+                            putDouble("totalBytes", totalBytes.toDouble())
+                        }
+                        sendEvent("apkDownloadProgress", map)
+                    }
+                }
+                output.flush()
+                output.close()
+                input.close()
+                conn.disconnect()
+
+                launchInstallIntent(apkFile)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("DOWNLOAD_ERROR", e.message ?: "Failed downloading APK")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun installDownloadedApk(version: String, promise: Promise) {
+        try {
+            val apkFile = File(File(rc.cacheDir, "updates"), "Blocker-$version.apk")
+            if (!apkFile.exists()) {
+                promise.reject("ERR_NOT_FOUND", "Downloaded APK file not found")
+                return
+            }
+            launchInstallIntent(apkFile)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("ERR_INSTALL", e.message)
+        }
+    }
+
+    private fun launchInstallIntent(apkFile: File) {
+        val apkUri = FileProvider.getUriForFile(
+            rc,
+            "${rc.packageName}.fileprovider",
+            apkFile
+        )
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        rc.startActivity(installIntent)
     }
 }
 

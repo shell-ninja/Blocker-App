@@ -4,6 +4,7 @@ import { Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
 import { refresh, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
+import UpdateBanner from './UpdateBanner';
 
 export default function HomeScreen() {
   const t = useTheme();
@@ -48,6 +49,9 @@ export default function HomeScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
+      {/* GitHub Releases Update Banner */}
+      <UpdateBanner />
+
       {/* Recommended Setup Guide - only shown when recommended protections need attention */}
       {!allRecommendedActive && (
         <Card style={{ borderColor: t.accent, borderWidth: 1.5 }}>

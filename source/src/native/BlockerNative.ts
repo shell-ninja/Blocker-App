@@ -101,6 +101,15 @@ interface BlockerNativeSpec {
   getAppUsageLimits(): Promise<Record<string, number>>;
   setAppUsageLimit(pkg: string, limitMinutes: number): Promise<boolean>;
   getAppUsageToday(): Promise<Record<string, number>>;
+  checkCanInstallPackages(): Promise<boolean>;
+  openInstallPermissionSettings(): Promise<boolean>;
+  getUpdateCheckTimestamp(): Promise<number>;
+  setUpdateCheckTimestamp(timestamp: number): Promise<boolean>;
+  getLastNotifiedVersion(): Promise<string | null>;
+  setLastNotifiedVersion(version: string): Promise<boolean>;
+  showUpdateNotification(title: string, message: string, version: string): Promise<boolean>;
+  downloadAndInstallApk(downloadUrl: string, version: string): Promise<boolean>;
+  installDownloadedApk(version: string): Promise<boolean>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;

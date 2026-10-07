@@ -1,12 +1,14 @@
-import React from 'react';
-import { Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { Code, ExternalLink } from 'lucide-react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { ArrowDownToLine, Code, ExternalLink, RotateCw, Sparkles } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
+import { useAppUpdate } from '../hooks/useAppUpdate';
 import { setDelay, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
+import UpdateModal from './UpdateModal';
 
 const DAYS = [1, 2, 3, 7, 14, 30];
 const NAMES: Record<LockKey, string> = {
@@ -19,13 +21,29 @@ const NAMES: Record<LockKey, string> = {
   exempt_apps: 'Scan exemptions',
   focus: 'Focus mode',
   granular_focus: 'Distraction shield changes',
-  schedule: 'Daily schedules'
+  schedule: 'Daily schedules',
+  app_limits: 'App usage timers'
 };
 
 export default function SettingsScreen() {
   const t = useTheme();
   const p = useProtection();
   const now = useNow();
+  const update = useAppUpdate();
+  const [modalVisible, setModalVisible] = useState(false);
+
+  const checkUpdatesManual = async () => {
+    try {
+      const rel = await update.checkForUpdate(true);
+      if (rel) {
+        setModalVisible(true);
+      } else {
+        showAlert('Blocker is Up to Date', `You are on the latest version (v${APP_VERSION}).`);
+      }
+    } catch (e) {
+      showAlert('Check Failed', errMsg(e));
+    }
+  };
 
   const run = async (fn: () => Promise<string>, what: string) => {
     try {
@@ -177,6 +195,63 @@ export default function SettingsScreen() {
         <LockBar lockKey="whitelist" />
         <LockBar lockKey="exempt_apps" />
       </Card>
+
+      <Card style={update.hasUpdate ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Title icon={Icons.sparkles}>App Updates</Title>
+          <Badge
+            label={update.hasUpdate ? `v${update.release?.version} Available` : `v${APP_VERSION} (Latest)`}
+            tone={update.hasUpdate ? 'warn' : 'ok'}
+          />
+        </View>
+        <Sub>
+          Check GitHub releases for updates, changelogs, bug fixes, and install directly.
+        </Sub>
+
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Row
+            label="Installed Version"
+            right={<Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>v{APP_VERSION} (build {BUILD_NUMBER})</Text>}
+          />
+          {update.release && (
+            <Row
+              label="Latest on GitHub"
+              right={
+                <Text style={{ color: update.hasUpdate ? t.accent : t.sub, fontWeight: '700', fontSize: 13 }}>
+                  {update.release.tagName}
+                </Text>
+              }
+            />
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+            <Btn
+              label={update.checking ? 'Checking...' : 'Check for Updates'}
+              icon={Icons.clock}
+              onPress={checkUpdatesManual}
+            />
+            {update.hasUpdate ? (
+              <Btn
+                label="View & Install"
+                kind="primary"
+                icon={Icons.sparkles}
+                onPress={() => setModalVisible(true)}
+              />
+            ) : update.release ? (
+              <Btn
+                label="Release Notes"
+                icon={Icons.list}
+                onPress={() => setModalVisible(true)}
+              />
+            ) : null}
+          </View>
+        </View>
+      </Card>
+
+      <UpdateModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+      />
 
       <View style={{ alignItems: 'center', marginTop: 14, marginBottom: 28, gap: 12 }}>
         <Pressable
