@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { ArrowDownToLine, Code, ExternalLink, RotateCw, Sparkles } from 'lucide-react-native';
+import { ArrowDownToLine, Code, ExternalLink, RotateCw } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
@@ -207,7 +207,7 @@ export default function SettingsScreen() {
 
       <Card style={update.hasUpdate ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Title icon={Icons.sparkles}>App Updates</Title>
+          <Title icon={Icons.download}>App Updates</Title>
           <Badge
             label={
               update.hasUpdate
@@ -260,7 +260,7 @@ export default function SettingsScreen() {
                   style={{ flex: 1 }}
                   label="View & Install"
                   kind="primary"
-                  icon={Icons.sparkles}
+                  icon={Icons.download}
                   onPress={() => setModalVisible(true)}
                 />
                 <Btn

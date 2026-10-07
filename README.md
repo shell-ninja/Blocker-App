@@ -36,30 +36,54 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 <table>
   <tr>
-    <td align="center" width="20%">
-      <img src="ScreenShots/ss1.jpg" width="160" alt="Home screen" /><br/>
+    <td align="center" width="33%">
+      <img src="ScreenShots/home-page.jpg" width="220" alt="Home page" /><br/>
       <b>Home</b><br/>
-      <sub>Live stats — sites redirected, apps blocked, screen closes, and bypass attempts for the day. System health shows all required permissions at a glance.</sub>
+      <sub>Live blocking stats, master toggle, and permission health check.</sub>
     </td>
-    <td align="center" width="20%">
-      <img src="ScreenShots/ss2.jpg" width="160" alt="Focus mode" /><br/>
-      <b>Focus mode</b><br/>
-      <sub>Start a one-off focus session with a preset or custom duration. Daily schedules let focus mode turn on automatically at the same time every day.</sub>
+    <td align="center" width="33%">
+      <img src="ScreenShots/focus-page.jpg" width="220" alt="Focus mode" /><br/>
+      <b>Focus Mode</b><br/>
+      <sub>Instant distraction-free sessions with preset or custom timers.</sub>
     </td>
-    <td align="center" width="20%">
-      <img src="ScreenShots/ss3.jpg" width="160" alt="Apps screen" /><br/>
-      <b>Apps</b><br/>
-      <sub>Block any installed app outright. The eye icon exempts a specific app from on-screen keyword scanning without lifting its other blocks.</sub>
+    <td align="center" width="33%">
+      <img src="ScreenShots/set-daily-schedule.jpg" width="220" alt="Daily schedules" /><br/>
+      <b>Daily Schedules</b><br/>
+      <sub>Automate recurring focus blocks with precise time pickers.</sub>
     </td>
-    <td align="center" width="20%">
-      <img src="ScreenShots/ss4.jpg" width="160" alt="Web & keywords" /><br/>
-      <b>Web &amp; keywords</b><br/>
-      <sub>Manage the built-in block list, add your own domains or keywords, and whitelist phrases that should never trigger blocking even if they contain a blocked word.</sub>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="ScreenShots/block-shots-reels.jpg" width="220" alt="Distraction shields" /><br/>
+      <b>Distraction Shields</b><br/>
+      <sub>Exit YouTube Shorts, Instagram Reels, and Explore feeds automatically.</sub>
     </td>
-    <td align="center" width="20%">
-      <img src="ScreenShots/ss5.jpg" width="160" alt="Settings" /><br/>
-      <b>Settings</b><br/>
-      <sub>Master protection switch, uninstall shield, in-app updater, and the delay timer — how long any weakening change must wait before it takes effect (24 h to 30 days).</sub>
+    <td align="center" width="33%">
+      <img src="ScreenShots/block-app-page.jpg" width="220" alt="App blocker" /><br/>
+      <b>Apps &amp; Scans</b><br/>
+      <sub>Block installed apps outright or exempt safe apps from screen scanning.</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="ScreenShots/set-usage-limit.jpg" width="220" alt="Usage limit" /><br/>
+      <b>Usage Limits</b><br/>
+      <sub>Enforce maximum daily screen time per app protected by delay locks.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="ScreenShots/check-blocked-page.jpg" width="220" alt="Web and keywords" /><br/>
+      <b>Web &amp; Keywords</b><br/>
+      <sub>Adult domain database, custom domain blocklist, and keyword whitelisting.</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="ScreenShots/settings-page.jpg" width="220" alt="Settings page" /><br/>
+      <b>Settings &amp; Shield</b><br/>
+      <sub>Uninstall shield, wireless debugging locks, and 1–30 day delay timers.</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="ScreenShots/update-app-feature.jpg" width="220" alt="App update feature" /><br/>
+      <b>In-App Updater</b><br/>
+      <sub>Check GitHub releases, view changelogs, and install APK updates directly.</sub>
     </td>
   </tr>
 </table>

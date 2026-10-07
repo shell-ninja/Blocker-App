@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ArrowRight, Sparkles, X } from 'lucide-react-native';
+import { ArrowDownToLine, ArrowRight, X } from 'lucide-react-native';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { useTheme } from '../ui';
 import UpdateModal from './UpdateModal';
@@ -35,7 +35,7 @@ export default function UpdateBanner() {
           },
         ]}>
         <View style={[styles.iconWrap, { backgroundColor: t.accentSoft, borderColor: t.accent }]}>
-          <Sparkles size={16} color={t.accent} strokeWidth={2.4} />
+          <ArrowDownToLine size={16} color={t.accent} strokeWidth={2.4} />
         </View>
 
         <View style={{ flex: 1, paddingRight: 4 }}>

@@ -1,13 +1,13 @@
 import {
-  Ban, ChevronRight, Clock, Eye, EyeOff, Globe, Grid2x2, Home, KeyRound, ListChecks, Lock, LucideIcon, Play,
-  Plus, Search, Settings as SettingsIcon, Shield, ShieldAlert, ShieldCheck, ShieldOff, Sparkles,
-  Target, Trash2, Unlock
+  ArrowDownToLine, Ban, ChevronRight, Clock, Compass, Eye, EyeOff, Film, Globe, Grid2x2, Home, KeyRound, Layers,
+  ListChecks, Lock, LucideIcon, Play, Plus, Search, Settings as SettingsIcon, Shield, ShieldAlert,
+  ShieldCheck, ShieldOff, Target, Trash2, Unlock
 } from 'lucide-react-native';
 
 export type IconName =
   | 'home' | 'apps' | 'web' | 'focus' | 'settings' | 'shield' | 'shieldOn' | 'shieldOff'
   | 'lock' | 'unlock' | 'clock' | 'eye' | 'eyeOff' | 'plus' | 'trash' | 'search' | 'ban'
-  | 'sparkles' | 'play' | 'key' | 'list' | 'chevronRight';
+  | 'download' | 'play' | 'key' | 'list' | 'chevronRight' | 'layers' | 'film' | 'guide';
 
 export const Icons: Record<IconName, LucideIcon> = {
   home: Home,
@@ -27,9 +27,12 @@ export const Icons: Record<IconName, LucideIcon> = {
   trash: Trash2,
   search: Search,
   ban: Ban,
-  sparkles: Sparkles,
+  download: ArrowDownToLine,
   play: Play,
   key: KeyRound,
   list: ListChecks,
-  chevronRight: ChevronRight
+  chevronRight: ChevronRight,
+  layers: Layers,
+  film: Film,
+  guide: Compass,
 };

@@ -57,7 +57,7 @@ export default function HomeScreen() {
         <Card style={{ borderColor: t.accent, borderWidth: 1.5 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 }}>
             <View style={{ flex: 1, paddingRight: 6 }}>
-              <Title icon={Icons.sparkles} tone="accent">Setup Guide</Title>
+              <Title icon={Icons.guide} tone="accent">Setup Guide</Title>
             </View>
             <Badge label={`${recommendedScore}/3 Active`} tone="warn" />
           </View>

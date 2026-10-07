@@ -17,7 +17,6 @@ import {
   Info,
   Package,
   RotateCw,
-  Sparkles,
   X,
 } from 'lucide-react-native';
 import { useAppUpdate } from '../hooks/useAppUpdate';
@@ -136,7 +135,7 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
           <View style={[styles.header, { borderBottomColor: t.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
               <View style={[styles.iconBox, { backgroundColor: t.accentSoft, borderColor: t.accent }]}>
-                <Sparkles size={18} color={t.accent} strokeWidth={2.5} />
+                <ArrowDownToLine size={18} color={t.accent} strokeWidth={2.4} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.title, { color: t.text }]}>
