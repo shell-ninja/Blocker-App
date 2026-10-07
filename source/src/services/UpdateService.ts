@@ -189,8 +189,20 @@ class UpdateManager {
           );
       }
 
-      if (!chosenAsset) {
+      if (!chosenAsset || !chosenAsset.browser_download_url) {
         throw new Error('No APK asset attached to the latest release.');
+      }
+
+      const downloadUrl: string = chosenAsset.browser_download_url;
+      try {
+        const parsed = new URL(downloadUrl);
+        const host = parsed.hostname.toLowerCase();
+        const isGithub = host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com');
+        if (parsed.protocol !== 'https:' || !isGithub) {
+          throw new Error('Untrusted update download URL host or protocol.');
+        }
+      } catch (err: any) {
+        throw new Error(`Insecure update asset URL: ${err.message}`);
       }
 
       const release: ReleaseInfo = {
@@ -199,7 +211,7 @@ class UpdateManager {
         name: data.name || tagName,
         body: data.body || 'No release notes provided.',
         publishedAt: data.published_at || '',
-        downloadUrl: chosenAsset.browser_download_url,
+        downloadUrl,
         apkName: chosenAsset.name,
         sizeBytes: Number(chosenAsset.size) || 0,
         htmlUrl: data.html_url || `https://github.com/shell-ninja/Blocker-App/releases/tag/${tagName}`,

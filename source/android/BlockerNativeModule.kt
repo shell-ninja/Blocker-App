@@ -965,13 +965,40 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     fun downloadAndInstallApk(downloadUrl: String, version: String, promise: Promise) {
         Executors.newSingleThreadExecutor().execute {
             try {
+                // SECURITY: Sanitize version to prevent path traversal
+                val safeVersion = version.trim()
+                if (!safeVersion.matches(Regex("^[a-zA-Z0-9._-]+$"))) {
+                    promise.reject("INVALID_VERSION", "Invalid version string format")
+                    return@execute
+                }
+
+                // SECURITY: Enforce HTTPS scheme and trusted GitHub hosts
+                val initialUrl = URL(downloadUrl)
+                if (!initialUrl.protocol.equals("https", ignoreCase = true)) {
+                    promise.reject("INSECURE_URL", "Only HTTPS downloads are permitted")
+                    return@execute
+                }
+                val host = initialUrl.host.lowercase()
+                val isTrustedHost = host == "github.com" ||
+                                    host.endsWith(".github.com") ||
+                                    host.endsWith(".githubusercontent.com")
+                if (!isTrustedHost) {
+                    promise.reject("UNTRUSTED_HOST", "Updates can only be downloaded from official GitHub domains")
+                    return@execute
+                }
+
                 val updatesDir = File(rc.cacheDir, "updates")
                 if (!updatesDir.exists()) updatesDir.mkdirs()
-                val apkFile = File(updatesDir, "Blocker-$version.apk")
+                val apkFile = File(updatesDir, "Blocker-$safeVersion.apk")
+
+                // SECURITY: Verify canonical path remains within the updates cache directory
+                if (!apkFile.canonicalFile.startsWith(updatesDir.canonicalFile)) {
+                    promise.reject("PATH_TRAVERSAL", "Invalid destination file path")
+                    return@execute
+                }
                 if (apkFile.exists()) apkFile.delete()
 
-                val url = URL(downloadUrl)
-                var conn = url.openConnection() as HttpURLConnection
+                var conn = initialUrl.openConnection() as HttpURLConnection
                 conn.connectTimeout = 30000
                 conn.readTimeout = 30000
                 conn.instanceFollowRedirects = true
@@ -986,7 +1013,23 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                         responseCode == 307 || responseCode == 308) && redirects < 5) {
                     val newUrl = conn.getHeaderField("Location")
                     conn.disconnect()
+                    if (newUrl.isNullOrEmpty()) break
+
                     val nextUrl = URL(newUrl)
+                    // SECURITY: Ensure redirects remain strictly on HTTPS and trusted GitHub hosts
+                    if (!nextUrl.protocol.equals("https", ignoreCase = true)) {
+                        promise.reject("INSECURE_REDIRECT", "Redirected to non-HTTPS URL")
+                        return@execute
+                    }
+                    val redirectHost = nextUrl.host.lowercase()
+                    val isRedirectTrusted = redirectHost == "github.com" ||
+                                            redirectHost.endsWith(".github.com") ||
+                                            redirectHost.endsWith(".githubusercontent.com")
+                    if (!isRedirectTrusted) {
+                        promise.reject("UNTRUSTED_REDIRECT", "Redirected to untrusted host: $redirectHost")
+                        return@execute
+                    }
+
                     conn = nextUrl.openConnection() as HttpURLConnection
                     conn.connectTimeout = 30000
                     conn.readTimeout = 30000
@@ -1001,9 +1044,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                     return@execute
                 }
 
+                // SECURITY: Cap maximum allowed download size (200MB max) to prevent DOS/disk exhaustion
+                val maxAllowedBytes = 200L * 1024L * 1024L
                 val totalBytes = conn.contentLength.toLong()
-                var downloadedBytes = 0L
+                if (totalBytes > maxAllowedBytes) {
+                    conn.disconnect()
+                    promise.reject("FILE_TOO_LARGE", "Update file exceeds size limit")
+                    return@execute
+                }
 
+                var downloadedBytes = 0L
                 val input = BufferedInputStream(conn.inputStream)
                 val output = FileOutputStream(apkFile)
                 val buffer = ByteArray(16384)
@@ -1011,8 +1061,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 var lastProgressEmit = 0L
 
                 while (input.read(buffer).also { bytesRead = it } != -1) {
-                    output.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
+                    if (downloadedBytes > maxAllowedBytes) {
+                        output.close()
+                        input.close()
+                        conn.disconnect()
+                        if (apkFile.exists()) apkFile.delete()
+                        promise.reject("FILE_TOO_LARGE", "Downloaded APK exceeded size limit")
+                        return@execute
+                    }
+                    output.write(buffer, 0, bytesRead)
                     val now = System.currentTimeMillis()
                     if (now - lastProgressEmit > 120 || downloadedBytes == totalBytes) {
                         lastProgressEmit = now
@@ -1030,6 +1088,18 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 input.close()
                 conn.disconnect()
 
+                // SECURITY: Verify download wasn't truncated or empty
+                if (totalBytes > 0 && downloadedBytes < totalBytes) {
+                    if (apkFile.exists()) apkFile.delete()
+                    promise.reject("INCOMPLETE_DOWNLOAD", "Download incomplete: received $downloadedBytes of $totalBytes bytes")
+                    return@execute
+                }
+                if (downloadedBytes <= 1024) {
+                    if (apkFile.exists()) apkFile.delete()
+                    promise.reject("INVALID_APK", "Downloaded file is too small to be a valid APK")
+                    return@execute
+                }
+
                 launchInstallIntent(apkFile)
                 promise.resolve(true)
             } catch (e: Exception) {
@@ -1041,9 +1111,19 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     @ReactMethod
     fun installDownloadedApk(version: String, promise: Promise) {
         try {
-            val apkFile = File(File(rc.cacheDir, "updates"), "Blocker-$version.apk")
-            if (!apkFile.exists()) {
-                promise.reject("ERR_NOT_FOUND", "Downloaded APK file not found")
+            val safeVersion = version.trim()
+            if (!safeVersion.matches(Regex("^[a-zA-Z0-9._-]+$"))) {
+                promise.reject("INVALID_VERSION", "Invalid version string format")
+                return
+            }
+            val updatesDir = File(rc.cacheDir, "updates")
+            val apkFile = File(updatesDir, "Blocker-$safeVersion.apk")
+            if (!apkFile.canonicalFile.startsWith(updatesDir.canonicalFile)) {
+                promise.reject("PATH_TRAVERSAL", "Invalid file path")
+                return
+            }
+            if (!apkFile.exists() || apkFile.length() <= 1024) {
+                promise.reject("ERR_NOT_FOUND", "Downloaded APK file not found or invalid")
                 return
             }
             launchInstallIntent(apkFile)

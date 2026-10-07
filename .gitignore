@@ -31,3 +31,5 @@ local.properties
 # Other MD files
 blocked_messages.md
 BLOCKED_MESSAGES.md
+RELEASE_NOTES.md
+RELEASE_NOTES*.md

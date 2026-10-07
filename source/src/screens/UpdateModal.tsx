@@ -22,6 +22,7 @@ import {
 } from 'lucide-react-native';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { APP_VERSION } from '../data/appVersion';
+import { compareSemVer } from '../services/UpdateService';
 import { Badge, Btn, Card, errMsg, showAlert, useTheme } from '../ui';
 
 interface UpdateModalProps {
@@ -44,6 +45,7 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
 
   const rel = update.release;
   const isNewer = update.hasUpdate;
+  const isAhead = rel ? compareSemVer(APP_VERSION, rel.version) > 0 : false;
   const sizeMb = rel.sizeBytes > 0 ? (rel.sizeBytes / (1024 * 1024)).toFixed(1) : null;
   const downloadedMb = (update.downloadedBytes / (1024 * 1024)).toFixed(1);
   const totalMb = update.totalBytes > 0 ? (update.totalBytes / (1024 * 1024)).toFixed(1) : sizeMb;
@@ -138,7 +140,7 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.title, { color: t.text }]}>
-                  {isNewer ? 'New Update Available' : 'Release Notes'}
+                  {isNewer ? 'New Update Available' : isAhead ? 'Public Release Notes' : 'Release Notes'}
                 </Text>
                 <Text style={{ color: t.sub, fontSize: 12 }}>
                   {rel.tagName} • Installed: v{APP_VERSION}
@@ -162,7 +164,10 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                     {rel.name || rel.tagName}
                   </Text>
                 </View>
-                <Badge label={isNewer ? 'Update Available' : 'Current Version'} tone={isNewer ? 'warn' : 'ok'} />
+                <Badge
+                  label={isNewer ? 'Update Available' : isAhead ? 'Public Release' : 'Current Version'}
+                  tone={isNewer ? 'warn' : isAhead ? 'idle' : 'ok'}
+                />
               </View>
 
               <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
@@ -296,11 +301,11 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <CheckCircle2 size={16} color={t.ok} />
                       <Text style={{ color: t.ok, fontWeight: '700', fontSize: 13.5 }}>
-                        You're on the latest version!
+                        {isAhead ? "You're on a newer dev build!" : "You're on the latest version!"}
                       </Text>
                     </View>
                     <Text style={{ color: t.sub, fontSize: 11.5 }}>
-                      No updates are currently required.
+                      {isAhead ? `Installed v${APP_VERSION} is ahead of GitHub ${rel.tagName}.` : 'No updates are currently required.'}
                     </Text>
                   </View>
                 )}

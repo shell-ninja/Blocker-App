@@ -66,9 +66,7 @@ write(xml_dir / "device_admin_policies.xml", """<?xml version="1.0" encoding="ut
 """)
 write(xml_dir / "file_paths.xml", """<?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <cache-path name="apk_cache" path="."/>
-    <external-cache-path name="apk_external_cache" path="."/>
-    <files-path name="apk_files" path="."/>
+    <cache-path name="apk_updates" path="updates/"/>
 </paths>
 """)
 strings = main / "res" / "values" / "strings.xml"

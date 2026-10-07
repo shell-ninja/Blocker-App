@@ -8,6 +8,7 @@ import { setDelay, setProtection, setShield } from '../services/ProtectionManage
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
+import { compareSemVer, UpdateService } from '../services/UpdateService';
 import UpdateModal from './UpdateModal';
 
 const DAYS = [1, 2, 3, 7, 14, 30];
@@ -31,14 +32,22 @@ export default function SettingsScreen() {
   const now = useNow();
   const update = useAppUpdate();
   const [modalVisible, setModalVisible] = useState(false);
+  const isAhead = update.release ? compareSemVer(APP_VERSION, update.release.version) > 0 : false;
 
   const checkUpdatesManual = async () => {
     try {
       const rel = await update.checkForUpdate(true);
-      if (rel) {
+      const state = UpdateService.getState();
+      if (state.hasUpdate) {
         setModalVisible(true);
       } else {
-        showAlert('Blocker is Up to Date', `You are on the latest version (v${APP_VERSION}).`);
+        const isAhead = rel ? compareSemVer(APP_VERSION, rel.version) > 0 : false;
+        showAlert(
+          'Blocker is Up to Date',
+          isAhead
+            ? `You are running v${APP_VERSION} (build ${BUILD_NUMBER}), which is ahead of GitHub's latest release (${rel?.tagName}).`
+            : `You are on the latest version (v${APP_VERSION}).`
+        );
       }
     } catch (e) {
       showAlert('Check Failed', errMsg(e));
@@ -200,7 +209,13 @@ export default function SettingsScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Title icon={Icons.sparkles}>App Updates</Title>
           <Badge
-            label={update.hasUpdate ? `v${update.release?.version} Available` : `v${APP_VERSION} (Latest)`}
+            label={
+              update.hasUpdate
+                ? `v${update.release?.version} Available`
+                : isAhead
+                ? `v${APP_VERSION} (Dev)`
+                : `v${APP_VERSION} (Latest)`
+            }
             tone={update.hasUpdate ? 'warn' : 'ok'}
           />
         </View>
@@ -217,33 +232,67 @@ export default function SettingsScreen() {
             <Row
               label="Latest on GitHub"
               right={
-                <Text style={{ color: update.hasUpdate ? t.accent : t.sub, fontWeight: '700', fontSize: 13 }}>
-                  {update.release.tagName}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text
+                    style={{
+                      color: update.hasUpdate ? t.accent : t.text,
+                      fontWeight: '700',
+                      fontSize: 13
+                    }}>
+                    {update.release.tagName}
+                  </Text>
+                  {update.hasUpdate ? (
+                    <Badge label="Update" tone="warn" icon={false} />
+                  ) : isAhead ? (
+                    <Badge label="Public" tone="idle" icon={false} />
+                  ) : (
+                    <Badge label="Up to date" tone="ok" icon={false} />
+                  )}
+                </View>
               }
             />
           )}
 
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-            <Btn
-              label={update.checking ? 'Checking...' : 'Check for Updates'}
-              icon={Icons.clock}
-              onPress={checkUpdatesManual}
-            />
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
             {update.hasUpdate ? (
-              <Btn
-                label="View & Install"
-                kind="primary"
-                icon={Icons.sparkles}
-                onPress={() => setModalVisible(true)}
-              />
-            ) : update.release ? (
-              <Btn
-                label="Release Notes"
-                icon={Icons.list}
-                onPress={() => setModalVisible(true)}
-              />
-            ) : null}
+              <>
+                <Btn
+                  style={{ flex: 1 }}
+                  label="View & Install"
+                  kind="primary"
+                  icon={Icons.sparkles}
+                  onPress={() => setModalVisible(true)}
+                />
+                <Btn
+                  style={{ flex: 1 }}
+                  label={update.checking ? 'Checking...' : 'Check Again'}
+                  kind="ghost"
+                  icon={RotateCw}
+                  disabled={update.checking}
+                  onPress={checkUpdatesManual}
+                />
+              </>
+            ) : (
+              <>
+                <Btn
+                  style={{ flex: 1 }}
+                  label={update.checking ? 'Checking...' : 'Check Updates'}
+                  kind="primary"
+                  icon={update.checking ? RotateCw : Icons.clock}
+                  disabled={update.checking}
+                  onPress={checkUpdatesManual}
+                />
+                {update.release && (
+                  <Btn
+                    style={{ flex: 1 }}
+                    label="Release Notes"
+                    kind="ghost"
+                    icon={Icons.list}
+                    onPress={() => setModalVisible(true)}
+                  />
+                )}
+              </>
+            )}
           </View>
         </View>
       </Card>
