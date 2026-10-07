@@ -861,7 +861,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             hit(
                 "apps",
                 "Fear Allah",
-                "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, and your free time before your preoccupation.”\n— Hadith",
+                "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
                 "Do not destroy your Akhirah"
             )
             return true
@@ -1056,8 +1056,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             performGlobalAction(GLOBAL_ACTION_HOME)
             showOverlay(
                 "Focus Mode Active",
-                "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, and your free time before your preoccupation.”\n— Hadith",
-                3500,
+                "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
+                5000,
                 "Guard your time for what benefits you",
                 "Astaghfirullah"
             )
@@ -1217,7 +1217,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** Sends the current tab straight to google.com. Browsers are never locked or held open. */
     private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String, subheading: String? = null) {
-        quietUntil[pkg] = System.currentTimeMillis() + 2000
+        quietUntil[pkg] = System.currentTimeMillis() + 5000L
         BlockerStore.incr(this, kind)
         if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
         showOverlay(heading, body, 5000, subheading, "Astaghfirullah")
@@ -1902,7 +1902,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (notify && now - lastAdbNotice > 2_000L) {
             lastAdbNotice = now
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 4000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
@@ -1939,7 +1939,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
         if (!adbIsOn()) {
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging were switched off. They stay locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 4000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging were switched off. They stay locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
         }
     }
 
@@ -2200,7 +2200,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastHit = now
         BlockerStore.incr(this, kind)
         performGlobalAction(GLOBAL_ACTION_HOME)
-        showOverlay(heading, msg, 4000, subheading, "Astaghfirullah")
+        showOverlay(heading, msg, 5000, subheading, "Astaghfirullah")
     }
 
     // ---------- Popup ----------
@@ -2212,10 +2212,11 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun showOverlay(
         heading: String,
         body: String,
-        ms: Long,
+        ms: Long = 5000L,
         subheading: String? = null,
         buttonText: String = "Astaghfirullah"
     ) {
+        val displayMs = ms.coerceAtLeast(5000L)
         main.post {
             if (overlay != null) return@post
             val svc = this@BlockerAccessibilityService
@@ -2331,10 +2332,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                 (getSystemService(WINDOW_SERVICE) as WindowManager).addView(card, lp)
                 overlay = card
                 card.animate().alpha(1f).translationY(0f).setDuration(180).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-                progressFill.animate().scaleX(0f).setDuration(ms).setInterpolator(LinearInterpolator()).start()
+                progressFill.animate().scaleX(0f).setDuration(displayMs).setInterpolator(LinearInterpolator()).start()
             }
             main.removeCallbacks(hideRunnable)
-            main.postDelayed(hideRunnable, ms)
+            main.postDelayed(hideRunnable, displayMs)
         }
     }
 
