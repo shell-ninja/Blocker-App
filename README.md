@@ -10,9 +10,9 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 
 > [!IMPORTANT]
 > **Recommendation: Install the Debug Version First!**  
-> We strongly recommend installing and testing the **Debug version** (`./build_apk.sh debug` or `Blocker-debug.apk`) before installing the Release build.  
+> We strongly recommend installing and testing the **Debug version** (`Blocker-release-debug-{VERSION}.apk`) before installing the Release build.  
 > - **Test with 1-Minute Timers:** The Debug build uses short **1-minute** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
-> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`./build_apk.sh release`), which enforces real **1 to 30 day** delayed-unlock timers with strict anti-tamper security and no backdoors.
+> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-{VERSION}.apk`), which enforces real **1 to 30 day** delayed-unlock timers with strict anti-tamper security and no backdoors.
 
 ---
 
@@ -22,12 +22,12 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## 🌟 Key Features in v1.0.2
 
-- **🚀 In-App GitHub Release Updater:** Checks for new GitHub releases automatically every 24 hours (or on-demand in Settings). Download, inspect release notes, and install APK updates directly within the app.
-- **🧹 Automatic APK Cache Cleanup:** Automatically purges downloaded update APK files as soon as the updated version is installed and running, keeping your phone's storage clean.
-- **⏱️ Per-App Usage Timers:** Set daily usage limits for specific apps. Once the timer expires, the app is blocked for the rest of the day.
-- **🔒 Anti-Tamper & Wireless Debugging Lockdown:** Blocks Developer options, Device admin settings, and app management. Automatically switches off USB and Wireless debugging if enabled.
-- **🌙 Islamic Reminder Overlays:** Replaces blocked content with thoughtful Islamic reminders, Quranic reflections, and motivational quotes.
-- **🎯 Granular Distraction Shield:** Independent switches to block YouTube Shorts, Instagram Reels, and Facebook Reels without disabling the host apps.
+- **In-App GitHub Release Updater:** Checks for new GitHub releases automatically every 24 hours (or on-demand in Settings). Download, inspect release notes, and install APK updates directly within the app.
+- **Automatic APK Cache Cleanup:** Automatically purges downloaded update APK files as soon as the updated version is installed and running, keeping your phone's storage clean.
+- **Per-App Usage Timers:** Set daily usage limits for specific apps. Once the timer expires, the app is blocked for the rest of the day.
+- **Anti-Tamper & Wireless Debugging Lockdown:** Blocks Developer options, Device admin settings, and app management. Automatically switches off USB and Wireless debugging if enabled.
+- **Islamic Reminder Overlays:** Replaces blocked content with thoughtful Islamic reminders, Quranic reflections, and motivational quotes.
+- **Granular Distraction Shield:** Independent switches to block YouTube Shorts, Instagram Reels, and Facebook Reels without disabling the host apps.
 - **⏳ Delayed Unlock Timers:** Any attempt to weaken protections, unblock apps, or shorten timers requires waiting out a delay of 24 hours to 30 days.
 
 ---
