@@ -207,11 +207,18 @@ class UpdateManager {
 
       const downloadUrl: string = chosenAsset.browser_download_url;
       try {
-        const parsed = new URL(downloadUrl);
-        const host = parsed.hostname.toLowerCase();
-        const isGithub = host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com');
-        if (parsed.protocol !== 'https:' || !isGithub) {
-          throw new Error('Untrusted update download URL host or protocol.');
+        // Use regex parsing because React Native's URL polyfill does not implement URL.hostname
+        const match = downloadUrl.match(/^https:\/\/([a-zA-Z0-9.-]+)(?::\d+)?(?:\/|$|\?|#)/i);
+        if (!match) {
+          throw new Error('Only secure HTTPS downloads are permitted.');
+        }
+        const host = match[1].toLowerCase();
+        const isGithub =
+          host === 'github.com' ||
+          host.endsWith('.github.com') ||
+          host.endsWith('.githubusercontent.com');
+        if (!isGithub) {
+          throw new Error(`Untrusted update host: ${host}`);
         }
       } catch (err: any) {
         throw new Error(`Insecure update asset URL: ${err.message}`);
