@@ -3,6 +3,7 @@ package com.blocker
 import android.app.AppOpsManager
 import android.app.TimePickerDialog
 import android.app.admin.DevicePolicyManager
+import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
@@ -31,7 +32,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /** Keywords this app used to ship. They are dropped from saved lists without the delay timer. */
-private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
+private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
 
 /** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00. */
 data class FocusSchedule(val id: String, val label: String, val startMin: Int, val endMin: Int, val enabled: Boolean) {
@@ -131,6 +132,116 @@ object BlockerStore {
     fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, false)
     fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
         prefs(c).edit().putBoolean(key, enabled).apply()
+
+    fun appLimits(c: Context): Map<String, Int> = runCatching {
+        val json = prefs(c).getString("app_limits", "{}") ?: "{}"
+        val obj = JSONObject(json)
+        val map = mutableMapOf<String, Int>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val v = obj.optInt(key, 0)
+            if (v > 0) map[key] = v
+        }
+        map
+    }.getOrDefault(emptyMap())
+
+    fun putAppLimits(c: Context, limits: Map<String, Int>) {
+        val obj = JSONObject()
+        limits.forEach { (k, v) ->
+            if (v > 0) obj.put(k, v)
+        }
+        prefs(c).edit().putString("app_limits", obj.toString()).apply()
+    }
+
+    fun setAppLimit(c: Context, pkg: String, limitMinutes: Int) {
+        val m = appLimits(c).toMutableMap()
+        if (limitMinutes > 0) {
+            m[pkg] = limitMinutes
+        } else {
+            m.remove(pkg)
+        }
+        putAppLimits(c, m)
+    }
+
+    fun addAppUsageMillis(c: Context, pkg: String, deltaMs: Long) {
+        if (deltaMs <= 0L) return
+        val k = "usage_${day()}_$pkg"
+        val p = prefs(c)
+        val cur = p.getLong(k, 0L)
+        p.edit().putLong(k, cur + deltaMs).apply()
+    }
+
+    fun getStoredTodayUsageMillis(c: Context, pkg: String): Long {
+        val k = "usage_${day()}_$pkg"
+        return prefs(c).getLong(k, 0L)
+    }
+
+    fun getAllStoredTodayUsageMillis(c: Context): Map<String, Long> {
+        val prefix = "usage_${day()}_"
+        val all = prefs(c).all
+        val res = mutableMapOf<String, Long>()
+        all.forEach { (k, v) ->
+            if (k.startsWith(prefix)) {
+                val value = (v as? Number)?.toLong() ?: 0L
+                if (value > 0L) {
+                    val pkg = k.removePrefix(prefix)
+                    res[pkg] = value
+                }
+            }
+        }
+        return res
+    }
+
+    fun getTodayUsageMillis(c: Context, pkg: String): Long {
+        var usmTotal = 0L
+        runCatching {
+            val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            if (usm != null) {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val startOfDay = cal.timeInMillis
+                val now = System.currentTimeMillis()
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                if (!list.isNullOrEmpty()) {
+                    usmTotal = list.filter { it.packageName == pkg }.sumOf { it.totalTimeInForeground }
+                }
+            }
+        }
+        val stored = getStoredTodayUsageMillis(c, pkg)
+        return maxOf(usmTotal, stored)
+    }
+
+    fun getAllTodayUsageMillis(c: Context): Map<String, Long> {
+        val res = getAllStoredTodayUsageMillis(c).toMutableMap()
+        runCatching {
+            val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            if (usm != null) {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val startOfDay = cal.timeInMillis
+                val now = System.currentTimeMillis()
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                if (!list.isNullOrEmpty()) {
+                    for (s in list) {
+                        if (s.totalTimeInForeground > 0) {
+                            val prev = res[s.packageName] ?: 0L
+                            res[s.packageName] = maxOf(prev, s.totalTimeInForeground)
+                        }
+                    }
+                }
+            }
+        }
+        return res
+    }
 }
 
 class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContextBaseJavaModule(rc) {
@@ -417,6 +528,43 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putBoolean("block_insta_search", BlockerStore.granularToggle(ctx, "block_insta_search"))
             putBoolean("block_yt_shorts", BlockerStore.granularToggle(ctx, "block_yt_shorts"))
         })
+    }
+
+    // ---------- Individual App Usage Limits ----------
+
+    @ReactMethod
+    fun getAppUsageLimits(promise: Promise) {
+        val limits = BlockerStore.appLimits(ctx)
+        val map = Arguments.createMap()
+        limits.forEach { (pkg, limit) ->
+            map.putInt(pkg, limit)
+        }
+        promise.resolve(map)
+    }
+
+    @ReactMethod
+    fun setAppUsageLimit(pkg: String, limitMinutes: Int, promise: Promise) {
+        val curLimits = BlockerStore.appLimits(ctx)
+        val cur = curLimits[pkg] ?: 0
+        val weakening = (limitMinutes == 0 && cur > 0) || (limitMinutes > cur && cur > 0)
+        if (BlockerStore.active(ctx) && weakening && !BlockerStore.guardOpen(ctx, "app_limits")) {
+            promise.reject("LOCKED", "Increasing or removing an app usage limit requires the delay timer.")
+            return
+        }
+        BlockerStore.setAppLimit(ctx, pkg, limitMinutes)
+        if (weakening) BlockerStore.consumeGuard(ctx, "app_limits")
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun getAppUsageToday(promise: Promise) {
+        val map = Arguments.createMap()
+        val stats = BlockerStore.getAllTodayUsageMillis(ctx)
+        stats.forEach { (pkg, millis) ->
+            val minutes = (millis / 60_000L).toInt()
+            map.putInt(pkg, minutes)
+        }
+        promise.resolve(map)
     }
 
     // ---------- Per-setting delay timers ----------

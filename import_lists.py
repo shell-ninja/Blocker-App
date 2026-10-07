@@ -106,8 +106,9 @@ d1, k1, tlds = parse_structured(here / "blocklists" / "block-list.md")
 d2, k2 = parse_simple(here / "blocklists" / "my_list.txt")
 whitelist = parse_whitelist(here / "blocklists" / "whitelist.txt")
 
+RETIRED_KEYWORDS = {"usb debugging", "oem unlocking", "oem unlock", "bare"}
 domains = sorted(set(d1 + d2))
-keywords = sorted(set(k1 + k2))
+keywords = sorted(set(k1 + k2) - RETIRED_KEYWORDS)
 tlds = sorted(set(tlds))
 whitelist = sorted(set(whitelist))
 

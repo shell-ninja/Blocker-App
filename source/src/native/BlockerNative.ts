@@ -3,10 +3,10 @@ import { NativeModules, Platform } from 'react-native';
 export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
-  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule';
+  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule' | 'app_limits';
 export const LOCK_KEYS: LockKey[] = [
   'protection', 'shield', 'delay_duration', 'remove_apps', 'remove_blocklist',
-  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule'
+  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule', 'app_limits'
 ];
 
 export interface PermissionStatus {
@@ -98,6 +98,9 @@ interface BlockerNativeSpec {
   saveState(json: string): Promise<boolean>;
   setGranularFocusToggle(key: GranularFocusKey, enabled: boolean): Promise<boolean>;
   getGranularFocusToggles(): Promise<GranularFocusToggles>;
+  getAppUsageLimits(): Promise<Record<string, number>>;
+  setAppUsageLimit(pkg: string, limitMinutes: number): Promise<boolean>;
+  getAppUsageToday(): Promise<Record<string, number>>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;

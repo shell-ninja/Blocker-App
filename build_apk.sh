@@ -157,14 +157,14 @@ elif [ "$MODE" = "release-debug" ]; then
 else
   # debug
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$APK_DIR/Blocker-debug-$APP_VER.apk"
+  OUT="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 fi
 
 step "Done"
 if [ "$MODE" = "release" ]; then
-  echo "Release APK ready:       $OUT_RELEASE (real 1-30 day timers, no back door)"
-  echo "Release-Debug APK ready: $OUT_DEBUG (1-minute timers for testing)"
+  echo "Release APK ready:        $OUT_RELEASE (real 1-30 day timers, no back door)"
+  echo "Release-Debug APK ready:  $OUT_DEBUG (1-minute timers for testing)"
   echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
   echo
   echo "To test on your phone first:"

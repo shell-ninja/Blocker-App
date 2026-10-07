@@ -186,7 +186,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.google.android.permissioncontroller", "com.android.intentresolver", "com.android.documentsui",
             "com.google.android.documentsui", "com.google.android.providers.media.module", "com.google.android.gms"
         )
-        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "active", "shield", "admin_disable_requested")
+        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "active", "shield", "admin_disable_requested", "app_limits")
         // Window titles (as shown on screen) that signal a dangerous settings screen — OEM-agnostic
         private val ADMIN_SCREEN_TITLES = setOf(
             "device admin apps", "device administrators", "device admin",
@@ -210,7 +210,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Activity class fragments of the Device admin screens (list and "Deactivate & uninstall" page)
         private val DEVICE_ADMIN_CLASS_HINTS = listOf("deviceadmin")
         // Phrases that used to ship as blocked keywords. Ignored even if an older saved list still contains them.
-        private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock")
+        private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
         // Activity / fragment class-name fragments that announce "this window is an App Info screen"
         private val APP_INFO_CLASS_HINTS = listOf("appinfo", "installedapp", "appdetail", "applicationdetail", "applicationsdetail")
         private const val APP_INFO_FAST_TICK_MS = 15L      // scan cadence right after a window opens
@@ -336,6 +336,12 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun autoCancelDialog(root: android.view.accessibility.AccessibilityNodeInfo?) {
+        if (root != null) {
+            val rPkg = root.packageName?.toString().orEmpty()
+            if (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = root)) {
+                return // NEVER auto-cancel an installation or update dialog!
+            }
+        }
         val targets = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
         if (root != null) targets.add(root)
         runCatching {
@@ -344,6 +350,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
         for (node in targets) {
+            val nPkg = node.packageName?.toString().orEmpty()
+            if (isInstallerPkg(nPkg) || isInstallOrUpdateDialog(root = node)) {
+                continue // Do not cancel installer buttons
+            }
             val cancelBtn = node.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("Cancel").firstOrNull()
                 ?: node.findAccessibilityNodeInfosByText("cancel").firstOrNull()
@@ -450,6 +460,15 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val isOurApp = "blocker" in wt || packageName.lowercase() in wt
                     val recentlyActive = System.currentTimeMillis() < viewingBlockerSettingsUntil
 
+                    // Skip installer windows if they are not uninstall attempts
+                    if (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = r)) {
+                        val isUninstall = "uninstall" in wt || "do you want to uninstall" in wt
+                        if (!isUninstall) {
+                            runCatching { r.recycle() }
+                            continue
+                        }
+                    }
+
                     // Uninstall dialog: catch by isOurApp OR by timer context (any settings/installer
                     // window recently associated with Blocker's own admin/app-info screens).
                     val isUninstallDialog = "do you want to uninstall" in wt ||
@@ -502,7 +521,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg) && rootPkg != "android") return
 
         // If PackageInstaller is in foreground, only block if it's an UNINSTALL dialog (allow updates/installs!)
-        if (isInstallerPkg(rootPkg)) {
+        if (isInstallerPkg(rootPkg) || isInstallOrUpdateDialog(root = root)) {
             val sb = StringBuilder()
             collectText(root, sb, 0, intArrayOf(200))
             val raw = sb.toString().lowercase()
@@ -512,7 +531,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Keeps the App Info scanner alive for as long as the user is sitting inside Settings, even if no
         // accessibility event arrives (e.g. when a slow handler delayed it).
-        if (rootPkg.isNotEmpty() && isSettingsPkg(rootPkg)) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
+        if (rootPkg.isNotEmpty() && isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg)) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
         val cls = root.className?.toString().orEmpty()
 
         // ── Device Admin list (any OEM) ──
@@ -610,6 +629,19 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var apps: Set<String> = emptySet()
     @Volatile private var exempt: Set<String> = emptySet()
     @Volatile private var focusAllowed: Set<String> = emptySet()
+    @Volatile private var appLimits: Map<String, Int> = emptyMap()
+    @Volatile private var currentFgPkg: String? = null
+    @Volatile private var fgStartTime: Long = 0L
+
+    private val appLimitWatchdog = object : Runnable {
+        override fun run() {
+            val pkg = currentFgPkg
+            if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                checkAppUsageLimit(pkg)
+            }
+            main.postDelayed(this, 5000L)
+        }
+    }
 
     @Volatile private var blockFbReels = false
     @Volatile private var blockInstaReels = false
@@ -644,9 +676,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             for (k in ADB_SETTING_KEYS) contentResolver.registerContentObserver(Settings.Global.getUriFor(k), false, adbObserver)
         }
         enforceAdbOff(notify = false)
+        main.post(appLimitWatchdog)
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(appLimitWatchdog)
         if (instance === this) instance = null
         BlockerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener)
         runCatching { contentResolver.unregisterContentObserver(adbObserver) }
@@ -692,10 +726,54 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isInstallerPkg(pkg: String): Boolean {
         val lower = pkg.lowercase()
-        return lower.contains("packageinstaller") || lower.contains("packagemanager")
+        return lower.contains("packageinstaller") ||
+            lower.contains("packagemanager") ||
+            lower.contains("installer") ||
+            lower == "com.google.android.permissioncontroller" ||
+            lower == "com.android.permissioncontroller"
+    }
+
+    private fun isInstallOrUpdateDialog(ev: AccessibilityEvent? = null, root: AccessibilityNodeInfo? = null): Boolean {
+        val evCls = ev?.className?.toString().orEmpty().lowercase()
+        val rootCls = root?.className?.toString().orEmpty().lowercase()
+
+        val sb = StringBuilder()
+        if (root != null) collectText(root, sb, 0, intArrayOf(120))
+        if (ev != null) {
+            for (t in ev.text) if (t != null) sb.append(' ').append(t)
+            ev.contentDescription?.let { sb.append(' ').append(it) }
+        }
+        val text = sb.toString().lowercase()
+
+        // If it explicitly asks to uninstall, it is NOT an install/update dialog
+        if ("uninstall" in text) return false
+
+        // Check text hints
+        val hasInstallText = "do you want to update" in text ||
+            "do you want to install" in text ||
+            "update this app" in text ||
+            "install this app" in text ||
+            "update this application" in text ||
+            "install this application" in text ||
+            "staging app" in text ||
+            "installing…" in text ||
+            "installing..." in text ||
+            "app installed" in text ||
+            "package installer" in text ||
+            "scanning for risks" in text ||
+            "install anyway" in text
+
+        if (hasInstallText) return true
+
+        val isInstallClass = evCls.contains("install") || rootCls.contains("install") ||
+            evCls.contains("packageinstaller") || rootCls.contains("packageinstaller")
+        if (isInstallClass && ("update" in text || "install" in text || "cancel" in text)) return true
+
+        return false
     }
 
     private fun isSettingsPkg(pkg: String): Boolean {
+        if (isInstallerPkg(pkg)) return false
         if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
         val lower = pkg.lowercase()
         return lower.contains("settings") ||
@@ -708,7 +786,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             lower.contains("securitycom") ||
             lower.contains("scorpio") ||
             lower.contains("ossettingsext") ||
-            lower.contains("permissioncontroller") ||
             lower.contains("securitypermission") ||
             lower.contains("managedprovisioning") ||
             lower.contains("engineermode") ||
@@ -729,7 +806,43 @@ class BlockerAccessibilityService : AccessibilityService() {
         blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
         blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
         blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        appLimits = BlockerStore.appLimits(this)
         enforceAdbOff(notify = false)
+    }
+
+    private fun getEffectiveUsageMillis(pkg: String): Long {
+        val base = BlockerStore.getTodayUsageMillis(this, pkg)
+        val activeSession = if (currentFgPkg == pkg && fgStartTime > 0L) {
+            (System.currentTimeMillis() - fgStartTime).coerceAtLeast(0L)
+        } else 0L
+        return base + activeSession
+    }
+
+    private fun formatLimitDuration(min: Int): String = when {
+        min >= 60 -> {
+            val h = min / 60
+            val m = min % 60
+            if (m > 0) "${h}h ${m}m" else "${h}h"
+        }
+        else -> "${min}m"
+    }
+
+    private fun checkAppUsageLimit(pkg: String): Boolean {
+        val limitMin = appLimits[pkg] ?: return false
+        if (limitMin <= 0) return false
+        val usedMs = getEffectiveUsageMillis(pkg)
+        val limitMs = limitMin * 60_000L
+        if (usedMs >= limitMs) {
+            val limitStr = formatLimitDuration(limitMin)
+            hit(
+                "apps",
+                "Fear Allah",
+                "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, and your free time before your preoccupation.”\n— Hadith",
+                "Do not destroy your Akhirah"
+            )
+            return true
+        }
+        return false
     }
 
     private fun imePackages(): Set<String> = runCatching {
@@ -740,6 +853,25 @@ class BlockerAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         val ev = e ?: return
         val pkg = ev.packageName?.toString() ?: return
+
+        if (pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+            if (currentFgPkg != pkg) {
+                if (currentFgPkg != null && fgStartTime > 0L) {
+                    val delta = System.currentTimeMillis() - fgStartTime
+                    BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
+                }
+                currentFgPkg = pkg
+                fgStartTime = System.currentTimeMillis()
+            }
+        } else if (pkg in neverBlock) {
+            if (currentFgPkg != null && fgStartTime > 0L) {
+                val delta = System.currentTimeMillis() - fgStartTime
+                BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
+            }
+            currentFgPkg = null
+            fgStartTime = 0L
+        }
+
         if (pkg == packageName) {
             viewingBlockerSettingsUntil = 0L
             settingsPollActive = false
@@ -747,7 +879,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             main.removeCallbacks(settingsPollRunnable)
             return
         }
-        if (isInstallerPkg(pkg)) {
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) {
             // PackageInstaller is installing/updating or uninstalling an app.
             // If it's an UNINSTALL attempt for Blocker, block it immediately!
             // If it's an INSTALL or UPDATE attempt for Blocker, ALLOW it!
@@ -769,7 +901,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!BlockerStore.active(this)) return
 
         // OEM-agnostic proactive intercept: fires on the window-open event BEFORE the screen is visible
-        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield") && isSettingsPkg(pkg)) {
+        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield") && isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
             val evCls = ev.className?.toString().orEmpty()
             val rootCls = runCatching { rootInActiveWindow?.className?.toString().orEmpty() }.getOrDefault(evCls)
             val winTitle = ev.text.joinToString(" ").trim().lowercase()  // screen title Samsung/AOSP use ev.text[0]
@@ -880,6 +1012,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (checkGranularInterception(pkg, ev)) return
             }
         }
+        if (checkAppUsageLimit(pkg)) return
         if (pkg !in exempt) scanScreen(pkg)
     }
 
@@ -1410,7 +1543,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** Accessibility-callback side: instant kick if title is Blocker, otherwise arm the scanner. */
     private fun guardBlockerAppInfo(ev: AccessibilityEvent, pkg: String) {
-        if (isInstallerPkg(pkg)) return // PackageInstaller is NOT App Info; installation/update dialogs must be allowed!
+        if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return // PackageInstaller is NOT App Info; installation/update dialogs must be allowed!
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             guardBlockerRowClick(ev, pkg)
             return
@@ -1540,9 +1673,10 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** One scan of the active window (scanner thread). */
     private fun scanAppInfoOnce(pkg: String, deep: Boolean) {
-        if (pkg.isEmpty()) return
+        if (pkg.isEmpty() || isInstallerPkg(pkg)) return
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
-        if (root.packageName?.toString() != pkg) return
+        val rPkg = root.packageName?.toString().orEmpty()
+        if (rPkg != pkg || isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = root)) return
         if (!matchesBlockerAppInfo(root, deep)) return
         kickFromAppInfo()
         val now = SystemClock.uptimeMillis()
