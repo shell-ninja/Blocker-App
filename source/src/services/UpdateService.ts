@@ -133,6 +133,9 @@ class UpdateManager {
   }
 
   async checkOnLaunch() {
+    // Automatically clean up downloaded APKs if app was updated to latest
+    this.cleanupOldApks().catch(() => {});
+
     let lastChecked = this.state.lastCheckedAt;
     if (isSupported && Native.getUpdateCheckTimestamp) {
       try {
@@ -145,6 +148,15 @@ class UpdateManager {
       return;
     }
     await this.checkForUpdate(false);
+  }
+
+  async cleanupOldApks(): Promise<number> {
+    if (isSupported && Native.cleanupOldUpdateApks) {
+      try {
+        return await Native.cleanupOldUpdateApks(APP_VERSION);
+      } catch {}
+    }
+    return 0;
   }
 
   async checkForUpdate(manual: boolean = false): Promise<ReleaseInfo | null> {
@@ -227,6 +239,11 @@ class UpdateManager {
         lastCheckedAt: now,
         dismissed: false,
       });
+
+      // If app is already up to date, ensure any leftover update APKs are removed
+      if (!hasUpdate) {
+        this.cleanupOldApks().catch(() => {});
+      }
 
       // Persist check timestamp
       if (isSupported && Native.setUpdateCheckTimestamp) {

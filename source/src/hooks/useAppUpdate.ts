@@ -32,6 +32,10 @@ export function useAppUpdate() {
     UpdateService.dismissBanner();
   };
 
+  const cleanupOldApks = async (): Promise<number> => {
+    return UpdateService.cleanupOldApks();
+  };
+
   return {
     ...state,
     checkForUpdate,
@@ -40,5 +44,6 @@ export function useAppUpdate() {
     checkCanInstall,
     openInstallSettings,
     dismissBanner,
+    cleanupOldApks,
   };
 }

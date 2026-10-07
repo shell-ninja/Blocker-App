@@ -261,6 +261,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     private val ctx: Context get() = rc.applicationContext
     private val admin get() = ComponentName(ctx, BlockerDeviceAdminReceiver::class.java)
 
+    init {
+        io.execute {
+            try {
+                val pInfo = rc.packageManager.getPackageInfo(rc.packageName, 0)
+                val currentVersion = pInfo.versionName ?: ""
+                deleteObsoleteApks(currentVersion)
+            } catch (_: Exception) {}
+        }
+    }
+
     override fun getName() = "BlockerNative"
 
     // ---------- Permissions ----------
@@ -1145,6 +1155,57 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         rc.startActivity(installIntent)
+    }
+
+    @ReactMethod
+    fun cleanupOldUpdateApks(currentVersion: String, promise: Promise) {
+        io.execute {
+            try {
+                val count = deleteObsoleteApks(currentVersion)
+                promise.resolve(count)
+            } catch (e: Exception) {
+                promise.resolve(0)
+            }
+        }
+    }
+
+    private fun compareSemVer(v1: String, v2: String): Int {
+        val parse = { v: String ->
+            v.trim().removePrefix("v").removePrefix("V")
+                .split("-")[0].split("+")[0]
+                .split(".")
+                .map { it.toIntOrNull() ?: 0 }
+        }
+        val p1 = parse(v1)
+        val p2 = parse(v2)
+        val maxLen = maxOf(p1.size, p2.size)
+        for (i in 0 until maxLen) {
+            val num1 = p1.getOrElse(i) { 0 }
+            val num2 = p2.getOrElse(i) { 0 }
+            if (num1 > num2) return 1
+            if (num1 < num2) return -1
+        }
+        return 0
+    }
+
+    private fun deleteObsoleteApks(currentVersion: String): Int {
+        var deletedCount = 0
+        try {
+            val updatesDir = File(rc.cacheDir, "updates")
+            if (!updatesDir.exists() || !updatesDir.isDirectory) return 0
+            val files = updatesDir.listFiles() ?: return 0
+            for (file in files) {
+                if (file.isFile && file.name.startsWith("Blocker-") && file.name.endsWith(".apk")) {
+                    val apkVer = file.name.removePrefix("Blocker-").removeSuffix(".apk")
+                    if (currentVersion.isNotEmpty() && compareSemVer(currentVersion, apkVer) >= 0) {
+                        if (file.delete()) deletedCount++
+                    } else if (file.length() <= 1024L) {
+                        if (file.delete()) deletedCount++
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return deletedCount
     }
 }
 
