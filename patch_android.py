@@ -237,6 +237,18 @@ if not n1 or not n2:
         f"Could not find versionCode/versionName in android/app/build.gradle to set them to "
         f"{build_number}/\"{app_version}\" \u2014 set them there by hand."
     )
+if "versionCodeOverride" not in g:
+    variant_hook = """
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release") {
+            variant.outputs.each { output ->
+                output.versionCodeOverride = defaultConfig.versionCode + 100000
+            }
+        }
+    }
+}
+"""
+    g = re.sub(r"\n\}\s*\n(dependencies\s*\{)", variant_hook + r"\1", g, count=1)
 write(gr, g)
 
 # 6. Register the native package
