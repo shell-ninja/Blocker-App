@@ -110,6 +110,7 @@ interface BlockerNativeSpec {
   showUpdateNotification(title: string, message: string, version: string): Promise<boolean>;
   downloadAndInstallApk(downloadUrl: string, version: string): Promise<boolean>;
   installDownloadedApk(version: string): Promise<boolean>;
+  isDebugBuild(): Promise<boolean>;
   cleanupOldUpdateApks(currentVersion: string): Promise<number>;
 }
 

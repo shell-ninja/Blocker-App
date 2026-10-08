@@ -186,23 +186,46 @@ class UpdateManager {
       const tagName: string = data.tag_name || '';
       const version = tagName.replace(/^[vV]/, '');
 
-      // Pick release APK (prefer release over debug if multiple exist)
+      // Determine if currently running app is a debug build
+      let isCurrentDebug = false;
+      if (isSupported && Native.isDebugBuild) {
+        try {
+          isCurrentDebug = await Native.isDebugBuild();
+        } catch {}
+      }
+
+      // Pick release APK (Release builds must NEVER update to a debug build)
       let chosenAsset: any = null;
       if (Array.isArray(data.assets) && data.assets.length > 0) {
-        chosenAsset =
-          data.assets.find(
+        if (!isCurrentDebug) {
+          // Release user: strictly require non-debug release APK
+          chosenAsset = data.assets.find(
             (a: any) =>
               typeof a.name === 'string' &&
               a.name.toLowerCase().endsWith('.apk') &&
               !a.name.toLowerCase().includes('debug')
-          ) ||
-          data.assets.find(
-            (a: any) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.apk')
           );
+        } else {
+          // Debug user: prefer release APK, fallback to debug APK
+          chosenAsset =
+            data.assets.find(
+              (a: any) =>
+                typeof a.name === 'string' &&
+                a.name.toLowerCase().endsWith('.apk') &&
+                !a.name.toLowerCase().includes('debug')
+            ) ||
+            data.assets.find(
+              (a: any) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.apk')
+            );
+        }
       }
 
       if (!chosenAsset || !chosenAsset.browser_download_url) {
-        throw new Error('No APK asset attached to the latest release.');
+        throw new Error(
+          !isCurrentDebug
+            ? 'No official release APK attached to this update.'
+            : 'No APK asset attached to the latest release.'
+        );
       }
 
       const downloadUrl: string = chosenAsset.browser_download_url;
@@ -293,6 +316,18 @@ class UpdateManager {
     }
     if (!isSupported) {
       throw new Error('In-app updates are only supported on Android');
+    }
+
+    if (this.state.release.apkName?.toLowerCase().includes('debug')) {
+      let isCurrentDebug = false;
+      if (Native.isDebugBuild) {
+        try {
+          isCurrentDebug = await Native.isDebugBuild();
+        } catch {}
+      }
+      if (!isCurrentDebug) {
+        throw new Error('Installing debug builds over the release version is prohibited.');
+      }
     }
 
     const { downloadUrl, version } = this.state.release;

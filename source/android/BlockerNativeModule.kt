@@ -982,6 +982,13 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                     return@execute
                 }
 
+                // SECURITY: If running Release build, strictly forbid downloading/installing debug APKs
+                val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                if (!isCurrentDebug && (downloadUrl.contains("debug", ignoreCase = true) || safeVersion.contains("debug", ignoreCase = true))) {
+                    promise.reject("DEBUG_UPDATE_FORBIDDEN", "Updating to debug version is not permitted from the release version")
+                    return@execute
+                }
+
                 // SECURITY: Enforce HTTPS scheme and trusted GitHub hosts
                 val initialUrl = URL(downloadUrl)
                 if (!initialUrl.protocol.equals("https", ignoreCase = true)) {
@@ -1126,6 +1133,11 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 promise.reject("INVALID_VERSION", "Invalid version string format")
                 return
             }
+            val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (!isCurrentDebug && safeVersion.contains("debug", ignoreCase = true)) {
+                promise.reject("DEBUG_UPDATE_FORBIDDEN", "Updating to debug version is not permitted from the release version")
+                return
+            }
             val updatesDir = File(rc.cacheDir, "updates")
             val apkFile = File(updatesDir, "Blocker-$safeVersion.apk")
             if (!apkFile.canonicalFile.startsWith(updatesDir.canonicalFile)) {
@@ -1144,6 +1156,15 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 
     private fun launchInstallIntent(apkFile: File) {
+        val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!isCurrentDebug) {
+            val pi = rc.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            val isApkDebug = pi?.applicationInfo?.flags?.let { (it and ApplicationInfo.FLAG_DEBUGGABLE) != 0 } ?: false
+            if (isApkDebug || apkFile.name.contains("debug", ignoreCase = true)) {
+                if (apkFile.exists()) apkFile.delete()
+                throw SecurityException("Updating to debug version is not permitted from the release version")
+            }
+        }
         val apkUri = FileProvider.getUriForFile(
             rc,
             "${rc.packageName}.fileprovider",
@@ -1155,6 +1176,12 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         rc.startActivity(installIntent)
+    }
+
+    @ReactMethod
+    fun isDebugBuild(promise: Promise) {
+        val debug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        promise.resolve(debug)
     }
 
     @ReactMethod

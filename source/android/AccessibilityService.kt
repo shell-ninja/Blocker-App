@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -247,6 +248,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         var instance: BlockerAccessibilityService? = null
     }
 
+    private val isCurrentAppDebug: Boolean
+        get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
     private val main = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var lastHit = 0L
@@ -354,11 +358,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (isInstallerPkg(nPkg) || isInstallOrUpdateDialog(root = node)) {
                 continue // Do not cancel installer buttons
             }
-            // Double check: if node contains Install or Update or Staging, NEVER cancel!
+            // Double check: if node contains Install or Update or Staging, NEVER cancel unless it's a forbidden debug attempt
             val nodeText = StringBuilder()
             collectText(node, nodeText, 0, intArrayOf(60))
             val nTxt = nodeText.toString().lowercase()
-            if ("uninstall" !in nTxt && ("install" in nTxt || "update" in nTxt || "staging" in nTxt)) {
+            val isForbiddenDebug = !isCurrentAppDebug && shieldEngaged() && "debug" in nTxt
+            if (!isForbiddenDebug && "uninstall" !in nTxt && ("install" in nTxt || "update" in nTxt || "staging" in nTxt)) {
                 continue
             }
             val cancelBtn = node.findAccessibilityNodeInfosByViewId("android:id/button2").firstOrNull()
@@ -471,6 +476,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                     if (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = r)) {
                         val isUninstall = "uninstall" in wt || "do you want to uninstall" in wt
                         if (!isUninstall) {
+                            if (!isCurrentAppDebug && shieldEngaged() && "debug" in wt) {
+                                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                                autoCancelDialog(r)
+                                runCatching { r.recycle() }
+                                pollKick("Updating to a debug version is locked while Protection Mode is active.")
+                                break
+                            }
                             runCatching { r.recycle() }
                             continue
                         }
@@ -533,7 +545,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             collectText(root, sb, 0, intArrayOf(200))
             val raw = sb.toString().lowercase()
             val isUninstall = "uninstall" in raw || "do you want to uninstall" in raw
-            if (!isUninstall) return
+            if (!isUninstall) {
+                if (!isCurrentAppDebug && shieldEngaged() && "debug" in raw) {
+                    viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                    autoCancelDialog(root)
+                    pollKick("Updating to a debug version is locked while Protection Mode is active.")
+                    return
+                }
+                return
+            }
         }
 
         // Keeps the App Info scanner alive for as long as the user is sitting inside Settings, even if no
@@ -758,6 +778,13 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // If it explicitly asks to uninstall or deactivate, it is NOT an install/update dialog
         if ("uninstall" in text || "deactivate" in text || "do you want to uninstall" in text) return false
+
+        // SECURITY: If running Release build with protection shield active, debug installs/updates are FORBIDDEN!
+        if (!isCurrentAppDebug && shieldEngaged()) {
+            if ("debug" in text || "debug" in evCls || "debug" in rootCls) {
+                return false
+            }
+        }
 
         // Check text hints
         val hasInstallText = "do you want to update" in text ||
@@ -1315,6 +1342,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t)) ||
                 "uninstall" in evCls
             if (!isUninstall) {
+                // SECURITY: If on release version, NEVER allow updating to a debug version!
+                if (!isCurrentAppDebug && shieldEngaged() && ("debug" in t || "debug" in rawT || "debug" in evCls)) {
+                    viewingBlockerSettingsUntil = now + 30_000L
+                    autoCancelDialog(root)
+                    lockOutOfSettings("Updating to a debug version is locked while Protection Mode is active.")
+                    return true
+                }
                 // This is an install or update dialog (e.g. "Do you want to update this app?")
                 // ALWAYS ALLOW IT! Never block or auto-cancel updates!
                 return false
@@ -1624,8 +1658,21 @@ class BlockerAccessibilityService : AccessibilityService() {
      * Only taps inside Settings count; Blocker's own screens and PackageInstaller never reach this.
      */
     private fun guardBlockerRowClick(ev: AccessibilityEvent, pkg: String) {
-        if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (!shieldEngaged()) return
+        // SECURITY: If on release version, block clicking any debug APK to prevent switching to debug build
+        if (!isCurrentAppDebug) {
+            val allTexts = ev.text.mapNotNull { it?.toString() } + listOfNotNull(ev.contentDescription?.toString())
+            val clickedDebug = allTexts.any {
+                val lower = it.lowercase()
+                lower.contains("debug") && (lower.contains(".apk") || lower.contains("blocker") || lower.contains("package"))
+            }
+            if (clickedDebug) {
+                kickToHomeAndCancel()
+                showOverlay("🔐 Tamper Protection", "Installing a debug version is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+                return
+            }
+        }
+        if (!isSettingsPkg(pkg) || pkg in neverBlock) return
         if (isInstallerPkg(pkg) || isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
