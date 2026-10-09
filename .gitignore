@@ -22,11 +22,26 @@ build/
 local.properties
 *.keystore
 
+# Local Android SDK in workspace
+Android/
+android-sdk/
+sdk/
+Sdk/
+commandlinetools-linux-*.zip
+android-ndk-*.zip
+*ndk*.zip
+gradle-*.zip
+*gradle*.zip
+build-tools_*.zip
+
 # IDE / System files
 .DS_Store
 *.log
 .idea/
 .vscode/
+*.crdownload
+*.part
+*.old
 
 # Other MD files
 blocked_messages.md
