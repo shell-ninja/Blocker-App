@@ -165,12 +165,14 @@ Ensure `env.sh` points to your installed Android SDK and Java 17 locations:
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
-export ANDROID_HOME="$HOME/Android/Sdk"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ANDROID_HOME="$HERE/Android/Sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 ```
 
-If you do not have the Android SDK command-line tools yet, download `commandlinetools-linux-*_latest.zip` from Google's Android developer portal into `~/Downloads`. The build script will automatically detect and extract it into `$ANDROID_HOME`.
+If you do not have the Android SDK command-line tools yet, place `commandlinetools-linux-*_latest.zip` directly in the `Blocker-App` directory (or `~/Downloads`). You can also place `android-ndk-r25b-linux.zip` and `gradle-8.3-all.zip` in `Blocker-App` to skip large downloads over the network. The build script automatically detects and sets them up.
 
 ### 2. Build Commands
 

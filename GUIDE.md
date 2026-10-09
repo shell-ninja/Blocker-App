@@ -61,9 +61,10 @@ rebuilding.
 This single script:
 1. Installs Java 17, Node.js, `adb`, `unzip` and `git` with `pacman` if any are missing (asks for
    your sudo password only if something needs installing).
-2. Checks for an existing Android SDK at `~/Android/Sdk`. If it's not there, it looks for a
-   `commandlinetools-linux-*.zip` you've already downloaded (in `~/Downloads` or your home folder)
-   and sets it up automatically. If it can't find one, it tells you the download link
+2. Checks for an existing Android SDK in the Blocker-App directory (or `~/Android/Sdk`). If it's not there, it looks for a
+   `commandlinetools-linux-*.zip` in the `Blocker-App` directory (or `~/Downloads`)
+   and sets it up automatically. You can also place `android-ndk-r25b-linux.zip` and `gradle-8.3-all.zip` directly in `Blocker-App`
+   to automatically install NDK and Gradle without downloading them over the network. If it can't find one, it tells you the download link
    (<https://developer.android.com/studio#command-line-tools-only>, Linux) and how to point it at
    the file: `ANDROID_CMDLINE_ZIP=/path/to/the.zip ./build_apk.sh`.
 3. Imports your blocklists and builds the app icon.

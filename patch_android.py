@@ -128,6 +128,13 @@ if "BlockerAccessibilityService" not in t:
             <action android:name="android.intent.action.MAIN"/>
             <category android:name="android.intent.category.HOME"/>
         </intent>
+        <intent>
+            <action android:name="android.settings.SETTINGS"/>
+        </intent>
+        <intent>
+            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS"/>
+            <data android:scheme="package"/>
+        </intent>
     </queries>
 
     """

@@ -45,27 +45,159 @@ if [ "$(archlinux-java get 2>/dev/null)" != "java-17-openjdk" ]; then
   sudo -n archlinux-java set java-17-openjdk >/dev/null 2>&1 || true
 fi
 
+install_ndk_if_needed() {
+  local NDK_DEST="$ANDROID_HOME/ndk/25.1.8937393"
+  if [ -d "$NDK_DEST" ] && [ -f "$NDK_DEST/source.properties" ]; then
+    return 0
+  fi
+
+  local NDK_ZIP="${ANDROID_NDK_ZIP:-}"
+  if [ -z "$NDK_ZIP" ]; then
+    NDK_ZIP="$(ls -t "$HERE"/android-ndk-r25b*.zip "$HERE"/*ndk*r25b*.zip "$HERE"/android-ndk-*.zip "$HERE"/*ndk*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$NDK_ZIP" ]; then
+    NDK_ZIP="$(ls -t "$HOME"/Downloads/android-ndk-r25b*.zip "$HOME"/Downloads/*ndk*r25b*.zip "$HOME"/Downloads/android-ndk-*.zip 2>/dev/null | head -1 || true)"
+  fi
+
+  if [ -n "$NDK_ZIP" ] && [ -f "$NDK_ZIP" ]; then
+    echo "Unpacking Android NDK from $NDK_ZIP..."
+    mkdir -p "$ANDROID_HOME/ndk"
+    local NDK_TMP
+    NDK_TMP="$(mktemp -d)"
+    unzip -q "$NDK_ZIP" -d "$NDK_TMP"
+    local UNPACKED_DIR
+    UNPACKED_DIR="$(ls -d "$NDK_TMP"/android-ndk-* 2>/dev/null | head -1 || true)"
+    if [ -z "$UNPACKED_DIR" ]; then
+      UNPACKED_DIR="$NDK_TMP"
+    fi
+    rm -rf "$NDK_DEST"
+    mv "$UNPACKED_DIR" "$NDK_DEST"
+    rm -rf "$NDK_TMP"
+
+    cat <<'EOF' > "$NDK_DEST/package.xml"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ns2:repository xmlns:ns2="http://schemas.android.com/repository/android/common/02" xmlns:ns3="http://schemas.android.com/repository/android/generic/02" xmlns:ns4="http://schemas.android.com/repository/android/common/01" xmlns:ns5="http://schemas.android.com/repository/android/generic/01" xmlns:ns6="http://schemas.android.com/sdk/android/repo/addon2/01" xmlns:ns7="http://schemas.android.com/sdk/android/repo/repository2/01" xmlns:ns8="http://schemas.android.com/sdk/android/repo/sys-img2/01">
+    <license id="android-sdk-license" type="text"/>
+    <localPackage path="ndk;25.1.8937393" obsolete="false">
+        <type-details xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="ns3:genericDetailsType"/>
+        <revision>
+            <major>25</major>
+            <minor>1</minor>
+            <micro>8937393</micro>
+        </revision>
+        <display-name>NDK (Side by side) 25.1.8937393</display-name>
+    </localPackage>
+</ns2:repository>
+EOF
+    echo "Android NDK 25.1.8937393 ready at $NDK_DEST."
+  fi
+}
+
+setup_gradle_wrapper_if_needed() {
+  local WRAPPER_PROPS="$PROJ/android/gradle/wrapper/gradle-wrapper.properties"
+  if [ ! -f "$WRAPPER_PROPS" ]; then
+    return 0
+  fi
+
+  local DIST_URL
+  DIST_URL="$(grep 'distributionUrl=' "$WRAPPER_PROPS" | cut -d= -f2- | tr -d '\\' | tr -d '\r' || true)"
+  local GRADLE_ZIP_NAME
+  GRADLE_ZIP_NAME="$(basename "$DIST_URL" 2>/dev/null || echo "gradle-8.3-all.zip")"
+  local GRADLE_BASE_NAME="${GRADLE_ZIP_NAME%.zip}"
+
+  # Default distribution hash for https://services.gradle.org/distributions/gradle-8.3-all.zip
+  local HASH="6en3ugtfdg5xnpx44z4qbwgas"
+
+  local G_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
+  local TARGET_DIR="$G_USER_HOME/wrapper/dists/$GRADLE_BASE_NAME/$HASH"
+
+  if [ -d "$TARGET_DIR" ] && [ -f "$TARGET_DIR/$GRADLE_ZIP_NAME.ok" ]; then
+    return 0
+  fi
+
+  local GRADLE_ZIP="${GRADLE_ZIP:-}"
+  if [ -z "$GRADLE_ZIP" ]; then
+    GRADLE_ZIP="$(ls -t "$HERE"/gradle-*.zip "$HERE"/*gradle*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$GRADLE_ZIP" ]; then
+    GRADLE_ZIP="$(ls -t "$HOME"/Downloads/gradle-*.zip "$HOME"/Downloads/*gradle*.zip 2>/dev/null | head -1 || true)"
+  fi
+
+  if [ -n "$GRADLE_ZIP" ] && [ -f "$GRADLE_ZIP" ]; then
+    echo "Installing Gradle from local archive: $GRADLE_ZIP..."
+    mkdir -p "$TARGET_DIR"
+    rm -f "$TARGET_DIR/$GRADLE_ZIP_NAME.part"
+    cp "$GRADLE_ZIP" "$TARGET_DIR/$GRADLE_ZIP_NAME"
+    unzip -q -o "$TARGET_DIR/$GRADLE_ZIP_NAME" -d "$TARGET_DIR"
+    touch "$TARGET_DIR/$GRADLE_ZIP_NAME.ok"
+    echo "Gradle wrapper ready at $TARGET_DIR."
+  fi
+}
+
+setup_build_tools_if_needed() {
+  if [ -d "$ANDROID_HOME/build-tools/34.0.0" ] && [ ! -d "$ANDROID_HOME/build-tools/33.0.1" ]; then
+    echo "Setting up build-tools 33.0.1 locally from 34.0.0..."
+    mkdir -p "$ANDROID_HOME/build-tools/33.0.1"
+    cp -a "$ANDROID_HOME/build-tools/34.0.0/"* "$ANDROID_HOME/build-tools/33.0.1/"
+    sed -i "s/34.0.0/33.0.1/g" "$ANDROID_HOME/build-tools/33.0.1/source.properties" 2>/dev/null || true
+    cat <<'EOF' > "$ANDROID_HOME/build-tools/33.0.1/package.xml"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ns2:repository xmlns:ns2="http://schemas.android.com/repository/android/common/02" xmlns:ns3="http://schemas.android.com/repository/android/generic/02">
+    <license id="android-sdk-license" type="text"/>
+    <localPackage path="build-tools;33.0.1" obsolete="false">
+        <type-details xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="ns3:genericDetailsType"/>
+        <revision>
+            <major>33</major>
+            <minor>0</minor>
+            <micro>1</micro>
+        </revision>
+        <display-name>Android SDK Build-Tools 33.0.1</display-name>
+    </localPackage>
+</ns2:repository>
+EOF
+  fi
+}
+
 # ---------- 2. Android SDK ----------
 step "Checking Android SDK"
+install_ndk_if_needed
+setup_build_tools_if_needed
+
 if command -v sdkmanager >/dev/null 2>&1 && [ -d "$ANDROID_HOME/platforms" ] && ls "$ANDROID_HOME/platforms" | grep -q android-34; then
   echo "Android SDK already set up at $ANDROID_HOME."
 elif [ -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
-  echo "Found existing SDK tools at $ANDROID_HOME/cmdline-tools/latest \u2014 fetching missing packages."
+  echo "Found existing SDK tools at $ANDROID_HOME/cmdline-tools/latest — fetching missing packages."
   yes | sdkmanager --licenses >/dev/null 2>&1 || true
-  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393" "cmake;3.22.1"
+  SDK_PKGS=("platform-tools" "platforms;android-34" "build-tools;34.0.0" "build-tools;33.0.1" "cmake;3.22.1")
+  if [ ! -d "$ANDROID_HOME/ndk/25.1.8937393" ]; then
+    SDK_PKGS+=("ndk;25.1.8937393")
+  fi
+  sdkmanager "${SDK_PKGS[@]}"
 else
-  echo "No Android SDK found at $ANDROID_HOME \u2014 looking for a command line tools zip you already downloaded..."
+  echo "No Android SDK found at $ANDROID_HOME — looking for a command line tools zip you already downloaded..."
   ZIP="${ANDROID_CMDLINE_ZIP:-}"
   if [ -z "$ZIP" ]; then
+    ZIP="$(ls -t "$HERE"/commandlinetools-linux-*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$ZIP" ]; then
+    ZIP="$(ls -t "$HERE"/*commandline*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$ZIP" ]; then
+    ZIP="$(ls -t "$HERE"/*cmdline*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$ZIP" ]; then
     ZIP="$(ls -t "$HOME"/Downloads/commandlinetools-linux-*.zip 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$ZIP" ]; then
+    ZIP="$(ls -t "$HOME"/Downloads/*cmdline*.zip 2>/dev/null | head -1 || true)"
   fi
   if [ -z "$ZIP" ]; then
     ZIP="$(find "$HOME" -maxdepth 4 -iname 'commandlinetools-linux-*.zip' 2>/dev/null | head -1 || true)"
   fi
   if [ -z "$ZIP" ]; then
-    echo "Couldn't find a commandlinetools-linux-*.zip under ~/Downloads or ~."
+    echo "Couldn't find a commandlinetools-linux-*.zip under $HERE, ~/Downloads or ~."
     echo "Download it from https://developer.android.com/studio#command-line-tools-only (Linux),"
-    echo "then either re-run this script, or run it again with the path set:"
+    echo "then either place it in $HERE or re-run with the path set:"
     echo "    ANDROID_CMDLINE_ZIP=/path/to/commandlinetools-linux-XXXXXXX_latest.zip ./build_apk.sh"
     exit 1
   fi
@@ -76,7 +208,11 @@ else
   rm -rf "$ANDROID_HOME/cmdline-tools/latest"
   mv "$TMP/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
   yes | sdkmanager --licenses >/dev/null 2>&1 || true
-  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393" "cmake;3.22.1"
+  SDK_PKGS=("platform-tools" "platforms;android-34" "build-tools;34.0.0" "build-tools;33.0.1" "cmake;3.22.1")
+  if [ ! -d "$ANDROID_HOME/ndk/25.1.8937393" ]; then
+    SDK_PKGS+=("ndk;25.1.8937393")
+  fi
+  sdkmanager "${SDK_PKGS[@]}"
 fi
 
 # ---------- 3. Blocklists, whitelist and app icon ----------
@@ -95,8 +231,21 @@ if [ ! -d "$PROJ" ]; then
   npx --yes @react-native-community/cli@12 init Blocker --version 0.73.6 \
     --package-name com.blocker --directory "$PROJ" --pm npm --skip-git-init
   echo "sdk.dir=$ANDROID_HOME" > "$PROJ/android/local.properties"
+  if [ -d "$ANDROID_HOME/ndk/25.1.8937393" ]; then
+    echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> "$PROJ/android/local.properties"
+  fi
 else
-  echo "$PROJ already exists \u2014 reusing it."
+  echo "$PROJ already exists — reusing it."
+fi
+
+# Always ensure sdk.dir and ndk.dir point to current ANDROID_HOME in local.properties
+if [ -d "$PROJ/android" ]; then
+  {
+    echo "sdk.dir=$ANDROID_HOME"
+    if [ -d "$ANDROID_HOME/ndk/25.1.8937393" ]; then
+      echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393"
+    fi
+  } > "$PROJ/android/local.properties"
 fi
 
 # ---------- 5. Copy in Blocker's code and native modules, icon, manifest entries ----------
@@ -107,11 +256,14 @@ python3 "$HERE/patch_android.py" "$PROJ" "$HERE/source" || {
 }
 
 # ---------- 6. JS dependencies (icons) ----------
-step "Installing JS dependencies"
-( cd "$PROJ" && npm install --no-audit --no-fund lucide-react-native@0.462.0 react-native-svg@15.8.0 )
+if [ ! -d "$PROJ/node_modules/lucide-react-native" ] || [ ! -d "$PROJ/node_modules/react-native-svg" ]; then
+  step "Installing JS dependencies"
+  ( cd "$PROJ" && npm install --no-audit --no-fund lucide-react-native@0.462.0 react-native-svg@15.8.0 )
+fi
 
 # ---------- 7. Build ----------
 step "Building the $MODE APK"
+setup_gradle_wrapper_if_needed
 cd "$PROJ/android"
 chmod +x gradlew
 BUILD_NUM="$(cat "$HERE/.build_number" 2>/dev/null || echo "0")"
