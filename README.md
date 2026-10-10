@@ -204,18 +204,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 
 ### 3. Install on Device
 
-#### Option A: Via ADB (Computer):
-Connect your phone with **USB Debugging** enabled in Developer Options, then execute:
-
-```bash
-# First test with debug:
-./05_install_on_phone.sh debug
-
-# When satisfied, install release:
-./05_install_on_phone.sh release
-```
-
-#### Option B: Direct APK Sideloading (Phone):
+#### Direct APK Sideloading (Phone):
 1. Copy or download the compiled APK to your Android device.
 2. Open the file to start installation.
 3. If **Google Play Protect** blocks the install:

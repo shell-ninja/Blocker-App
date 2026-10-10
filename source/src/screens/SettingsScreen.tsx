@@ -176,16 +176,14 @@ export default function SettingsScreen() {
             );
           })}
         </View>
-        <Sub>Lengthening applies immediately. Shortening is delayed by the current timer.</Sub>
+        <Sub>Lengthening applies immediately; shortening is protected by the active delay.</Sub>
         <LockBar lockKey="delay_duration" />
       </Card>
 
       <Card>
-        <Title icon={Icons.eye}>Screen monitoring</Title>
+        <Title icon={Icons.eye}>Screen Monitoring</Title>
         <Sub>
-          Always on. Scans on-screen text in every app — a blocked word in a browser redirects that tab to
-          Google; in any other app, it closes the app and shows a 5-second notice. Checked on this phone only,
-          never stored, and can't be turned off.
+          Scans text locally on-device. Blocked words trigger an instant safe exit. Completely private, offline, and zero telemetry.
         </Sub>
       </Card>
 

@@ -55,17 +55,20 @@ function Chips({ values, selected, onPick }: { values: number[]; selected?: numb
   );
 }
 
-/** A button showing a 12-hour time that opens Android's own clock-dial picker when tapped. */
+/** A button showing a 12-hour time that opens Android's system clock picker. */
 function TimeButton({ minute, onChange }: { minute: number; onChange: (m: number) => void }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={() => Native.pickTime(minute).then(onChange).catch(() => {})}
-      style={{
-        backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12,
-        paddingVertical: 10, paddingHorizontal: 16, minWidth: 96, alignItems: 'center'
-      }}>
-      <Text style={{ color: t.text, fontWeight: '700', fontSize: 15 }}>{clock12(minute)}</Text>
+      style={({ pressed }) => [{
+        backgroundColor: t.glass, borderColor: t.border, borderWidth: 1, borderRadius: 14,
+        paddingVertical: 9, paddingHorizontal: 14, minWidth: 106, alignItems: 'center',
+        flexDirection: 'row', gap: 7, justifyContent: 'center',
+        transform: [{ scale: pressed ? 0.95 : 1 }], opacity: pressed ? 0.8 : 1
+      }]}>
+      <Icons.clock size={14} color={t.accent} strokeWidth={2.3} />
+      <Text style={{ color: t.text, fontWeight: '700', fontSize: 14, letterSpacing: -0.2 }}>{clock12(minute)}</Text>
     </Pressable>
   );
 }
@@ -392,34 +395,34 @@ function GranularFocusCard() {
 
   return (
     <Card>
-      <Title icon={Icons.shieldOn}>Focus Distraction Shields</Title>
-      <Sub>Intercept and exit addictive short-form loops without closing allowed parent apps.</Sub>
+      <Title icon={Icons.shieldOn}>Distraction Shields</Title>
+      <Sub>Exit short-form video feeds while keeping parent apps usable.</Sub>
       <View style={{ marginTop: 10 }}>
         <AnimatedToggleRow
           icon={Icons.play}
           label="Block YouTube Shorts"
-          sub="Instantly exit Shorts player feed back to regular YouTube"
+          sub="Exit Shorts back to standard feed"
           value={gf.block_yt_shorts}
           onValueChange={v => onToggle('block_yt_shorts', v)}
         />
         <AnimatedToggleRow
           icon={Icons.film}
           label="Block Instagram Reels"
-          sub="Instantly exit Reels tab & player back to main feed"
+          sub="Exit Reels back to main feed"
           value={gf.block_insta_reels}
           onValueChange={v => onToggle('block_insta_reels', v)}
         />
         <AnimatedToggleRow
           icon={Icons.search}
-          label="Block Instagram Explore / Search"
-          sub="Instantly exit Search & Explore feed to prevent scrolling"
+          label="Block Instagram Explore"
+          sub="Exit Explore & search feed"
           value={gf.block_insta_search}
           onValueChange={v => onToggle('block_insta_search', v)}
         />
         <AnimatedToggleRow
           icon={Icons.apps}
           label="Block Facebook Reels"
-          sub="Instantly exit Reels viewer back to main Facebook feed"
+          sub="Exit Reels & video feeds"
           value={gf.block_fb_reels}
           onValueChange={v => onToggle('block_fb_reels', v)}
         />
