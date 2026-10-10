@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { ArrowDownToLine, Code, ExternalLink, RotateCw } from 'lucide-react-native';
+import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
@@ -33,6 +33,27 @@ export default function SettingsScreen() {
   const update = useAppUpdate();
   const [modalVisible, setModalVisible] = useState(false);
   const isAhead = update.release ? compareSemVer(APP_VERSION, update.release.version) > 0 : false;
+  const [cacheStats, setCacheStats] = useState<{ fileCount: number; totalBytes: number }>({ fileCount: 0, totalBytes: 0 });
+
+  useEffect(() => {
+    update.getCacheStats().then(setCacheStats).catch(() => {});
+  }, [modalVisible, update.isDownloaded]);
+
+  const handleClearCache = async () => {
+    try {
+      const res = await update.clearUpdateCache();
+      setCacheStats({ fileCount: 0, totalBytes: 0 });
+      const freedMb = (res.freedBytes / (1024 * 1024)).toFixed(1);
+      showAlert(
+        'Cache Cleared',
+        res.deletedCount > 0
+          ? `Removed ${res.deletedCount} update file(s) and freed ${freedMb} MB.`
+          : 'Update cache is already empty.'
+      );
+    } catch (e) {
+      showAlert('Clear Failed', errMsg(e));
+    }
+  };
 
   const checkUpdatesManual = async () => {
     try {
@@ -246,6 +267,31 @@ export default function SettingsScreen() {
                   ) : (
                     <Badge label="Up to date" tone="ok" icon={false} />
                   )}
+                </View>
+              }
+            />
+          )}
+
+          {cacheStats.fileCount > 0 && (
+            <Row
+              label="Download Cache"
+              right={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ color: t.sub, fontSize: 12 }}>
+                    {(cacheStats.totalBytes / (1024 * 1024)).toFixed(1)} MB ({cacheStats.fileCount} file{cacheStats.fileCount > 1 ? 's' : ''})
+                  </Text>
+                  <Pressable
+                    onPress={handleClearCache}
+                    style={{
+                      paddingVertical: 3,
+                      paddingHorizontal: 8,
+                      borderRadius: 6,
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(239, 68, 68, 0.3)',
+                    }}>
+                    <Text style={{ color: t.warn, fontSize: 11, fontWeight: '700' }}>Clear</Text>
+                  </Pressable>
                 </View>
               }
             />

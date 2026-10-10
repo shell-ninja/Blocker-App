@@ -113,6 +113,8 @@ interface BlockerNativeSpec {
   installDownloadedApk(version: string): Promise<boolean>;
   isDebugBuild(): Promise<boolean>;
   cleanupOldUpdateApks(currentVersion: string): Promise<number>;
+  clearAllUpdateApks(): Promise<{ deletedCount: number; freedBytes: number }>;
+  getUpdateCacheStats(): Promise<{ fileCount: number; totalBytes: number }>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;
