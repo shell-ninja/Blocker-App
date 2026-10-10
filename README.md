@@ -30,7 +30,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## 🌟 Key Features in v1.0.2
+## 🌟 Key Features in v1.0.3.1
 
 - **In-App GitHub Release Updater:** Checks for new GitHub releases automatically every 24 hours (or on-demand in Settings). Download, inspect release notes, and install APK updates directly within the app.
 - **Automatic APK Cache Cleanup:** Automatically purges downloaded update APK files as soon as the updated version is installed and running, keeping your phone's storage clean.

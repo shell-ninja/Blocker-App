@@ -17,6 +17,7 @@ import {
   Info,
   Package,
   RotateCw,
+  Trash2,
   X,
 } from 'lucide-react-native';
 import { useAppUpdate } from '../hooks/useAppUpdate';
@@ -79,6 +80,21 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
       }
     } catch (e) {
       showAlert('Update Failed', errMsg(e));
+    }
+  };
+
+  const handleClearCache = async () => {
+    try {
+      const res = await update.clearUpdateCache();
+      const freedMb = (res.freedBytes / (1024 * 1024)).toFixed(1);
+      showAlert(
+        'Cache Cleared',
+        res.deletedCount > 0
+          ? `Removed ${res.deletedCount} update file(s) and freed ${freedMb} MB. You can now download afresh.`
+          : 'Update download cache is already clean.'
+      );
+    } catch (e) {
+      showAlert('Clear Failed', errMsg(e));
     }
   };
 
@@ -208,6 +224,21 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
               </Pressable>
             )}
 
+            {/* Error Notice if any */}
+            {update.error && (
+              <View style={[styles.noticeBox, { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: '#EF4444' }]}>
+                <AlertCircle size={16} color="#EF4444" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 12.5 }}>
+                    Update Notice
+                  </Text>
+                  <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 2 }}>
+                    {update.error}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* Release Notes Changelog */}
             <Text style={[styles.sectionHeading, { color: t.text }]}>What's New & Bug Fixes</Text>
 
@@ -285,6 +316,13 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                   <Package size={17} color="#FFFFFF" strokeWidth={2.4} />
                   <Text style={styles.primaryBtnText}>Install Update Now</Text>
                 </Pressable>
+
+                <Pressable
+                  onPress={handleClearCache}
+                  style={[styles.secondaryBtn, { borderColor: t.border }]}>
+                  <Trash2 size={14} color={t.warn} />
+                  <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>Clear Downloaded APK Cache</Text>
+                </Pressable>
               </View>
             ) : (
               <View style={{ width: '100%', gap: 10 }}>
@@ -307,6 +345,15 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                       {isAhead ? `Installed v${APP_VERSION} is ahead of GitHub ${rel.tagName}.` : 'No updates are currently required.'}
                     </Text>
                   </View>
+                )}
+
+                {update.error && (
+                  <Pressable
+                    onPress={handleClearCache}
+                    style={[styles.secondaryBtn, { borderColor: t.border }]}>
+                    <Trash2 size={14} color={t.warn} />
+                    <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>Clear Download Cache & Retry</Text>
+                  </Pressable>
                 )}
 
                 <Pressable
