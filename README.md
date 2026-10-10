@@ -14,6 +14,16 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 > - **Test with 1-Minute Timers:** The Debug build uses short **1-minute** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
 > - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-{VERSION}.apk`), which enforces real **1 to 30 day** delayed-unlock timers with strict anti-tamper security and no backdoors.
 
+> [!WARNING]
+> **Play Protect Warning During Installation**  
+> Because Blocker is an open-source, sideloaded app that utilizes Android Accessibility Services and Device Administrator permissions for tamper resistance, Google Play Protect may warn or block installation:  
+> - **Quick Install:** On the prompt, tap **"More details"** &rarr; **"Install anyway"**.  
+> - **If Blocked:** Temporarily disable Play Protect during installation:  
+>   1. Open **Google Play Store** &rarr; tap your **Profile Icon** (top right) &rarr; select **Play Protect**.  
+>   2. Tap the **Settings gear (⚙️)** in the top right corner.  
+>   3. Turn off **"Scan apps with Play Protect"**.  
+>   4. Install Blocker, then you can turn Play Protect back on once installation finishes.
+
 ---
 
 Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetry, and no account required. It blocks distracting websites, full-screen short-form video players (YouTube Shorts, Instagram Reels, Facebook Reels), and adult domains across browsers and apps.
@@ -194,6 +204,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 
 ### 3. Install on Device
 
+#### Option A: Via ADB (Computer):
 Connect your phone with **USB Debugging** enabled in Developer Options, then execute:
 
 ```bash
@@ -203,6 +214,13 @@ Connect your phone with **USB Debugging** enabled in Developer Options, then exe
 # When satisfied, install release:
 ./05_install_on_phone.sh release
 ```
+
+#### Option B: Direct APK Sideloading (Phone):
+1. Copy or download the compiled APK to your Android device.
+2. Open the file to start installation.
+3. If **Google Play Protect** blocks the install:
+   - Tap **"More details"** &rarr; **"Install anyway"**.
+   - If blocked completely, open **Google Play Store** &rarr; tap your **Profile** (top right) &rarr; **Play Protect** &rarr; tap **Settings (⚙️)** &rarr; temporarily turn off **"Scan apps with Play Protect"** while installing. You can turn it back on after installation.
 
 ---
 
