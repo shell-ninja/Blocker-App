@@ -272,30 +272,30 @@ export default function SettingsScreen() {
             />
           )}
 
-          {cacheStats.fileCount > 0 && (
-            <Row
-              label="Download Cache"
-              right={
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ color: t.sub, fontSize: 12 }}>
-                    {(cacheStats.totalBytes / (1024 * 1024)).toFixed(1)} MB ({cacheStats.fileCount} file{cacheStats.fileCount > 1 ? 's' : ''})
-                  </Text>
-                  <Pressable
-                    onPress={handleClearCache}
-                    style={{
-                      paddingVertical: 3,
-                      paddingHorizontal: 8,
-                      borderRadius: 6,
-                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                      borderWidth: 1,
-                      borderColor: 'rgba(239, 68, 68, 0.3)',
-                    }}>
-                    <Text style={{ color: t.warn, fontSize: 11, fontWeight: '700' }}>Clear</Text>
-                  </Pressable>
-                </View>
-              }
-            />
-          )}
+          <Row
+            label="Download Cache"
+            right={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ color: t.sub, fontSize: 12 }}>
+                  {cacheStats.fileCount > 0
+                    ? `${(cacheStats.totalBytes / (1024 * 1024)).toFixed(1)} MB (${cacheStats.fileCount} file${cacheStats.fileCount > 1 ? 's' : ''})`
+                    : 'Clean (0 MB)'}
+                </Text>
+                <Pressable
+                  onPress={handleClearCache}
+                  style={{
+                    paddingVertical: 3,
+                    paddingHorizontal: 8,
+                    borderRadius: 6,
+                    backgroundColor: cacheStats.fileCount > 0 ? 'rgba(239, 68, 68, 0.12)' : t.cardBorder,
+                    borderWidth: 1,
+                    borderColor: cacheStats.fileCount > 0 ? 'rgba(239, 68, 68, 0.3)' : t.border,
+                  }}>
+                  <Text style={{ color: cacheStats.fileCount > 0 ? t.warn : t.sub, fontSize: 11, fontWeight: '700' }}>Clear</Text>
+                </Pressable>
+              </View>
+            }
+          />
 
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
             {update.hasUpdate ? (

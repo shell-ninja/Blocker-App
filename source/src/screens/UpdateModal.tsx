@@ -347,14 +347,14 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                   </View>
                 )}
 
-                {update.error && (
-                  <Pressable
-                    onPress={handleClearCache}
-                    style={[styles.secondaryBtn, { borderColor: t.border }]}>
-                    <Trash2 size={14} color={t.warn} />
-                    <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>Clear Download Cache & Retry</Text>
-                  </Pressable>
-                )}
+                <Pressable
+                  onPress={handleClearCache}
+                  style={[styles.secondaryBtn, { borderColor: t.border }]}>
+                  <Trash2 size={14} color={t.warn} />
+                  <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>
+                    {update.error ? 'Clear Download Cache & Retry' : 'Clear Downloaded Cache'}
+                  </Text>
+                </Pressable>
 
                 <Pressable
                   onPress={() => Linking.openURL(rel.htmlUrl).catch(() => {})}
