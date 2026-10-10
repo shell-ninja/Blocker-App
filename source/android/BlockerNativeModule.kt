@@ -859,7 +859,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             var resolved = false
             val dialog = TimePickerDialog(
                 activity,
-                android.R.style.Theme_DeviceDefault_DayNight_Dialog_Alert,
+                android.R.style.Theme_DeviceDefault_Dialog_Alert,
                 { _, hour, minute ->
                     resolved = true
                     promise.resolve(hour * 60 + minute)
