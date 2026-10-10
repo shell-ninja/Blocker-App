@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, AppState, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
+import { Animated, AppState, Easing, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
@@ -35,14 +35,14 @@ export default function App() {
   const changeTab = (id: (typeof TABS)[number]['id']) => {
     if (id === tab) return;
     Animated.parallel([
-      Animated.timing(fade, { toValue: 0, duration: 75, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: -6, duration: 75, useNativeDriver: true }),
+      Animated.timing(fade, { toValue: 0, duration: 90, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: -6, duration: 90, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start(() => {
       setTab(id);
-      translateY.setValue(8);
+      translateY.setValue(10);
       Animated.parallel([
-        Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }),
-        Animated.timing(translateY, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(translateY, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       ]).start();
     });
   };

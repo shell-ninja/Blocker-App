@@ -39,7 +39,7 @@ write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encod
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="20"
+    android:notificationTimeout="80"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
@@ -169,6 +169,24 @@ if "BlockerAccessibilityService" not in t:
             <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
         </intent-filter>
     </receiver>
+
+    <service
+        android:name=".BlockerForegroundService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse">
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="Distraction and adult content protection"/>
+    </service>
+
+    <receiver
+        android:name=".BootReceiver"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+        </intent-filter>
+    </receiver>
     """
     if "<application" not in t or "</application>" not in t:
         sys.exit("ERROR: unexpected AndroidManifest.xml layout")
@@ -178,17 +196,15 @@ if "BlockerAccessibilityService" not in t:
 
 # 4b. Permissions added after the first release. Kept apart from the block above (which only runs once per
 # manifest) so re-running this script upgrades a manifest that was already patched.
-#  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
-#  - WRITE_SECURE_SETTINGS: lets the service switch USB/Wireless debugging back off. It can only be GRANTED over adb:
-#        adb shell pm grant <package> android.permission.WRITE_SECURE_SETTINGS
-#  - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets Settings > Background activity open the "allow background" dialog.
-#  - REQUEST_INSTALL_PACKAGES: lets the app trigger in-app updates to download and install new versions.
 t = read(mf)
 extra = []
 for perm, attrs in (
     ("android.permission.WRITE_SECURE_SETTINGS", ' tools:ignore="ProtectedPermissions"'),
     ("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", ""),
     ("android.permission.REQUEST_INSTALL_PACKAGES", ""),
+    ("android.permission.FOREGROUND_SERVICE", ""),
+    ("android.permission.FOREGROUND_SERVICE_SPECIAL_USE", ' tools:ignore="ProtectedPermissions"'),
+    ("android.permission.RECEIVE_BOOT_COMPLETED", ""),
 ):
     if perm not in t:
         extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
@@ -197,6 +213,31 @@ if extra:
         t = t.replace('xmlns:android="http://schemas.android.com/apk/res/android"',
                       'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
     t = t.replace("<application", "\n    ".join(extra) + "\n    <application", 1)
+    write(mf, t)
+
+# Ensure BlockerForegroundService and BootReceiver exist if manifest was previously patched
+t = read(mf)
+extra_components = []
+if "BlockerForegroundService" not in t:
+    extra_components.append("""    <service
+        android:name=".BlockerForegroundService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse">
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="Distraction and adult content protection"/>
+    </service>""")
+if "BootReceiver" not in t:
+    extra_components.append("""    <receiver
+        android:name=".BootReceiver"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+        </intent-filter>
+    </receiver>""")
+if extra_components:
+    t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)
 
 # FileProvider for in-app APK installer

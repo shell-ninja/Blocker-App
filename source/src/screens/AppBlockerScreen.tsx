@@ -166,8 +166,8 @@ function AppLimitModal({ app, currentLimit, todayUsage, hasUsageAccess, onClose,
             <Text style={{ color: t.text, fontWeight: '700', fontSize: 14, marginBottom: 10 }}>
               Set Daily Usage Limit
             </Text>
-            <Text style={{ color: t.sub, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>
-              Once you reach this time limit in a single day, {app.label} will be automatically blocked until midnight.
+            <Text style={{ color: t.sub, fontSize: 12, marginBottom: 12 }}>
+              {app.label} will be blocked once this daily limit is reached.
             </Text>
 
             {/* Presets Grid */}

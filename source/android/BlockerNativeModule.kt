@@ -45,16 +45,38 @@ import java.util.concurrent.Executors
 /** Keywords this app used to ship. They are dropped from saved lists without the delay timer. */
 private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
 
-/** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00. */
-data class FocusSchedule(val id: String, val label: String, val startMin: Int, val endMin: Int, val enabled: Boolean) {
-    fun toJson(): JSONObject = JSONObject()
-        .put("id", id).put("label", label).put("startMin", startMin).put("endMin", endMin).put("enabled", enabled)
+/** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00, with optional per-schedule unblocked apps. */
+data class FocusSchedule(
+    val id: String,
+    val label: String,
+    val startMin: Int,
+    val endMin: Int,
+    val enabled: Boolean,
+    val allowedApps: Set<String> = emptySet()
+) {
+    fun toJson(): JSONObject {
+        val arr = JSONArray()
+        allowedApps.forEach { arr.put(it) }
+        return JSONObject()
+            .put("id", id).put("label", label).put("startMin", startMin).put("endMin", endMin).put("enabled", enabled)
+            .put("allowedApps", arr)
+    }
 
     companion object {
-        fun fromJson(o: JSONObject) = FocusSchedule(
-            o.getString("id"), o.optString("label", "Schedule"), o.getInt("startMin"), o.getInt("endMin"),
-            o.optBoolean("enabled", true)
-        )
+        fun fromJson(o: JSONObject): FocusSchedule {
+            val appSet = mutableSetOf<String>()
+            val arr = o.optJSONArray("allowedApps")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val a = arr.optString(i, "")
+                    if (a.isNotEmpty()) appSet.add(a)
+                }
+            }
+            return FocusSchedule(
+                o.getString("id"), o.optString("label", "Schedule"), o.getInt("startMin"), o.getInt("endMin"),
+                o.optBoolean("enabled", true), appSet
+            )
+        }
     }
 }
 
@@ -126,6 +148,16 @@ object BlockerStore {
             .map { minutesUntil(it.endMin, minuteOfDay()) * 60_000L }
         val schedMs = activeEnds.maxOrNull() ?: 0L
         return maxOf(untilMs, schedMs)
+    }
+
+    /** Returns the union of allowed apps configured for all schedules currently active. */
+    fun scheduleAllowedApps(c: Context): Set<String> {
+        val active = schedules(c).filter { scheduleIsActiveNow(it) }
+        val set = mutableSetOf<String>()
+        for (s in active) {
+            set.addAll(s.allowedApps)
+        }
+        return set
     }
 
     fun pendingUntil(c: Context, key: String) = prefs(c).getLong("pending_$key", 0L)
@@ -205,51 +237,61 @@ object BlockerStore {
     }
 
     fun getTodayUsageMillis(c: Context, pkg: String): Long {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = cal.timeInMillis
+        val now = System.currentTimeMillis()
+        val elapsedToday = (now - startOfDay).coerceAtLeast(0L)
+
         var usmTotal = 0L
         runCatching {
             val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                val startOfDay = cal.timeInMillis
-                val now = System.currentTimeMillis()
-                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startOfDay, now)
                 if (!list.isNullOrEmpty()) {
-                    usmTotal = list.filter { it.packageName == pkg }.sumOf { it.totalTimeInForeground }
+                    val pkgStats = list.filter { it.packageName == pkg && it.lastTimeStamp >= startOfDay }
+                    val maxFg = pkgStats.maxOfOrNull { it.totalTimeInForeground } ?: 0L
+                    usmTotal = minOf(maxFg, elapsedToday)
                 }
             }
         }
         val stored = getStoredTodayUsageMillis(c, pkg)
-        return maxOf(usmTotal, stored)
+        return minOf(maxOf(usmTotal, stored), elapsedToday)
     }
 
     fun getAllTodayUsageMillis(c: Context): Map<String, Long> {
         val res = getAllStoredTodayUsageMillis(c).toMutableMap()
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = cal.timeInMillis
+        val now = System.currentTimeMillis()
+        val elapsedToday = (now - startOfDay).coerceAtLeast(0L)
+
         runCatching {
             val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                val startOfDay = cal.timeInMillis
-                val now = System.currentTimeMillis()
-                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, now)
+                val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startOfDay, now)
                 if (!list.isNullOrEmpty()) {
                     for (s in list) {
-                        if (s.totalTimeInForeground > 0) {
+                        if (s.lastTimeStamp >= startOfDay && s.totalTimeInForeground > 0) {
                             val prev = res[s.packageName] ?: 0L
-                            res[s.packageName] = maxOf(prev, s.totalTimeInForeground)
+                            val bounded = minOf(s.totalTimeInForeground, elapsedToday)
+                            res[s.packageName] = maxOf(prev, bounded)
                         }
                     }
                 }
             }
+        }
+        res.keys.forEach { k ->
+            res[k] = minOf(res[k] ?: 0L, elapsedToday)
         }
         return res
     }
@@ -262,6 +304,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     private val admin get() = ComponentName(ctx, BlockerDeviceAdminReceiver::class.java)
 
     init {
+        BlockerForegroundService.start(ctx)
         io.execute {
             try {
                 val pInfo = rc.packageManager.getPackageInfo(rc.packageName, 0)
@@ -725,23 +768,38 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
      *  widening one is immediate. Shrinking, disabling, or deleting one that is currently in effect
      *  needs the "focus" guard; doing any of those while it's not currently active is immediate. */
     @ReactMethod
-    fun addSchedule(label: String, startMin: Int, endMin: Int, enabled: Boolean, promise: Promise) {
+    fun addSchedule(label: String, startMin: Int, endMin: Int, enabled: Boolean, allowedApps: ReadableArray?, promise: Promise) {
+        val appSet = mutableSetOf<String>()
+        if (allowedApps != null) {
+            for (i in 0 until allowedApps.size()) {
+                allowedApps.getString(i)?.let { if (it.isNotEmpty()) appSet.add(it) }
+            }
+        }
         val s = FocusSchedule(
             java.util.UUID.randomUUID().toString(), label.trim().ifEmpty { "Schedule" },
-            startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled
+            startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled, appSet
         )
         BlockerStore.putSchedules(ctx, BlockerStore.schedules(ctx) + s)
         promise.resolve(s.id)
     }
 
     @ReactMethod
-    fun updateSchedule(id: String, label: String, startMin: Int, endMin: Int, enabled: Boolean, promise: Promise) {
+    fun updateSchedule(id: String, label: String, startMin: Int, endMin: Int, enabled: Boolean, allowedApps: ReadableArray?, promise: Promise) {
         val list = BlockerStore.schedules(ctx)
         val old = list.find { it.id == id } ?: run {
             promise.reject("NOT_FOUND", "No such schedule.")
             return
         }
-        val new = FocusSchedule(id, label.trim().ifEmpty { "Schedule" }, startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled)
+        val appSet = if (allowedApps != null) {
+            val set = mutableSetOf<String>()
+            for (i in 0 until allowedApps.size()) {
+                allowedApps.getString(i)?.let { if (it.isNotEmpty()) set.add(it) }
+            }
+            set
+        } else {
+            old.allowedApps
+        }
+        val new = FocusSchedule(id, label.trim().ifEmpty { "Schedule" }, startMin.coerceIn(0, 1439), endMin.coerceIn(0, 1439), enabled, appSet)
         val wasActive = BlockerStore.scheduleIsActiveNow(old)
         val shrinking = wasActive && (!new.enabled || windowLen(new.startMin, new.endMin) < windowLen(old.startMin, old.endMin))
         if (shrinking && !BlockerStore.guardOpen(ctx, "schedule") && !BlockerStore.guardOpen(ctx, "focus")) {
@@ -778,6 +836,9 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 putInt("endMin", s.endMin)
                 putBoolean("enabled", s.enabled)
                 putBoolean("activeNow", BlockerStore.scheduleIsActiveNow(s))
+                val appsArr = Arguments.createArray()
+                s.allowedApps.forEach { appsArr.pushString(it) }
+                putArray("allowedApps", appsArr)
             })
         }
         promise.resolve(out)
@@ -798,6 +859,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             var resolved = false
             val dialog = TimePickerDialog(
                 activity,
+                android.R.style.Theme_DeviceDefault_Dialog_Alert,
                 { _, hour, minute ->
                     resolved = true
                     promise.resolve(hour * 60 + minute)

@@ -2,7 +2,10 @@ package com.blocker
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -15,6 +18,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -132,6 +136,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.instagram.android:id/search_edit_text"
         )
         private val FB_REELS_PLAYER_IDS = listOf(
+            // Reels & short video viewers
             "com.facebook.katana:id/fb_shorts_viewer_container",
             "com.facebook.katana:id/fb_shorts_video_container",
             "com.facebook.katana:id/fb_shorts_viewer_view_pager",
@@ -144,14 +149,35 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.katana:id/reels_video_feed",
             "com.facebook.katana:id/watch_and_go_reels_container",
             "com.facebook.katana:id/short_video_feed_fragment",
-            "com.facebook.katana:id/unified_video_viewer",
             "com.facebook.katana:id/feed_short_form_video_container",
             "com.facebook.katana:id/fb_shorts_player_fragment",
+            // Watch, Warion & Channel Feed (Chaining video viewer from newsfeed)
             "com.facebook.katana:id/warion_root_container",
+            "com.facebook.katana:id/warion_container",
+            "com.facebook.katana:id/warion_video_view",
             "com.facebook.katana:id/rich_video_player",
+            "com.facebook.katana:id/channel_feed",
+            "com.facebook.katana:id/channel_feed_fragment",
+            "com.facebook.katana:id/channel_feed_view",
+            "com.facebook.katana:id/channel_view",
+            "com.facebook.katana:id/fullscreen_video",
+            "com.facebook.katana:id/fullscreen_video_player",
+            "com.facebook.katana:id/video_fullscreen_player",
+            "com.facebook.katana:id/unified_video_viewer",
+            "com.facebook.katana:id/watch_and_go",
+            "com.facebook.katana:id/watch_feed_fragment",
+            "com.facebook.katana:id/watch_feed",
+            "com.facebook.katana:id/video_home",
+            "com.facebook.katana:id/video_home_fragment",
+            "com.facebook.katana:id/video_seek_bar",
+            "com.facebook.katana:id/video_time_display",
+            "com.facebook.katana:id/playback_control_overlay",
+            // Facebook Lite IDs
             "com.facebook.lite:id/reels_screen",
             "com.facebook.lite:id/reels_player",
-            "com.facebook.lite:id/video_player_reels"
+            "com.facebook.lite:id/video_player_reels",
+            "com.facebook.lite:id/watch_screen",
+            "com.facebook.lite:id/video_player"
         )
         // The AOSP list screen only ever means "browse admins to possibly deactivate one" — block outright.
         private val DEVICE_ADMIN_LIST_CLASSES = setOf(
@@ -699,14 +725,43 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    if (currentFgPkg != null && fgStartTime > 0L) {
+                        val delta = (System.currentTimeMillis() - fgStartTime).coerceAtLeast(0L)
+                        if (delta > 0L) {
+                            BlockerStore.addAppUsageMillis(this@BlockerAccessibilityService, currentFgPkg!!, minOf(delta, 60_000L))
+                        }
+                    }
+                    currentFgPkg = null
+                    fgStartTime = 0L
+                }
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                    fgStartTime = System.currentTimeMillis()
+                }
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        BlockerForegroundService.start(this)
         loadAppIdentity()
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
         BlockerStore.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
+        runCatching {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            registerReceiver(screenReceiver, filter)
+        }
         runCatching {
             for (k in ADB_SETTING_KEYS) contentResolver.registerContentObserver(Settings.Global.getUriFor(k), false, adbObserver)
         }
@@ -718,6 +773,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         main.removeCallbacks(appLimitWatchdog)
         if (instance === this) instance = null
         BlockerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener)
+        runCatching { unregisterReceiver(screenReceiver) }
         runCatching { contentResolver.unregisterContentObserver(adbObserver) }
         synchronized(appInfoLock) {
             appInfoBg?.removeCallbacks(appInfoLoop)
@@ -869,10 +925,24 @@ class BlockerAccessibilityService : AccessibilityService() {
         enforceAdbOff(notify = false)
     }
 
+    private val todayUsageCache = HashMap<String, Pair<Long, Long>>() // pkg -> (timestamp, usageMs)
+    private val lastEventTime = HashMap<String, Long>()
+    private val lastUsageCheck = HashMap<String, Long>()
+
     private fun getEffectiveUsageMillis(pkg: String): Long {
-        val base = BlockerStore.getTodayUsageMillis(this, pkg)
-        val activeSession = if (currentFgPkg == pkg && fgStartTime > 0L) {
-            (System.currentTimeMillis() - fgStartTime).coerceAtLeast(0L)
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isInteractive = pm?.isInteractive ?: true
+        val now = System.currentTimeMillis()
+        val cached = todayUsageCache[pkg]
+        val base = if (cached != null && (now - cached.first < 4000L)) {
+            cached.second
+        } else {
+            val fresh = BlockerStore.getTodayUsageMillis(this, pkg)
+            todayUsageCache[pkg] = Pair(now, fresh)
+            fresh
+        }
+        val activeSession = if (isInteractive && currentFgPkg == pkg && fgStartTime > 0L) {
+            (now - fgStartTime).coerceAtLeast(0L)
         } else 0L
         return base + activeSession
     }
@@ -910,26 +980,40 @@ class BlockerAccessibilityService : AccessibilityService() {
     }.getOrDefault(emptySet())
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
-        val ev = e ?: return
-        val pkg = ev.packageName?.toString() ?: return
+        try {
+            val ev = e ?: return
+            val pkg = ev.packageName?.toString() ?: return
 
-        if (pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
-            if (currentFgPkg != pkg) {
-                if (currentFgPkg != null && fgStartTime > 0L) {
-                    val delta = System.currentTimeMillis() - fgStartTime
-                    BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm?.isInteractive == false) {
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            // Throttle rapid WINDOW_CONTENT_CHANGED events outside settings to eliminate scroll/animation lag
+            if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                val lastEv = lastEventTime[pkg] ?: 0L
+                if (now - lastEv < 75L) return
+            }
+            lastEventTime[pkg] = now
+
+            if (pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                if (currentFgPkg != pkg) {
+                    if (currentFgPkg != null && fgStartTime > 0L) {
+                        val delta = (now - fgStartTime).coerceAtLeast(0L)
+                        BlockerStore.addAppUsageMillis(this, currentFgPkg!!, minOf(delta, 60_000L))
+                    }
+                    currentFgPkg = pkg
+                    fgStartTime = now
                 }
-                currentFgPkg = pkg
-                fgStartTime = System.currentTimeMillis()
+            } else if (pkg in neverBlock) {
+                if (currentFgPkg != null && fgStartTime > 0L) {
+                    val delta = (now - fgStartTime).coerceAtLeast(0L)
+                    BlockerStore.addAppUsageMillis(this, currentFgPkg!!, minOf(delta, 60_000L))
+                }
+                currentFgPkg = null
+                fgStartTime = 0L
             }
-        } else if (pkg in neverBlock) {
-            if (currentFgPkg != null && fgStartTime > 0L) {
-                val delta = System.currentTimeMillis() - fgStartTime
-                BlockerStore.addAppUsageMillis(this, currentFgPkg!!, delta)
-            }
-            currentFgPkg = null
-            fgStartTime = 0L
-        }
 
         if (pkg == packageName) {
             viewingBlockerSettingsUntil = 0L
@@ -1067,15 +1151,21 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (checkGranularInterception(pkg, ev)) return
             }
         }
-        if (checkAppUsageLimit(pkg)) return
+        if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || now - (lastUsageCheck[pkg] ?: 0L) > 5000L) {
+            lastUsageCheck[pkg] = now
+            if (checkAppUsageLimit(pkg)) return
+        }
         if (pkg !in exempt) scanScreen(pkg)
+    } catch (_: Throwable) {
+        // Safe guard against any unexpected framework or node lifecycle exceptions
     }
+}
 
     // ---------- Focus mode ----------
 
     /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
     private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
-        if (pkg in focusAllowed) return false
+        if (pkg in focusAllowed || pkg in BlockerStore.scheduleAllowedApps(this)) return false
         val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             rootInActiveWindow?.packageName?.toString() == pkg
         if (!trusted) return false
@@ -2182,8 +2272,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - (lastGranularHit[pkg] ?: 0L) < 700L) return true
 
-        val root = rootInActiveWindow ?: return false
-        if (root.packageName?.toString() != pkg) return false
+        val root = rootInActiveWindow ?: ev.source ?: return false
+        if (root.packageName?.toString() != pkg && !root.packageName?.toString().orEmpty().contains("facebook")) return false
 
         val evCls = ev.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
@@ -2224,24 +2314,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
             "com.facebook.katana", "com.facebook.lite" -> {
                 if (!blockFbReels) return false
-                // 1. Check Reels tab in navigation bar (only when selected)
-                val isReelsTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
-                    scanSelectedTab(root, listOf("reels", "facebook reels"))
-                // 2. Check full-screen Reels viewer (e.g. clicked from newsfeed)
-                val isReelsPlayer = hasAnyNodeId(root, FB_REELS_PLAYER_IDS) ||
-                    evCls.contains("fbshorts") || evCls.contains("reelsviewer") ||
-                    rootCls.contains("fbshorts") || rootCls.contains("reelsviewer")
-                // 3. Fallback text inspection for Facebook Reels playback overlay markers
-                val isReelsOverlay = if (!isReelsTab && !isReelsPlayer) {
-                    val sb = StringBuilder()
-                    collectText(root, sb, 0, intArrayOf(100))
-                    val t = sb.toString().lowercase()
-                    t.contains("remix this reel") || t.contains("use audio") ||
-                        t.contains("share reel") || (t.contains("reels") && (t.contains("remix") || t.contains("original audio") || t.contains("reels audio")))
-                } else false
-
-                if (isReelsTab || isReelsPlayer || isReelsOverlay) {
-                    exitSubFeature(pkg, "Facebook Reels")
+                if (isFacebookVideoOrReels(root, ev)) {
+                    exitSubFeature(pkg, "Facebook Video & Reels")
                     return true
                 }
             }
@@ -2280,6 +2354,76 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastGranularHit[pkg] = now
         quietUntil[pkg] = now + 1500L
         performGlobalAction(GLOBAL_ACTION_BACK)
+        main.postDelayed({
+            if (currentFgPkg == pkg) {
+                val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
+                if (r != null) {
+                    val stillInSubFeature = when (pkg) {
+                        "com.facebook.katana", "com.facebook.lite" -> isFacebookVideoOrReels(r, null)
+                        "com.google.android.youtube" -> hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts")
+                        "com.instagram.android" -> hasAnyNodeId(r, INSTA_REELS_PLAYER_IDS) || isTabSelectedById(r, "com.instagram.android:id/clips_tab")
+                        else -> false
+                    }
+                    if (stillInSubFeature) {
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                    }
+                }
+            }
+        }, 250L)
+    }
+
+    private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        // 1. Check Reels & Video tabs in navigation bar (only when actually selected)
+        val isVideoOrReelsTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_reels") ||
+            isTabSelectedById(root, "com.facebook.katana:id/fb_shorts_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/video_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_video") ||
+            isTabSelectedById(root, "com.facebook.katana:id/watch_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_watch") ||
+            isTabSelectedById(root, "com.facebook.katana:id/video_home_tab") ||
+            scanSelectedTab(root, listOf(
+                "reels", "facebook reels", "short videos", "reels tab",
+                "video, tab", "watch, tab", "video tab", "watch tab", "videos, tab"
+            ))
+        if (isVideoOrReelsTab) return true
+
+        // 2. Check full-screen / immersive Video or Reels player IDs
+        if (hasAnyNodeId(root, FB_REELS_PLAYER_IDS)) return true
+
+        // 3. Check Window / Event / View class names
+        val evCls = ev?.className?.toString().orEmpty().lowercase()
+        val rootCls = root.className?.toString().orEmpty().lowercase()
+        val isVideoClass = evCls.contains("channelfeed") || rootCls.contains("channelfeed") ||
+            evCls.contains("warion") || rootCls.contains("warion") ||
+            evCls.contains("fullscreenvideo") || rootCls.contains("fullscreenvideo") ||
+            evCls.contains("watchandmore") || rootCls.contains("watchandmore") ||
+            evCls.contains("videohome") || rootCls.contains("videohome") ||
+            evCls.contains("fbshorts") || rootCls.contains("fbshorts") ||
+            evCls.contains("reelsviewer") || rootCls.contains("reelsviewer") ||
+            evCls.contains("reelwatch") || rootCls.contains("reelwatch") ||
+            evCls.contains("richvideoplayer") || rootCls.contains("richvideoplayer")
+        if (isVideoClass) return true
+
+        // 4. Fallback text & contentDescription inspection for video player & reels playback overlay markers (Litho/Compose)
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(250))
+        val t = sb.toString().lowercase()
+
+        // Markers specific to full-screen video player or reels playback overlay
+        val hasPlayerControls = ("enter full screen" in t || "exit full screen" in t) ||
+            (("pause video" in t || "play video" in t) && ("seek bar" in t || "elapsed time" in t || "rewind 10" in t || "mute" in t || "full screen" in t)) ||
+            ("rewind 10 seconds" in t || "fast forward 10 seconds" in t)
+        val hasVideoChaining = "swipe up for next video" in t || "swipe up for more" in t ||
+            "watch more videos" in t || "watch more reels" in t ||
+            ("more videos" in t && ("pause" in t || "play" in t || "share" in t)) ||
+            ("suggested videos" in t && ("pause" in t || "play" in t)) ||
+            ("next video" in t && ("pause" in t || "play" in t))
+        val hasReelsOverlay = "remix this reel" in t || "use audio" in t ||
+            "share reel" in t || "reels audio" in t ||
+            (t.contains("reels") && (t.contains("remix") || t.contains("original audio") || t.contains("follow") || t.contains("like reel")))
+
+        return hasPlayerControls || hasVideoChaining || hasReelsOverlay
     }
 
     private fun hasAnyNodeId(root: AccessibilityNodeInfo, ids: List<String>): Boolean {

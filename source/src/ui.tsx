@@ -9,18 +9,17 @@ import { cancel, confirm } from './services/ProtectionManager';
 import { APP_ICON_DATA_URI } from './data/appIcon';
 import { BG_PATTERN_DATA_URI } from './data/bgPattern';
 
-// Purple-on-dark, glassmorphism-inspired. Cards use a translucent purple tint over the base
-// background (true backdrop blur needs a native blur library, which isn't wired into this build).
+// Purple-on-dark, glassmorphism-inspired with increased card opacity and vibrant accents
 const DARK = {
-  bg: '#0C0A16', bgAlt: '#120E22', card: 'rgba(139,92,246,0.08)', cardBorder: 'rgba(199,175,255,0.16)',
-  glass: 'rgba(255,255,255,0.04)', text: '#F3F0FF', sub: '#9C93B8', border: 'rgba(199,175,255,0.14)',
-  accent: '#8B5CF6', accentSoft: 'rgba(139,92,246,0.18)', danger: '#F5455C', dangerSoft: 'rgba(245,69,92,0.16)',
+  bg: '#0C0A16', bgAlt: '#120E22', card: 'rgba(139,92,246,0.14)', cardBorder: 'rgba(199,175,255,0.22)',
+  glass: 'rgba(255,255,255,0.06)', text: '#F3F0FF', sub: '#9C93B8', border: 'rgba(199,175,255,0.18)',
+  accent: '#8B5CF6', accentSoft: 'rgba(139,92,246,0.20)', danger: '#F5455C', dangerSoft: 'rgba(245,69,92,0.16)',
   ok: '#2ED88A', okSoft: 'rgba(46,216,138,0.16)', warn: '#F5A623', warnSoft: 'rgba(245,166,35,0.16)'
 };
 const LIGHT: typeof DARK = {
-  bg: '#F5F3FC', bgAlt: '#EDE9FB', card: 'rgba(139,92,246,0.06)', cardBorder: 'rgba(124,58,237,0.16)',
-  glass: 'rgba(255,255,255,0.5)', text: '#181321', sub: '#655E78', border: 'rgba(124,58,237,0.14)',
-  accent: '#7C3AED', accentSoft: 'rgba(124,58,237,0.12)', danger: '#DC2A42', dangerSoft: 'rgba(220,42,66,0.1)',
+  bg: '#F5F3FC', bgAlt: '#EDE9FB', card: 'rgba(139,92,246,0.12)', cardBorder: 'rgba(124,58,237,0.20)',
+  glass: 'rgba(255,255,255,0.5)', text: '#181321', sub: '#655E78', border: 'rgba(124,58,237,0.16)',
+  accent: '#7C3AED', accentSoft: 'rgba(124,58,237,0.14)', danger: '#DC2A42', dangerSoft: 'rgba(220,42,66,0.1)',
   ok: '#149A63', okSoft: 'rgba(20,154,99,0.12)', warn: '#C77700', warnSoft: 'rgba(199,119,0,0.12)'
 };
 export type Theme = typeof DARK;
@@ -45,7 +44,7 @@ export function AppBackground() {
           {
             width: '100%',
             height: '100%',
-            opacity: 0.30,
+            opacity: 0.22,
           },
         ]}
         resizeMode="cover"
@@ -61,10 +60,10 @@ export function Header() {
   const t = useTheme();
   return (
     <View style={{
-      flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6
+      flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 8
     }}>
-      <Image source={{ uri: APP_ICON_DATA_URI }} style={{ width: 30, height: 30 }} resizeMode="contain" />
-      <Text style={{ color: t.accent, fontSize: 20, fontWeight: '800', letterSpacing: 0.3 }}>Blocker</Text>
+      <Image source={{ uri: APP_ICON_DATA_URI }} style={{ width: 34, height: 34 }} resizeMode="contain" />
+      <Text style={{ color: t.accent, fontSize: 24, fontWeight: '800', letterSpacing: -0.3 }}>Blocker</Text>
     </View>
   );
 }

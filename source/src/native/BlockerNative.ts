@@ -62,6 +62,7 @@ export interface Schedule {
   endMin: number;
   enabled: boolean;
   activeNow: boolean;
+  allowedApps?: string[];
 }
 
 interface BlockerNativeSpec {
@@ -88,8 +89,8 @@ interface BlockerNativeSpec {
   endFocus(): Promise<boolean>;
   setFocusApps(packages: string[]): Promise<boolean>;
   getSchedules(): Promise<Schedule[]>;
-  addSchedule(label: string, startMin: number, endMin: number, enabled: boolean): Promise<string>;
-  updateSchedule(id: string, label: string, startMin: number, endMin: number, enabled: boolean): Promise<boolean>;
+  addSchedule(label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<string>;
+  updateSchedule(id: string, label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<boolean>;
   deleteSchedule(id: string): Promise<boolean>;
   /** Shows Android's own clock-style AM/PM time picker; resolves minutes since midnight, or rejects on cancel. */
   pickTime(initialMinute: number): Promise<number>;

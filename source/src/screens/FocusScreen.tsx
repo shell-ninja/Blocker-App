@@ -55,23 +55,27 @@ function Chips({ values, selected, onPick }: { values: number[]; selected?: numb
   );
 }
 
-/** A button showing a 12-hour time that opens Android's own clock-dial picker when tapped. */
+/** A button showing a 12-hour time that opens Android's system clock picker. */
 function TimeButton({ minute, onChange }: { minute: number; onChange: (m: number) => void }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={() => Native.pickTime(minute).then(onChange).catch(() => {})}
-      style={{
-        backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12,
-        paddingVertical: 10, paddingHorizontal: 16, minWidth: 96, alignItems: 'center'
-      }}>
-      <Text style={{ color: t.text, fontWeight: '700', fontSize: 15 }}>{clock12(minute)}</Text>
+      style={({ pressed }) => [{
+        backgroundColor: t.glass, borderColor: t.border, borderWidth: 1, borderRadius: 14,
+        paddingVertical: 9, paddingHorizontal: 14, minWidth: 106, alignItems: 'center',
+        flexDirection: 'row', gap: 7, justifyContent: 'center',
+        transform: [{ scale: pressed ? 0.95 : 1 }], opacity: pressed ? 0.8 : 1
+      }]}>
+      <Icons.clock size={14} color={t.accent} strokeWidth={2.3} />
+      <Text style={{ color: t.text, fontWeight: '700', fontSize: 14, letterSpacing: -0.2 }}>{clock12(minute)}</Text>
     </Pressable>
   );
 }
 
 /** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
-function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean }) {
+/** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
+function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp[]; initialOpen?: boolean }) {
   const t = useTheme();
   const p = useProtection();
   const isSaved = (p.state.savedSchedules ?? []).includes(s.id);
@@ -81,17 +85,29 @@ function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean })
   const [label_, setLabel] = useState(s.label);
   const [start, setStart] = useState(s.startMin);
   const [end, setEnd] = useState(s.endMin);
+  const [allowedApps, setAllowedApps] = useState<string[]>(s.allowedApps ?? []);
+  const [showAppPicker, setShowAppPicker] = useState(false);
+  const [appQuery, setAppQuery] = useState('');
+
   useEffect(() => {
     setLabel(s.label);
     setStart(s.startMin);
     setEnd(s.endMin);
-  }, [s.label, s.startMin, s.endMin]);
+    setAllowedApps(s.allowedApps ?? []);
+  }, [s.label, s.startMin, s.endMin, s.allowedApps]);
 
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
-  const dirty = !isSaved || label_ !== s.label || start !== s.startMin || end !== s.endMin;
+  const appsDirty = JSON.stringify([...(allowedApps ?? [])].sort()) !== JSON.stringify([...(s.allowedApps ?? [])].sort());
+  const dirty = !isSaved || label_ !== s.label || start !== s.startMin || end !== s.endMin || appsDirty;
   const guard = (fn: () => Promise<unknown>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
 
-  const patch: SchedulePatch = { label: label_.trim() || 'Schedule', startMin: start, endMin: end, enabled: s.enabled };
+  const patch: SchedulePatch = {
+    label: label_.trim() || 'Schedule',
+    startMin: start,
+    endMin: end,
+    enabled: s.enabled,
+    allowedApps
+  };
 
   const save = () => guard(async () => {
     const wasSaved = isSaved;
@@ -136,7 +152,10 @@ function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean })
       <Pressable onPress={toggleOpen} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1 }]}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>{s.label}</Text>
-          <Text style={{ color: t.sub, fontSize: 13, marginTop: 1 }}>{clock12(s.startMin)} – {clock12(s.endMin)}</Text>
+          <Text style={{ color: t.sub, fontSize: 13, marginTop: 1 }}>
+            {clock12(s.startMin)} – {clock12(s.endMin)}
+            {allowedApps.length > 0 ? ` • ${allowedApps.length} apps allowed` : ''}
+          </Text>
         </View>
         <Animated.View style={{ transform: [{ rotate: rotateInterp }] }}>
           <ChevronDown size={18} color={t.sub} />
@@ -169,6 +188,80 @@ function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean })
               <TimeButton minute={end} onChange={setEnd} />
             </View>
           </View>
+
+          {/* Per-schedule unblocked apps customization */}
+          <View style={{ marginTop: 4, padding: 12, backgroundColor: t.card, borderRadius: 12, borderWidth: 1, borderColor: t.cardBorder }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>Allowed Apps</Text>
+                <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
+                  {allowedApps.length === 0
+                    ? 'Default essential apps allowed'
+                    : `${allowedApps.length} custom app${allowedApps.length === 1 ? '' : 's'} unblocked`}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setShowAppPicker(!showAppPicker)}
+                style={{
+                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+                  backgroundColor: showAppPicker ? t.accent : t.cardBorder,
+                  borderWidth: 1, borderColor: showAppPicker ? t.accent : t.border
+                }}>
+                <Text style={{ color: showAppPicker ? '#fff' : t.text, fontSize: 12, fontWeight: '700' }}>
+                  {showAppPicker ? 'Done' : 'Customize'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {showAppPicker && (
+              <View style={{ marginTop: 10 }}>
+                <TextInput
+                  value={appQuery}
+                  onChangeText={setAppQuery}
+                  placeholder="Search apps to allow..."
+                  placeholderTextColor={t.sub}
+                  style={{
+                    backgroundColor: t.bg, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 8,
+                    paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, marginBottom: 8
+                  }}
+                />
+                <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                  {apps
+                    .filter(a => !appQuery.trim() || a.label.toLowerCase().includes(appQuery.trim().toLowerCase()))
+                    .slice(0, 50)
+                    .map(a => {
+                      const isAllowed = allowedApps.includes(a.packageName);
+                      return (
+                        <Pressable
+                          key={a.packageName}
+                          onPress={() => {
+                            setAllowedApps(prev =>
+                              isAllowed ? prev.filter(pkg => pkg !== a.packageName) : [...prev, a.packageName]
+                            );
+                          }}
+                          style={{
+                            flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
+                            gap: 8, borderBottomWidth: 1, borderBottomColor: t.cardBorder
+                          }}>
+                          <AppIcon pkg={a.packageName} />
+                          <Text style={{ color: t.text, flex: 1, fontSize: 13 }} numberOfLines={1}>{a.label}</Text>
+                          <Switch
+                            value={isAllowed}
+                            onValueChange={v => {
+                              setAllowedApps(prev =>
+                                v ? [...new Set([...prev, a.packageName])] : prev.filter(pkg => pkg !== a.packageName)
+                              );
+                            }}
+                            trackColor={{ true: t.accent }}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {dirty && <View style={{ flex: 1 }}><Btn label={isSaved ? "Save" : "Save schedule"} icon={Icons.clock} onPress={save} /></View>}
             <View style={dirty ? undefined : { flex: 1 }}>
@@ -181,7 +274,7 @@ function ScheduleRow({ s, initialOpen }: { s: Schedule; initialOpen?: boolean })
   );
 }
 
-function SchedulesCard() {
+function SchedulesCard({ apps }: { apps: InstalledApp[] }) {
   const t = useTheme();
   const p = useProtection();
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
@@ -190,7 +283,7 @@ function SchedulesCard() {
   const addNew = () => {
     const start = nextRoundedHour();
     const end = (start + 60) % 1440;
-    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true)
+    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true, [])
       .then(id => setNewestId(id))
       .catch(e => showAlert('Blocker', errMsg(e)));
   };
@@ -205,7 +298,7 @@ function SchedulesCard() {
         <Btn label="Add" icon={Icons.plus} onPress={addNew} />
       </View>
       {p.schedules.length === 0 && <Sub>No schedules yet — tap Add, or the + button, to create one.</Sub>}
-      {p.schedules.map(s => <ScheduleRow key={s.id} s={s} initialOpen={s.id === newestId} />)}
+      {p.schedules.map(s => <ScheduleRow key={s.id} s={s} apps={apps} initialOpen={s.id === newestId} />)}
       <Sub>First-time schedule setup is saved immediately. Once saved, editing, shrinking or turning one off waits for {delayText}.</Sub>
       <LockBar lockKey="schedule" />
     </Card>
@@ -302,34 +395,34 @@ function GranularFocusCard() {
 
   return (
     <Card>
-      <Title icon={Icons.shieldOn}>Focus Distraction Shields</Title>
-      <Sub>Intercept and exit addictive short-form loops without closing allowed parent apps.</Sub>
+      <Title icon={Icons.shieldOn}>Distraction Shields</Title>
+      <Sub>Exit short-form video feeds while keeping parent apps usable.</Sub>
       <View style={{ marginTop: 10 }}>
         <AnimatedToggleRow
           icon={Icons.play}
           label="Block YouTube Shorts"
-          sub="Instantly exit Shorts player feed back to regular YouTube"
+          sub="Exit Shorts back to standard feed"
           value={gf.block_yt_shorts}
           onValueChange={v => onToggle('block_yt_shorts', v)}
         />
         <AnimatedToggleRow
           icon={Icons.film}
           label="Block Instagram Reels"
-          sub="Instantly exit Reels tab & player back to main feed"
+          sub="Exit Reels back to main feed"
           value={gf.block_insta_reels}
           onValueChange={v => onToggle('block_insta_reels', v)}
         />
         <AnimatedToggleRow
           icon={Icons.search}
-          label="Block Instagram Explore / Search"
-          sub="Instantly exit Search & Explore feed to prevent scrolling"
+          label="Block Instagram Explore"
+          sub="Exit Explore & search feed"
           value={gf.block_insta_search}
           onValueChange={v => onToggle('block_insta_search', v)}
         />
         <AnimatedToggleRow
           icon={Icons.apps}
           label="Block Facebook Reels"
-          sub="Instantly exit Reels viewer back to main Facebook feed"
+          sub="Exit Reels & video feeds"
           value={gf.block_fb_reels}
           onValueChange={v => onToggle('block_fb_reels', v)}
         />
@@ -390,6 +483,14 @@ export default function FocusScreen() {
     showAlert('Change requested', `Focus ends early only after the ${delayText} timer completes and you confirm.`);
   });
 
+  const activeFocusApps = useMemo(() => {
+    const set = new Set(p.focus.apps);
+    if (activeSchedule?.allowedApps) {
+      activeSchedule.allowedApps.forEach(pkg => set.add(pkg));
+    }
+    return Array.from(set);
+  }, [p.focus.apps, activeSchedule]);
+
   if (active) {
     return (
       <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -407,7 +508,7 @@ export default function FocusScreen() {
 
         <Card>
           <Title icon={Icons.play}>Open an essential app</Title>
-          {p.focus.apps.map(pkg => {
+          {activeFocusApps.map(pkg => {
             const a = byPkg.get(pkg);
             return (
               <View key={pkg} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 12 }}>
@@ -439,7 +540,7 @@ export default function FocusScreen() {
           <Btn label="End focus now" kind="danger" icon={Icons.unlock} onPress={endNow} />
         </Card>
 
-        <SchedulesCard />
+        <SchedulesCard apps={apps} />
         <GranularFocusCard />
         <EssentialApps apps={apps} />
       </ScrollView>
@@ -476,7 +577,7 @@ export default function FocusScreen() {
           />
         </Card>
 
-        <SchedulesCard />
+        <SchedulesCard apps={apps} />
         <GranularFocusCard />
         <EssentialApps apps={apps} />
       </ScrollView>
@@ -484,7 +585,7 @@ export default function FocusScreen() {
         onPress={() => {
           const start = nextRoundedHour();
           const end = (start + 60) % 1440;
-          addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true).catch(e => showAlert('Blocker', errMsg(e)));
+          addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true, []).catch(e => showAlert('Blocker', errMsg(e)));
         }}
       />
     </View>
