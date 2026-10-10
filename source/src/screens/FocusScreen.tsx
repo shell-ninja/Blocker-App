@@ -74,7 +74,6 @@ function TimeButton({ minute, onChange }: { minute: number; onChange: (m: number
 }
 
 /** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
-/** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
 function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp[]; initialOpen?: boolean }) {
   const t = useTheme();
   const p = useProtection();
@@ -89,16 +88,25 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
   const [showAppPicker, setShowAppPicker] = useState(false);
   const [appQuery, setAppQuery] = useState('');
 
-  useEffect(() => {
-    setLabel(s.label);
-    setStart(s.startMin);
-    setEnd(s.endMin);
-    setAllowedApps(s.allowedApps ?? []);
-  }, [s.label, s.startMin, s.endMin, s.allowedApps]);
-
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
   const appsDirty = JSON.stringify([...(allowedApps ?? [])].sort()) !== JSON.stringify([...(s.allowedApps ?? [])].sort());
   const dirty = !isSaved || label_ !== s.label || start !== s.startMin || end !== s.endMin || appsDirty;
+
+  const prevScheduleJson = useRef(JSON.stringify({ id: s.id, label: s.label, start: s.startMin, end: s.endMin, apps: (s.allowedApps ?? []).slice().sort() }));
+
+  useEffect(() => {
+    const nextJson = JSON.stringify({ id: s.id, label: s.label, start: s.startMin, end: s.endMin, apps: (s.allowedApps ?? []).slice().sort() });
+    if (nextJson !== prevScheduleJson.current) {
+      prevScheduleJson.current = nextJson;
+      // Never wipe in-progress edits if the user is actively editing this schedule
+      if (!dirty) {
+        setLabel(s.label);
+        setStart(s.startMin);
+        setEnd(s.endMin);
+        setAllowedApps(s.allowedApps ?? []);
+      }
+    }
+  }, [s.id, s.label, s.startMin, s.endMin, JSON.stringify(s.allowedApps ?? []), dirty]);
   const guard = (fn: () => Promise<unknown>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
 
   const patch: SchedulePatch = {
@@ -113,9 +121,11 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
     const wasSaved = isSaved;
     const r = await updateSchedule(s.id, patch);
     if (r !== 'applied') {
-      showAlert('Change requested', `That change applies only after ${delayText} and confirming, since the schedule is currently active.`);
+      showAlert('Change requested', `That change applies only after ${delayText} and confirming, since protection is active.`);
     } else if (!wasSaved) {
       showAlert('Schedule saved', `"${patch.label}" is saved and active. Future changes will be protected.`);
+    } else {
+      showAlert('Schedule saved', `"${patch.label}" has been updated.`);
     }
   });
 
@@ -147,23 +157,46 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
     Animated.timing(rotate, { toValue: next ? 1 : 0, duration: 200, useNativeDriver: true }).start();
   };
 
+  const filteredApps = useMemo(() => {
+    const q = appQuery.trim().toLowerCase();
+    const matched = apps.filter(a => !q || a.label.toLowerCase().includes(q) || a.packageName.toLowerCase().includes(q));
+    return matched.sort((a, b) => {
+      const aAllowed = allowedApps.includes(a.packageName) ? 1 : 0;
+      const bAllowed = allowedApps.includes(b.packageName) ? 1 : 0;
+      if (aAllowed !== bAllowed) return bAllowed - aAllowed;
+      return a.label.localeCompare(b.label);
+    }).slice(0, 80);
+  }, [apps, appQuery, allowedApps]);
+
+  const toggleApp = (pkg: string) => {
+    setAllowedApps(prev =>
+      prev.includes(pkg) ? prev.filter(p => p !== pkg) : [...prev, pkg]
+    );
+  };
+
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: t.cardBorder, paddingVertical: 10 }}>
-      <Pressable onPress={toggleOpen} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1 }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>{s.label}</Text>
-          <Text style={{ color: t.sub, fontSize: 13, marginTop: 1 }}>
-            {clock12(s.startMin)} – {clock12(s.endMin)}
-            {allowedApps.length > 0 ? ` • ${allowedApps.length} apps allowed` : ''}
-          </Text>
-        </View>
-        <Animated.View style={{ transform: [{ rotate: rotateInterp }] }}>
-          <ChevronDown size={18} color={t.sub} />
-        </Animated.View>
-        {!isSaved && <Badge label="New" tone="warn" />}
-        {s.activeNow && <Badge label="Active" tone="ok" />}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Pressable
+          onPress={toggleOpen}
+          style={({ pressed }) => [{
+            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1
+          }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>{label_ || s.label}</Text>
+            <Text style={{ color: t.sub, fontSize: 13, marginTop: 1 }}>
+              {clock12(start)} – {clock12(end)}
+              {allowedApps.length > 0 ? ` • ${allowedApps.length} apps allowed` : ''}
+            </Text>
+          </View>
+          <Animated.View style={{ transform: [{ rotate: rotateInterp }] }}>
+            <ChevronDown size={18} color={t.sub} />
+          </Animated.View>
+          {!isSaved && <Badge label="New" tone="warn" />}
+          {s.activeNow && <Badge label="Active" tone="ok" />}
+        </Pressable>
         <Switch value={s.enabled} onValueChange={toggleEnabled} trackColor={{ true: t.accent }} />
-      </Pressable>
+      </View>
 
       {open && (
         <View style={{ marginTop: 12, gap: 12 }}>
@@ -226,37 +259,34 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
                   }}
                 />
                 <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
-                  {apps
-                    .filter(a => !appQuery.trim() || a.label.toLowerCase().includes(appQuery.trim().toLowerCase()))
-                    .slice(0, 50)
-                    .map(a => {
-                      const isAllowed = allowedApps.includes(a.packageName);
-                      return (
-                        <Pressable
-                          key={a.packageName}
-                          onPress={() => {
-                            setAllowedApps(prev =>
-                              isAllowed ? prev.filter(pkg => pkg !== a.packageName) : [...prev, a.packageName]
-                            );
-                          }}
-                          style={{
-                            flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
-                            gap: 8, borderBottomWidth: 1, borderBottomColor: t.cardBorder
-                          }}>
-                          <AppIcon pkg={a.packageName} />
-                          <Text style={{ color: t.text, flex: 1, fontSize: 13 }} numberOfLines={1}>{a.label}</Text>
+                  {apps.length === 0 && (
+                    <Text style={{ color: t.sub, fontSize: 12, paddingVertical: 8 }}>Loading installed apps...</Text>
+                  )}
+                  {apps.length > 0 && filteredApps.length === 0 && (
+                    <Text style={{ color: t.sub, fontSize: 12, paddingVertical: 8 }}>No matching apps found.</Text>
+                  )}
+                  {filteredApps.map(a => {
+                    const isAllowed = allowedApps.includes(a.packageName);
+                    return (
+                      <Pressable
+                        key={a.packageName}
+                        onPress={() => toggleApp(a.packageName)}
+                        style={({ pressed }) => [{
+                          flexDirection: 'row', alignItems: 'center', paddingVertical: 7,
+                          gap: 8, borderBottomWidth: 1, borderBottomColor: t.cardBorder,
+                          opacity: pressed ? 0.7 : 1
+                        }]}>
+                        <AppIcon pkg={a.packageName} />
+                        <Text style={{ color: t.text, flex: 1, fontSize: 13 }} numberOfLines={1}>{a.label}</Text>
+                        <View pointerEvents="none">
                           <Switch
                             value={isAllowed}
-                            onValueChange={v => {
-                              setAllowedApps(prev =>
-                                v ? [...new Set([...prev, a.packageName])] : prev.filter(pkg => pkg !== a.packageName)
-                              );
-                            }}
                             trackColor={{ true: t.accent }}
                           />
-                        </Pressable>
-                      );
-                    })}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
                 </ScrollView>
               </View>
             )}
@@ -274,19 +304,10 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
   );
 }
 
-function SchedulesCard({ apps }: { apps: InstalledApp[] }) {
+function SchedulesCard({ apps, onAddNew, newestId }: { apps: InstalledApp[]; onAddNew: () => void; newestId: string | null }) {
   const t = useTheme();
   const p = useProtection();
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
-  const [newestId, setNewestId] = useState<string | null>(null);
-
-  const addNew = () => {
-    const start = nextRoundedHour();
-    const end = (start + 60) % 1440;
-    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true, [])
-      .then(id => setNewestId(id))
-      .catch(e => showAlert('Blocker', errMsg(e)));
-  };
 
   return (
     <Card style={{ paddingBottom: p.schedules.length ? 4 : 16 }}>
@@ -295,7 +316,7 @@ function SchedulesCard({ apps }: { apps: InstalledApp[] }) {
           <Title icon={Icons.clock}>Daily schedules</Title>
           <Sub>Focus mode turns on by itself during each active schedule below.</Sub>
         </View>
-        <Btn label="Add" icon={Icons.plus} onPress={addNew} />
+        <Btn label="Add" icon={Icons.plus} onPress={onAddNew} />
       </View>
       {p.schedules.length === 0 && <Sub>No schedules yet — tap Add, or the + button, to create one.</Sub>}
       {p.schedules.map(s => <ScheduleRow key={s.id} s={s} apps={apps} initialOpen={s.id === newestId} />)}
@@ -444,7 +465,16 @@ export default function FocusScreen() {
   }, []);
 
   const active = p.focus.active;
-  const now = useNow(1000);
+  const now = useNow(active ? 1000 : 0);
+  const [newestId, setNewestId] = useState<string | null>(null);
+
+  const addNewSchedule = () => {
+    const start = nextRoundedHour();
+    const end = (start + 60) % 1440;
+    addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true, [])
+      .then(id => setNewestId(id))
+      .catch(e => showAlert('Blocker', errMsg(e)));
+  };
   // While focus is running, poll a bit faster than the app-wide 5s cadence so a schedule
   // starting/ending, or a change made elsewhere, shows up here within about 2 seconds.
   useEffect(() => {
@@ -540,7 +570,7 @@ export default function FocusScreen() {
           <Btn label="End focus now" kind="danger" icon={Icons.unlock} onPress={endNow} />
         </Card>
 
-        <SchedulesCard apps={apps} />
+        <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
         <GranularFocusCard />
         <EssentialApps apps={apps} />
       </ScrollView>
@@ -577,17 +607,11 @@ export default function FocusScreen() {
           />
         </Card>
 
-        <SchedulesCard apps={apps} />
+        <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
         <GranularFocusCard />
         <EssentialApps apps={apps} />
       </ScrollView>
-      <Fab
-        onPress={() => {
-          const start = nextRoundedHour();
-          const end = (start + 60) % 1440;
-          addSchedule(`Schedule ${p.schedules.length + 1}`, start, end, true, []).catch(e => showAlert('Blocker', errMsg(e)));
-        }}
-      />
+      <Fab onPress={addNewSchedule} />
     </View>
   );
 }
