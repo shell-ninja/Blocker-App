@@ -9,18 +9,18 @@ import { cancel, confirm } from './services/ProtectionManager';
 import { APP_ICON_DATA_URI } from './data/appIcon';
 import { BG_PATTERN_DATA_URI } from './data/bgPattern';
 
-// Modern, high-precision dark/light palette with frosted glassmorphism surfaces
+// Purple-on-dark, glassmorphism-inspired with increased card opacity and vibrant accents
 const DARK = {
-  bg: '#0A0914', bgAlt: '#120F22', card: 'rgba(255,255,255,0.04)', cardBorder: 'rgba(255,255,255,0.08)',
-  glass: 'rgba(255,255,255,0.05)', text: '#F8F9FA', sub: '#94A3B8', border: 'rgba(255,255,255,0.08)',
-  accent: '#8B5CF6', accentSoft: 'rgba(139,92,246,0.15)', danger: '#F43F5E', dangerSoft: 'rgba(244,63,94,0.14)',
-  ok: '#10B981', okSoft: 'rgba(16,185,129,0.14)', warn: '#F59E0B', warnSoft: 'rgba(245,158,11,0.14)'
+  bg: '#0C0A16', bgAlt: '#120E22', card: 'rgba(139,92,246,0.14)', cardBorder: 'rgba(199,175,255,0.22)',
+  glass: 'rgba(255,255,255,0.06)', text: '#F3F0FF', sub: '#9C93B8', border: 'rgba(199,175,255,0.18)',
+  accent: '#8B5CF6', accentSoft: 'rgba(139,92,246,0.20)', danger: '#F5455C', dangerSoft: 'rgba(245,69,92,0.16)',
+  ok: '#2ED88A', okSoft: 'rgba(46,216,138,0.16)', warn: '#F5A623', warnSoft: 'rgba(245,166,35,0.16)'
 };
 const LIGHT: typeof DARK = {
-  bg: '#F8FAFC', bgAlt: '#F1F5F9', card: '#FFFFFF', cardBorder: 'rgba(0,0,0,0.06)',
-  glass: 'rgba(0,0,0,0.03)', text: '#0F172A', sub: '#64748B', border: 'rgba(0,0,0,0.08)',
-  accent: '#7C3AED', accentSoft: 'rgba(124,58,237,0.10)', danger: '#E11D48', dangerSoft: 'rgba(225,29,72,0.10)',
-  ok: '#059669', okSoft: 'rgba(5,150,105,0.10)', warn: '#D97706', warnSoft: 'rgba(217,119,6,0.10)'
+  bg: '#F5F3FC', bgAlt: '#EDE9FB', card: 'rgba(139,92,246,0.12)', cardBorder: 'rgba(124,58,237,0.20)',
+  glass: 'rgba(255,255,255,0.5)', text: '#181321', sub: '#655E78', border: 'rgba(124,58,237,0.16)',
+  accent: '#7C3AED', accentSoft: 'rgba(124,58,237,0.14)', danger: '#DC2A42', dangerSoft: 'rgba(220,42,66,0.1)',
+  ok: '#149A63', okSoft: 'rgba(20,154,99,0.12)', warn: '#C77700', warnSoft: 'rgba(199,119,0,0.12)'
 };
 export type Theme = typeof DARK;
 export const useTheme = (): Theme => (useColorScheme() === 'light' ? LIGHT : DARK);

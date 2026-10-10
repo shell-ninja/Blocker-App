@@ -117,21 +117,34 @@ export default function App() {
             <Pressable
               key={x.id}
               onPress={() => changeTab(x.id)}
-              style={({ pressed }) => [{
-                flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4,
-                transform: [{ scale: pressed ? 0.94 : 1 }], opacity: pressed ? 0.8 : 1
-              }]}>
-              <View style={{
-                width: 48, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-                backgroundColor: active ? t.accentSoft : 'transparent',
-              }}>
-                <Ico size={18} color={active ? t.accent : t.sub} strokeWidth={active ? 2.5 : 2} />
+              style={({ pressed }) => [{ flex: 1, alignItems: 'center', gap: 3, paddingVertical: 6, opacity: pressed ? 0.6 : 1 }]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                {/* Layered vibrant neon glow behind the active icon */}
+                {active && (
+                  <View style={{
+                    position: 'absolute', width: 50, height: 34, borderRadius: 17,
+                    backgroundColor: t.accent, opacity: 0.32,
+                    shadowColor: t.accent, shadowOpacity: 1,
+                    shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 6
+                  }} />
+                )}
+                <View style={{
+                  width: 44, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: active ? t.accentSoft : 'transparent',
+                  borderWidth: active ? 1 : 0, borderColor: t.accent,
+                  shadowColor: active ? t.accent : 'transparent', shadowOpacity: active ? 1 : 0,
+                  shadowRadius: active ? 12 : 0, shadowOffset: { width: 0, height: 0 }, elevation: active ? 8 : 0
+                }}>
+                  <Ico size={18} color={active ? '#FFFFFF' : t.sub} strokeWidth={active ? 2.6 : 2} />
+                </View>
               </View>
               <Text style={{
                 color: active ? t.accent : t.sub,
-                fontWeight: active ? '700' : '500',
+                fontWeight: active ? '700' : '600',
                 fontSize: 11,
-                letterSpacing: -0.1
+                textShadowColor: active ? t.accentSoft : 'transparent',
+                textShadowOffset: { width: 0, height: 0 },
+                textShadowRadius: active ? 8 : 0
               }}>
                 {x.label}
               </Text>
