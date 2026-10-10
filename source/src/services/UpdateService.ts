@@ -379,6 +379,42 @@ class UpdateManager {
       return false;
     }
   }
+
+  async clearUpdateCache(): Promise<{ deletedCount: number; freedBytes: number }> {
+    if (!isSupported || !Native.clearAllUpdateApks) {
+      this.setState({
+        isDownloaded: false,
+        downloadProgress: 0,
+        downloadedBytes: 0,
+        error: null,
+      });
+      return { deletedCount: 0, freedBytes: 0 };
+    }
+    try {
+      const res = await Native.clearAllUpdateApks();
+      this.setState({
+        isDownloaded: false,
+        downloadProgress: 0,
+        downloadedBytes: 0,
+        error: null,
+      });
+      return res;
+    } catch (e: any) {
+      this.setState({ error: e?.message || 'Failed to clear update cache' });
+      throw e;
+    }
+  }
+
+  async getCacheStats(): Promise<{ fileCount: number; totalBytes: number }> {
+    if (!isSupported || !Native.getUpdateCacheStats) {
+      return { fileCount: 0, totalBytes: 0 };
+    }
+    try {
+      return await Native.getUpdateCacheStats();
+    } catch {
+      return { fileCount: 0, totalBytes: 0 };
+    }
+  }
 }
 
 export const UpdateService = new UpdateManager();

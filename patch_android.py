@@ -276,8 +276,19 @@ try:
     build_number = int(build_file.read_text(encoding="utf-8").strip()) if build_file.exists() else 0
 except ValueError:
     build_number = 0
-# Android requires versionCode to be a strictly positive integer (> 0)
-version_code = max(1, build_number + 1)
+# Android requires versionCode to strictly monotonically increase across releases to prevent
+# INSTALL_FAILED_VERSION_DOWNGRADE ("App not installed as package appears to be invalid").
+# We derive a deterministic base versionCode from the semantic marketing version (MAJOR.MINOR.PATCH.HOTFIX),
+# guaranteeing that any higher marketing version will always have a higher versionCode than older versions
+# regardless of whether .build_number is reset.
+digits = [int(p) for p in re.findall(r"\d+", app_version)]
+major = digits[0] if len(digits) > 0 else 1
+minor = digits[1] if len(digits) > 1 else 0
+patch = digits[2] if len(digits) > 2 else 0
+hotfix = digits[3] if len(digits) > 3 else 0
+
+semver_base = (major * 1_000_000) + (minor * 100_000) + (patch * 1_000) + (hotfix * 100)
+version_code = max(1, semver_base + (build_number % 100))
 g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {version_code}", g, count=1)
 g, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{app_version}"', g, count=1)
 if not n1 or not n2:

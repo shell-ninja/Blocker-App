@@ -36,6 +36,14 @@ export function useAppUpdate() {
     return UpdateService.cleanupOldApks();
   };
 
+  const clearUpdateCache = async (): Promise<{ deletedCount: number; freedBytes: number }> => {
+    return UpdateService.clearUpdateCache();
+  };
+
+  const getCacheStats = async (): Promise<{ fileCount: number; totalBytes: number }> => {
+    return UpdateService.getCacheStats();
+  };
+
   return {
     ...state,
     checkForUpdate,
@@ -45,5 +53,7 @@ export function useAppUpdate() {
     openInstallSettings,
     dismissBanner,
     cleanupOldApks,
+    clearUpdateCache,
+    getCacheStats,
   };
 }

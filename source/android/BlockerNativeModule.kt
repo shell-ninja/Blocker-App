@@ -1218,13 +1218,42 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 
     private fun launchInstallIntent(apkFile: File) {
+        val pi = rc.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+        if (pi == null) {
+            if (apkFile.exists()) apkFile.delete()
+            throw IllegalArgumentException("Downloaded file is not a valid Android package archive")
+        }
+
         val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!isCurrentDebug) {
-            val pi = rc.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            val isApkDebug = pi?.applicationInfo?.flags?.let { (it and ApplicationInfo.FLAG_DEBUGGABLE) != 0 } ?: false
+            val isApkDebug = pi.applicationInfo?.flags?.let { (it and ApplicationInfo.FLAG_DEBUGGABLE) != 0 } ?: false
             if (isApkDebug || apkFile.name.contains("debug", ignoreCase = true)) {
                 if (apkFile.exists()) apkFile.delete()
                 throw SecurityException("Updating to debug version is not permitted from the release version")
+            }
+        }
+
+        val newVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pi.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            pi.versionCode.toLong()
+        }
+        val currentPkgInfo = try {
+            rc.packageManager.getPackageInfo(rc.packageName, 0)
+        } catch (e: Exception) {
+            null
+        }
+        if (currentPkgInfo != null) {
+            val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                currentPkgInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                currentPkgInfo.versionCode.toLong()
+            }
+            if (newVersionCode < currentVersionCode) {
+                if (apkFile.exists()) apkFile.delete()
+                throw IllegalStateException("Downloaded update (code $newVersionCode) is older than currently installed version (code $currentVersionCode). Downgrades cannot be installed.")
             }
         }
         val apkUri = FileProvider.getUriForFile(
@@ -1254,6 +1283,67 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 promise.resolve(count)
             } catch (e: Exception) {
                 promise.resolve(0)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun clearAllUpdateApks(promise: Promise) {
+        io.execute {
+            try {
+                val updatesDir = File(rc.cacheDir, "updates")
+                var deletedCount = 0
+                var freedBytes = 0L
+                if (updatesDir.exists() && updatesDir.isDirectory) {
+                    val files = updatesDir.listFiles() ?: emptyArray()
+                    for (file in files) {
+                        if (file.isFile) {
+                            val len = file.length()
+                            if (file.delete()) {
+                                deletedCount++
+                                freedBytes += len
+                            }
+                        }
+                    }
+                }
+                val map = Arguments.createMap().apply {
+                    putInt("deletedCount", deletedCount)
+                    putDouble("freedBytes", freedBytes.toDouble())
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("ERR_CLEAR_CACHE", e.message ?: "Failed to clear update cache")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getUpdateCacheStats(promise: Promise) {
+        io.execute {
+            try {
+                val updatesDir = File(rc.cacheDir, "updates")
+                var fileCount = 0
+                var totalBytes = 0L
+                if (updatesDir.exists() && updatesDir.isDirectory) {
+                    val files = updatesDir.listFiles() ?: emptyArray()
+                    for (file in files) {
+                        if (file.isFile) {
+                            fileCount++
+                            totalBytes += file.length()
+                        }
+                    }
+                }
+                val map = Arguments.createMap().apply {
+                    putInt("fileCount", fileCount)
+                    putDouble("totalBytes", totalBytes.toDouble())
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                val map = Arguments.createMap().apply {
+                    putInt("fileCount", 0)
+                    putDouble("totalBytes", 0.0)
+                }
+                promise.resolve(map)
             }
         }
     }
