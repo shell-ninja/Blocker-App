@@ -16,6 +16,7 @@ export interface SchedulePatch {
   startMin: number;
   endMin: number;
   enabled: boolean;
+  allowedApps?: string[];
 }
 export interface Action {
   t: ActionType;
@@ -250,7 +251,7 @@ export async function confirm(key: LockKey) {
     else if (a.t === 'focus_shorten') await Native.shortenFocus(a.n!);
     else if (a.t === 'schedule_update') {
       const p = a.schedule!;
-      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled);
+      await Native.updateSchedule(a.v!, p.label, p.startMin, p.endMin, p.enabled, p.allowedApps ?? []);
     } else if (a.t === 'schedule_delete') {
       await Native.deleteSchedule(a.v!);
       savedSchedules = savedSchedules.filter(x => x !== a.v);
@@ -400,8 +401,8 @@ export async function removeFocusApp(pkg: string) {
 
 const windowLen = (start: number, end: number) => (start <= end ? end - start : 1440 - start + end);
 
-export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean): Promise<string> {
-  const id = await Native.addSchedule(label, startMin, endMin, enabled);
+export async function addSchedule(label: string, startMin: number, endMin: number, enabled: boolean, allowedApps: string[] = []): Promise<string> {
+  const id = await Native.addSchedule(label, startMin, endMin, enabled, allowedApps);
   await refresh();
   return id;
 }
@@ -415,25 +416,27 @@ export async function updateSchedule(id: string, patch: SchedulePatch): Promise<
   const old = snap.schedules.find(x => x.id === id);
   if (!old) throw new Error('That schedule no longer exists.');
 
+  const nextApps = patch.allowedApps ?? old.allowedApps ?? [];
   const isSaved = (snap.state.savedSchedules ?? []).includes(id);
   // Setting for the first time: apply immediately without delay timer, and mark as saved
   if (!isSaved) {
-    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
+    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled, nextApps);
     const savedSchedules = [...new Set([...(snap.state.savedSchedules ?? []), id])];
     persist({ ...snap.state, savedSchedules });
     await refresh();
     return 'applied';
   }
 
-  // From the 2nd time onward: modifying times or disabling requires delay timer while active
+  // From the 2nd time onward: modifying times, disabling, or adding allowed apps requires delay timer while active
   const timesChanged = patch.startMin !== old.startMin || patch.endMin !== old.endMin;
-  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin) || timesChanged;
+  const appsAdded = patch.allowedApps && old.allowedApps && patch.allowedApps.some(a => !old.allowedApps?.includes(a));
+  const weakening = !patch.enabled || windowLen(patch.startMin, patch.endMin) < windowLen(old.startMin, old.endMin) || timesChanged || appsAdded;
   if (!weakening || !snap.active || snap.locks.schedule?.open) {
-    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled);
+    await Native.updateSchedule(id, patch.label, patch.startMin, patch.endMin, patch.enabled, nextApps);
     await refresh();
     return 'applied';
   }
-  return queueAction('schedule', { t: 'schedule_update', v: id, schedule: patch, label: `Update "${old.label}"` });
+  return queueAction('schedule', { t: 'schedule_update', v: id, schedule: { ...patch, allowedApps: nextApps }, label: `Update "${old.label}"` });
 }
 
 export async function deleteSchedule(id: string): Promise<Outcome> {
