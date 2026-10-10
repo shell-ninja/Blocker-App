@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.2`
+# Blocker `v1.0.3.1`
 
-> **Current Version:** `v1.0.2` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.3.1` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
