@@ -623,6 +623,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Date & Time settings
+        val hasDateTimeTitle = "date & time" in t || "date and time" in t || "set time" in t || "set date" in t
+        val hasDateTimeMarker = "automatic date & time" in t || "automatic date and time" in t ||
+            "use network-provided time" in t || "use 24-hour format" in t || "select time zone" in t
+        if (hasDateTimeTitle || hasDateTimeMarker) {
+            pollKick("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+            return
+        }
+
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
         val isOurApp = "blocker" in t || packageName.lowercase() in t
 
