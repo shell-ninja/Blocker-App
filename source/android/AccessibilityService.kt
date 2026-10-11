@@ -238,7 +238,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Static OS button labels, matched case-insensitively. Add another UI language here if you ever need one.
         // "Deactivate" covers the "Deactivate & uninstall" device-admin page that Uninstall leads to.
         private val APP_INFO_ACTION_TEXTS = listOf(
-            "Uninstall", "Force stop", "Deactivate", "Disable", "Storage & cache", "Storage", "Clear storage", "Clear data", "Manage space", "Open by default", "Permissions"
+            "Uninstall", "Force stop", "Deactivate", "Disable", "Storage & cache", "Storage", "Clear storage", "Clear data", "Manage space"
         )
         // Activity class fragments of the Device admin screens (list and "Deactivate & uninstall" page)
         private val DEVICE_ADMIN_CLASS_HINTS = listOf("deviceadmin")
@@ -392,6 +392,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             val nodeText = StringBuilder()
             collectText(node, nodeText, 0, intArrayOf(60))
             val nTxt = nodeText.toString().lowercase()
+            if (isLegitimatePermissionScreen(node, nTxt)) {
+                continue
+            }
             if (!isSettingsPkg(nPkg) && "uninstall" !in nTxt && ("install" in nTxt || "update" in nTxt || "staging" in nTxt)) {
                 continue
             }
@@ -642,18 +645,23 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
         val isOurApp = "blocker" in t || packageName.lowercase() in t
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app,
-        // EXCEPT legitimate permission grant screens (DND access, unknown apps, usage access).
+        // Blocker-specific: kick the instant ANY settings screen mentions our app with destructive actions,
+        // EXCEPT legitimate permission grant screens (DND access, unknown apps, usage access, battery optimization).
         if (isOurApp) {
-            if (!isLegitimatePermissionScreen(t) && !isInstallOrUpdateDialog(root = root)) {
-                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-                autoCancelDialog(root)
-                if (isActualSettingsPkg(rootPkg)) {
-                    kickFromAppInfo()
-                } else {
-                    pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+            if (!isLegitimatePermissionScreen(root, t) && !isInstallOrUpdateDialog(root = root)) {
+                val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+                    "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t ||
+                    "delete app data" in t || "clear app data" in t
+                if (hasDestructiveAction) {
+                    viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                    autoCancelDialog(root)
+                    if (isActualSettingsPkg(rootPkg)) {
+                        kickFromAppInfo()
+                    } else {
+                        pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+                    }
+                    return
                 }
-                return
             }
         }
 
@@ -889,23 +897,60 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isLegitimatePermissionScreen(text: String): Boolean {
+        return isLegitimatePermissionScreen(null, text)
+    }
+
+    private fun isLegitimatePermissionScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
         val t = text.lowercase()
         // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen
-        if ("force stop" in t || "uninstall" in t || "clear storage" in t || "clear data" in t ||
-            "delete app data" in t || "deactivate" in t || "manage space" in t) {
+        val hasDestructiveAction = "force stop" in t || "clear storage" in t || "clear data" in t ||
+            "delete app data" in t || "manage space" in t || "clear app data" in t ||
+            "do you want to uninstall" in t || "uninstall this app" in t
+        if (hasDestructiveAction) {
             return false
         }
         // Legitimate special app access / permission screens:
         // 1. Do Not Disturb / Notification Policy Access:
-        val isDnd = "do not disturb" in t || "notification policy" in t || "zen" in t
-        // 2. Install unknown apps:
-        val isUnknownApps = "install unknown" in t || "unknown apps" in t || "allow from this source" in t
-        // 3. Usage access:
-        val isUsage = "usage access" in t || "usage data access" in t
-        // 4. Special app access list:
-        val isSpecialAccess = "special app access" in t || "special access" in t
+        val isDnd = "do not disturb" in t || "notification policy" in t || "zen" in t || "dnd" in t ||
+            "device & app notifications" in t || "notification access" in t
+        // 2. Battery Optimization / Background Service:
+        val isBattery = "battery" in t || "battery optimization" in t || "optimize battery" in t ||
+            "unrestricted" in t || "high power" in t || "always run in background" in t ||
+            "background usage" in t || "background activity" in t || "run in background" in t ||
+            "ignore battery" in t || "battery saver" in t || "power consumption" in t ||
+            "background execution" in t || "optimize battery usage" in t || "let app always run" in t
+        // 3. Install unknown apps:
+        val isUnknownApps = "install unknown" in t || "unknown apps" in t || "allow from this source" in t || "install other apps" in t
+        // 4. Usage access:
+        val isUsage = "usage access" in t || "usage data access" in t || "apps with usage access" in t
+        // 5. Special app access list / Overlay / Accessibility:
+        val isSpecialAccess = "special app access" in t || "special access" in t || "special permissions" in t ||
+            "display over other apps" in t || "appear on top" in t || "draw over other apps" in t ||
+            "accessibility" in t
 
-        return isDnd || isUnknownApps || isUsage || isSpecialAccess
+        if (isDnd || isBattery || isUnknownApps || isUsage || isSpecialAccess) {
+            return true
+        }
+
+        // Fast native node lookup on the view tree if root is available
+        if (root != null) {
+            val terms = listOf(
+                "Do Not Disturb", "Notification policy", "Zen", "DND",
+                "Battery optimization", "Optimize battery", "Ignore battery", "Unrestricted",
+                "Always run in background", "Background usage", "Usage access",
+                "Special app access", "Special access", "Install unknown apps",
+                "Device & app notifications", "Notification access"
+            )
+            for (term in terms) {
+                val nodes = root.findAccessibilityNodeInfosByText(term)
+                if (!nodes.isNullOrEmpty()) {
+                    nodes.forEach { runCatching { it.recycle() } }
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     private fun shouldBlockDateTime(): Boolean {
@@ -1138,7 +1183,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             val rootNow = rootInActiveWindow ?: ev.source
             if (!isInstallOrUpdateDialog(ev, rootNow)) {
                 val winTitle = ev.text.joinToString(" ").trim().lowercase()
-                if (!isLegitimatePermissionScreen(winTitle)) {
+                if (!isLegitimatePermissionScreen(rootNow, winTitle)) {
                     startSettingsPoll()
                     val evCls = ev.className?.toString().orEmpty()
                     val rootCls = runCatching { rootNow?.className?.toString().orEmpty() }.getOrDefault(evCls)
@@ -1200,9 +1245,26 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val txt = sb.toString().lowercase()
                 val isOurApp = "blocker" in txt || packageName.lowercase() in txt
                 if (isOurApp) {
-                    if (!isLegitimatePermissionScreen(txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
+                    if (!isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
+                        val hasDestructiveAction = "force stop" in txt || "uninstall" in txt || "disable" in txt ||
+                            "clear storage" in txt || "clear data" in txt || "manage space" in txt || "storage & cache" in txt
+                        if (hasDestructiveAction) {
+                            viewingBlockerSettingsUntil = now + 30_000L
+                            autoCancelDialog(rootForScan)
+                            if (isActualSettingsPkg(pkg)) {
+                                kickFromAppInfo()
+                            } else {
+                                lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
+                            }
+                            return
+                        }
+                    }
+                }
+            } else if (titleMatchesBlocker && !isInstallOrUpdateDialog(ev, null)) {
+                if (!isLegitimatePermissionScreen(null, winTitle)) {
+                    val hasDestructiveAction = "force stop" in winTitle || "uninstall" in winTitle || "disable" in winTitle
+                    if (hasDestructiveAction) {
                         viewingBlockerSettingsUntil = now + 30_000L
-                        autoCancelDialog(rootForScan)
                         if (isActualSettingsPkg(pkg)) {
                             kickFromAppInfo()
                         } else {
@@ -1210,16 +1272,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                         }
                         return
                     }
-                }
-            } else if (titleMatchesBlocker && !isInstallOrUpdateDialog(ev, null)) {
-                if (!isLegitimatePermissionScreen(winTitle)) {
-                    viewingBlockerSettingsUntil = now + 30_000L
-                    if (isActualSettingsPkg(pkg)) {
-                        kickFromAppInfo()
-                    } else {
-                        lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
-                    }
-                    return
                 }
             }
 
@@ -1724,7 +1776,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // 4. App Info screen for Blocker (Open / Uninstall / Force stop / Storage / Permissions)
-        val isAppInfoScreen = isOurApp && !isLegitimatePermissionScreen(t) && (
+        val isAppInfoScreen = isOurApp && !isLegitimatePermissionScreen(root, t) && (
             "app info" in t || "application info" in t || "app details" in t ||
             "force stop" in t || "storage" in t || "clear" in t ||
             ("notifications" in t && "permissions" in t) ||
@@ -1874,10 +1926,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasRiskAction = APP_RISK_TERMS.any { it in fullText } || isStorageRisk
 
         // If currently viewing Blocker's settings or app details
-        if (isOurApp && !isLegitimatePermissionScreen(fullText) && !isInstallOrUpdateDialog(ev, root)) {
-            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-            lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
-            return
+        if (isOurApp && !isLegitimatePermissionScreen(root, fullText) && !isInstallOrUpdateDialog(ev, root)) {
+            val hasDestructiveAction = "force stop" in fullText || "uninstall" in fullText || "disable" in fullText ||
+                "clear storage" in fullText || "clear data" in fullText || "manage space" in fullText || "storage & cache" in fullText
+            if (hasDestructiveAction) {
+                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
+                return
+            }
         }
 
         // If viewing storage screen/dialog: requires storage-specific terms + timer context or our app name
@@ -1989,13 +2045,23 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return
             }
             if (titleMatches && !isInstallOrUpdateDialog(ev, rootInActiveWindow)) {
-                if (isActualSettingsPkg(pkg)) {
-                    kickFromAppInfo()
-                } else {
-                    autoCancelDialog(rootInActiveWindow)
-                    pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+                val rootNow = rootInActiveWindow
+                val sb = StringBuilder()
+                if (rootNow != null) collectText(rootNow, sb, 0, intArrayOf(400))
+                val t = sb.toString().lowercase()
+                if (!isLegitimatePermissionScreen(rootNow, t)) {
+                    val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+                        "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
+                    if (hasDestructiveAction) {
+                        if (isActualSettingsPkg(pkg)) {
+                            kickFromAppInfo()
+                        } else {
+                            autoCancelDialog(rootInActiveWindow)
+                            pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+                        }
+                        return
+                    }
                 }
-                return
             }
         }
 
@@ -2007,15 +2073,19 @@ class BlockerAccessibilityService : AccessibilityService() {
             val t = sb.toString().lowercase()
             val isOurApp = "blocker" in t || packageName.lowercase() in t
             if (isOurApp) {
-                if (!isLegitimatePermissionScreen(t) && !isInstallOrUpdateDialog(ev, root)) {
-                    if (isActualSettingsPkg(pkg)) {
-                        kickFromAppInfo()
-                        return
-                    } else {
-                        viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-                        autoCancelDialog(root)
-                        pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
-                        return
+                if (!isLegitimatePermissionScreen(root, t) && !isInstallOrUpdateDialog(ev, root)) {
+                    val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+                        "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
+                    if (hasDestructiveAction) {
+                        if (isActualSettingsPkg(pkg)) {
+                            kickFromAppInfo()
+                            return
+                        } else {
+                            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                            autoCancelDialog(root)
+                            pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+                            return
+                        }
                     }
                 }
             }
@@ -2038,16 +2108,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!(isSettingsPkg(pkg) || isInstallerPkg(pkg)) || pkg in neverBlock) return
         if (!shieldEngaged()) return
         if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
-        // Do not intercept clicks if user is in a legitimate permission grant screen (e.g. Do Not Disturb, Unknown apps, Usage access)
+        // Do not intercept clicks if user is in a legitimate permission grant screen (e.g. Do Not Disturb, Unknown apps, Usage access, Battery optimization)
         val winTitle = ev.text.joinToString(" ").lowercase()
         val root = rootInActiveWindow
         val rootText = if (root != null) {
             val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(200))
+            collectText(root, sb, 0, intArrayOf(800))
             sb.toString().lowercase()
         } else ""
         val combined = "$winTitle $rootText"
-        if (isLegitimatePermissionScreen(combined)) return
+        if (isLegitimatePermissionScreen(root, combined)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
         var hit = false
@@ -2206,6 +2276,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** One scan of the active window (scanner thread). */
     private fun scanAppInfoOnce(pkg: String, deep: Boolean) {
+        if (!shieldEngaged() && !BlockerStore.studyActive(this) && !BlockerStore.focusActive(this)) return
         if (pkg.isEmpty() || !isSettingsPkg(pkg)) return
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
         val rPkg = root.packageName?.toString().orEmpty()
@@ -2231,14 +2302,17 @@ class BlockerAccessibilityService : AccessibilityService() {
      * [deep] additionally allows the bounded walk (used for post-open settle passes only).
      */
     private fun matchesBlockerAppInfo(root: AccessibilityNodeInfo, deep: Boolean): Boolean {
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(400))
+        val t = sb.toString().lowercase()
+        if (isLegitimatePermissionScreen(root, t)) return false
+
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node
         if (runCatching { fastMatch(root, name, ver) || (deep && walkMatch(root, name, ver)) }.getOrDefault(false)) {
             return true
         }
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(300))
-        val t = sb.toString().lowercase()
+
         val isOurApp = name.lowercase() in t || "blocker" in t || packageName.lowercase() in t
         if (!isOurApp) return false
         val isUninstallDialog = ("do you want to uninstall" in t || "uninstall this app" in t) &&
@@ -2248,6 +2322,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             "force stop" !in t && "clear" !in t && "storage" !in t && "uninstall" !in t
         if (isUnknownApps) return false
         if (isInstallOrUpdateDialog(root = root)) return false
+
+        val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+            "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
+        if (!hasDestructiveAction) return false
+
         return true
     }
 
