@@ -312,6 +312,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var lastWindowOpenUp = 0L                    // main thread only: last TYPE_WINDOW_STATE_CHANGED in Settings
     private var appInfoWatchPkg = ""                     // main thread only
     private var appInfoWatchUntil = 0L                   // main thread only
+    @Volatile private var currentSettingsScreenTitle = "" // main thread only: title of current settings screen
     private val appInfoLoop = object : Runnable {
         override fun run() {
             val now = SystemClock.uptimeMillis()
@@ -896,6 +897,17 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun isLegitimatePermissionTitle(title: String): Boolean {
+        if (title.isEmpty()) return false
+        val t = title.lowercase()
+        return "do not disturb" in t || "notification policy" in t || "zen" in t || "dnd" in t ||
+            "device & app notifications" in t || "notification access" in t ||
+            "battery" in t || "unrestricted" in t || "high power" in t || "background" in t ||
+            "unknown apps" in t || "install unknown" in t || "allow from this source" in t ||
+            "usage access" in t || "special app access" in t || "special access" in t || "special permissions" in t ||
+            "display over other apps" in t || "appear on top" in t
+    }
+
     private fun isLegitimatePermissionScreen(text: String): Boolean {
         return isLegitimatePermissionScreen(null, text)
     }
@@ -928,29 +940,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "display over other apps" in t || "appear on top" in t || "draw over other apps" in t ||
             "accessibility" in t
 
-        if (isDnd || isBattery || isUnknownApps || isUsage || isSpecialAccess) {
-            return true
-        }
-
-        // Fast native node lookup on the view tree if root is available
-        if (root != null) {
-            val terms = listOf(
-                "Do Not Disturb", "Notification policy", "Zen", "DND",
-                "Battery optimization", "Optimize battery", "Ignore battery", "Unrestricted",
-                "Always run in background", "Background usage", "Usage access",
-                "Special app access", "Special access", "Install unknown apps",
-                "Device & app notifications", "Notification access"
-            )
-            for (term in terms) {
-                val nodes = root.findAccessibilityNodeInfosByText(term)
-                if (!nodes.isNullOrEmpty()) {
-                    nodes.forEach { runCatching { it.recycle() } }
-                    return true
-                }
-            }
-        }
-
-        return false
+        return isDnd || isBattery || isUnknownApps || isUsage || isSpecialAccess
     }
 
     private fun shouldBlockDateTime(): Boolean {
@@ -2021,6 +2011,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
         val stateChange = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        if (stateChange && isSettingsPkg(pkg)) {
+            val winTitle = ev.text.joinToString(" ").trim().lowercase()
+            if (winTitle.isNotEmpty() && !titleIsAppName(ev)) {
+                currentSettingsScreenTitle = winTitle
+            }
+        }
+        if (!isSettingsPkg(pkg) && pkg != "android") {
+            currentSettingsScreenTitle = ""
+        }
         if (!stateChange && ev.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
         if (pkg == "com.android.systemui" || pkg == "android") return
 
@@ -2045,22 +2044,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return
             }
             if (titleMatches && !isInstallOrUpdateDialog(ev, rootInActiveWindow)) {
-                val rootNow = rootInActiveWindow
-                val sb = StringBuilder()
-                if (rootNow != null) collectText(rootNow, sb, 0, intArrayOf(400))
-                val t = sb.toString().lowercase()
-                if (!isLegitimatePermissionScreen(rootNow, t)) {
-                    val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
-                        "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
-                    if (hasDestructiveAction) {
-                        if (isActualSettingsPkg(pkg)) {
-                            kickFromAppInfo()
-                        } else {
-                            autoCancelDialog(rootInActiveWindow)
-                            pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
-                        }
-                        return
+                if (!isLegitimatePermissionTitle(currentSettingsScreenTitle)) {
+                    if (isActualSettingsPkg(pkg)) {
+                        kickFromAppInfo()
+                    } else {
+                        autoCancelDialog(rootInActiveWindow)
+                        pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
                     }
+                    return
                 }
             }
         }
@@ -2108,16 +2099,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!(isSettingsPkg(pkg) || isInstallerPkg(pkg)) || pkg in neverBlock) return
         if (!shieldEngaged()) return
         if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
-        // Do not intercept clicks if user is in a legitimate permission grant screen (e.g. Do Not Disturb, Unknown apps, Usage access, Battery optimization)
-        val winTitle = ev.text.joinToString(" ").lowercase()
-        val root = rootInActiveWindow
-        val rootText = if (root != null) {
-            val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(800))
-            sb.toString().lowercase()
-        } else ""
-        val combined = "$winTitle $rootText"
-        if (isLegitimatePermissionScreen(root, combined)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
         var hit = false
@@ -2161,7 +2142,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 runCatching { src.recycle() }
             }
         }
-        if (hit) kickFromAppInfo()
+        if (!hit) return
+
+        // Blocker row was clicked inside Settings!
+        // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization), allow it:
+        if (isLegitimatePermissionTitle(currentSettingsScreenTitle)) return
+
+        kickFromAppInfo()
     }
 
     /**
@@ -2302,16 +2289,16 @@ class BlockerAccessibilityService : AccessibilityService() {
      * [deep] additionally allows the bounded walk (used for post-open settle passes only).
      */
     private fun matchesBlockerAppInfo(root: AccessibilityNodeInfo, deep: Boolean): Boolean {
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(400))
-        val t = sb.toString().lowercase()
-        if (isLegitimatePermissionScreen(root, t)) return false
-
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node
         if (runCatching { fastMatch(root, name, ver) || (deep && walkMatch(root, name, ver)) }.getOrDefault(false)) {
             return true
         }
+
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(300))
+        val t = sb.toString().lowercase()
+        if (isLegitimatePermissionScreen(null, t)) return false
 
         val isOurApp = name.lowercase() in t || "blocker" in t || packageName.lowercase() in t
         if (!isOurApp) return false
