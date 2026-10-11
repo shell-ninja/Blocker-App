@@ -32,14 +32,28 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## 🌟 Key Features in v1.0.5
 
-- **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a top switcher. Configure focus times (15m to 180m), rest breaks, and session rounds. When activated, all apps, the notification shade, quick settings, and internet/Wi-Fi toggles are completely locked down. Waking or unlocking the device returns directly to the live Pomodoro timer.
-- **In-App GitHub Release Updater:** Checks for new GitHub releases automatically every 24 hours (or on-demand in Settings). Download, inspect release notes, and install APK updates directly within the app.
-- **Automatic APK Cache Cleanup:** Automatically purges downloaded update APK files as soon as the updated version is installed and running, keeping your phone's storage clean.
-- **Per-App Usage Timers:** Set daily usage limits for specific apps. Once the timer expires, the app is blocked for the rest of the day.
-- **Anti-Tamper & Wireless Debugging Lockdown:** Blocks Developer options, Device admin settings, and app management. Automatically switches off USB and Wireless debugging if enabled.
-- **Islamic Reminder Overlays:** Replaces blocked content with thoughtful Islamic reminders, Quranic reflections, and motivational quotes.
-- **Granular Distraction Shield:** Independent switches to block YouTube Shorts, Instagram Reels, and Facebook Reels without disabling the host apps.
-- **⏳ Delayed Unlock Timers:** Any attempt to weaken protections, unblock apps, or shorten timers requires waiting out a delay of 24 hours to 30 days.
+- **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a segmented switcher.
+  - **Customizable Cycles:** Set study focus intervals (15m to 180m), rest breaks (3m to 15m), and session rounds (1 to 6).
+  - **Aggressive Phone Lockdown:** All apps, home launcher, settings, and navigation are blocked during study sessions, returning directly to the running study timer within milliseconds.
+  - **Quick Settings & Status Bar Shield:** Automatically collapses notification shade pulls (`StatusBarManager.collapsePanels()`), preventing unauthorized toggling of Wi-Fi, mobile data, or airplane mode.
+  - **Complete Silencing & Do Not Disturb:** Automatically activates Do Not Disturb (`INTERRUPTION_FILTER_NONE`) and zeroes ringtone, media, notification, and system volume streams, cleanly restoring prior volumes upon completion.
+  - **Interactive Wi-Fi Controls:** Monitor Wi-Fi status and toggle network connectivity on demand directly within Blocker without breaking lockdown.
+  - **Display Standby & Power Lock Friendly:** Safely turn off the screen using the physical power button; unlocking returns straight to the active timer.
+  - **Emergency Safeguard:** Dialer and emergency telecom services are explicitly whitelisted for critical safety.
+- **🛡️ Anti-Tamper & Clock Manipulation Defense:**
+  - **Date & Time Tamper Shield (Anti-Timer Bypass):** Dual-layer protection (instant window interception + 150ms continuous screen text scanner) prevents users from manipulating device date/time in Android Settings to prematurely expire delayed unlock timers.
+  - **System Settings Guard:** Strictly blocks access to Developer Options, Device Administrator settings, and App Info / Force Stop / Uninstall screens.
+  - **Debugging Lockdown:** Automatically detects and disables USB and Wireless debugging if enabled.
+- **🔒 Hardened Content & Distraction Shields:**
+  - **URL User-Info Domain Spoofing Defense:** Hardened domain extraction parser (`hostOf`) strips user credentials (`user@host`) and decodes percent-encoded characters, eliminating bypasses like `https://safe.org@blocked-domain.com`.
+  - **Granular Distraction Shields:** Independent toggles for YouTube Shorts, Instagram Reels, and Facebook Reels without breaking main app feeds.
+  - **Offline Content Database:** Fast, local, obfuscated adult domain database with custom domain blocklists and keyword whitelisting.
+- **🔄 In-App Updater & Security Verification:**
+  - **Automated Update Checks:** Checks for official GitHub releases every 24 hours with in-app changelog viewer and direct APK installer.
+  - **Package Identity Verification:** Enforces strict package name validation (`pi.packageName == rc.packageName`) before invoking Android package installer on downloaded APKs.
+  - **URL Sanitization:** Release links are strictly validated against official GitHub repositories.
+  - **Automatic Storage Cleanup:** Purges cached APK files immediately upon successful installation.
+- **⏳ Delayed Unlock Timers:** Any attempt to weaken protections, unblock apps, or shorten timers requires waiting out an unbreakable delay of 24 hours to 30 days.
 
 ---
 
@@ -251,11 +265,12 @@ python3 patch_android.py ~/Blocker source
 ## Required Android Permissions
 
 Once installed on a physical device, Blocker requires the following permissions to provide full protection:
-1. **Accessibility Service:** Required to inspect active window activities, detect open URL bars in web browsers, scan text for blocked keywords, and detect short-form video players (YouTube Shorts, Reels).
+1. **Accessibility Service:** Required to inspect active window activities, detect open URL bars in web browsers, scan text for blocked keywords, detect short-form video players (YouTube Shorts, Reels), and enforce Study Mode phone lockdown.
 2. **Display Over Other Apps (Overlay):** Used to display the non-intrusive blocked notification banner and reminder screen.
 3. **Usage Access (Package Usage Stats):** Required to calculate daily per-app usage time and enforce daily app limits.
 4. **Device Administrator:** Prevents immediate uninstallation while Protection Mode is active.
-5. *(Optional)* **Write Secure Settings:** Allows Blocker to automatically and instantly turn off USB & Wireless debugging if enabled (`adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS`).
+5. *(Optional)* **Do Not Disturb (Notification Policy Access):** Allows Pomodoro Study Mode to automatically suppress all notifications, alerts, and ringtones during focus sessions.
+6. *(Optional)* **Write Secure Settings:** Allows Blocker to automatically and instantly turn off USB & Wireless debugging if enabled (`adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS`).
 
 ---
 
