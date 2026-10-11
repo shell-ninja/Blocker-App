@@ -424,6 +424,8 @@ export async function skipStudyBreak() {
 export const isWifiOn = () => Native.isWifiOn();
 export const openWifiSettings = () => Native.openWifiSettings();
 export const setWifiEnabled = (enabled: boolean) => Native.setWifiEnabled(enabled);
+export const hasDndAccess = () => Native.hasDndAccess();
+export const requestDndAccess = () => Native.requestDndAccess();
 
 export async function addFocusApp(pkg: string, label: string): Promise<Outcome> {
   const cur = snap.focus.apps;

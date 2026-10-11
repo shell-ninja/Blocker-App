@@ -1166,6 +1166,22 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var lastStudyRedirect = 0L
     private var lastShadeDismiss = 0L
 
+    private fun collapseNotificationShade() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching { performGlobalAction(15) } // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE
+        }
+        runCatching {
+            val sbservice = getSystemService("statusbar")
+            val statusbarManager = Class.forName("android.app.StatusBarManager")
+            val collapse = statusbarManager.getMethod("collapsePanels")
+            collapse.invoke(sbservice)
+        }
+        runCatching {
+            @Suppress("DEPRECATION")
+            sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        }
+    }
+
     private fun studyBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
         // 1. If inside Blocker itself, never block! Let the user view and use the Pomodoro timer uninterrupted.
         if (pkg == packageName) return false
@@ -1173,36 +1189,56 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 2. Emergency phone calls and soft keyboards must always work.
         if (pkg in EMERGENCY_CALL_PKGS) return false
         if (pkg in imePackages()) return false
+        if (pkg == "android") return false
 
         val now = System.currentTimeMillis()
 
-        // 3. SystemUI handling:
-        // Do NOT block normal SystemUI events (navigation bar, gesture insets, status bar ticks).
-        // Only dismiss if the notification shade or Quick Settings panel is explicitly pulled down.
+        // 3. SystemUI handling (Notification shade, Quick Settings tiles for Wi-Fi / Mobile Data):
+        // Automatically collapse the notification panel so Wi-Fi, Mobile Data, and alerts are shielded.
+        // Navigation bar touches are preserved so in-app buttons continue to function.
         if (pkg == "com.android.systemui") {
-            if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                val cls = ev.className?.toString().orEmpty()
-                val isShade = cls.contains("NotificationShade", ignoreCase = true) ||
-                              cls.contains("QSPanel", ignoreCase = true) ||
-                              cls.contains("QuickSettings", ignoreCase = true) ||
-                              cls.contains("NotificationPanelView", ignoreCase = true)
-                if (isShade && (now - lastShadeDismiss >= 1500L)) {
+            val cls = ev.className?.toString().orEmpty()
+            val isNavBar = cls.contains("NavigationBar", ignoreCase = true) || cls.contains("Navigation", ignoreCase = true)
+            if (!isNavBar) {
+                if (now - lastShadeDismiss >= 400L) {
                     lastShadeDismiss = now
-                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    collapseNotificationShade()
                 }
             }
             return false
         }
 
-        // 4. Android internal framework events
-        if (pkg == "android") return false
+        // 4. Home launcher:
+        // Redirect smoothly back to Blocker's Pomodoro timer without looping.
+        if (pkg in launcherPackages()) {
+            if (now - lastStudyRedirect >= 800L) {
+                lastStudyRedirect = now
+                bringBlockerToForeground()
+            }
+            return true
+        }
 
-        // 5. User is outside Blocker (in launcher, other apps, or settings).
-        // Smoothly bring Blocker back to foreground without flashing dialog overlays.
-        if (now - lastStudyRedirect >= 800L) {
+        // 5. Unauthorized apps, Settings, Browsers, and Games:
+        // Immediately kick off the screen back to Home, bring Blocker back to front, and show study lockout dialog.
+        if (now - lastStudyRedirect >= 600L) {
             lastStudyRedirect = now
             BlockerStore.incr(this, "study")
-            bringBlockerToForeground()
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 180)
+            val isBreak = BlockerStore.studyIsBreak(this)
+            val cur = BlockerStore.studyCurrentRound(this)
+            val tot = BlockerStore.studyTotalRounds(this)
+            val phase = if (isBreak) "Break Time" else "Round $cur of $tot"
+            showOverlay(
+                "Study Mode Active",
+                "Full phone lockdown is active for your Pomodoro study session ($phase • ${studyLeftText()}).\n\nAll other apps, settings, quick toggles, and notifications are blocked until you finish.\n\n“The two blessings which many people lose are: health and free time for doing good.”\n— Sahih al-Bukhari",
+                4000,
+                "Stay dedicated to your session",
+                "Back to Study"
+            )
+        } else {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 180)
         }
         return true
     }

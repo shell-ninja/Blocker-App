@@ -285,50 +285,83 @@ object BlockerStore {
     }
 
     fun muteNotifications(c: Context) {
-        runCatching {
-            val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            if (am != null) {
-                val p = prefs(c)
+        val p = prefs(c)
+        val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (am != null) {
+            if (!p.contains("study_prev_vol_ring")) {
+                p.edit()
+                    .putInt("study_prev_vol_ring", am.getStreamVolume(AudioManager.STREAM_RING))
+                    .putInt("study_prev_vol_notif", am.getStreamVolume(AudioManager.STREAM_NOTIFICATION))
+                    .putInt("study_prev_vol_music", am.getStreamVolume(AudioManager.STREAM_MUSIC))
+                    .putInt("study_prev_vol_sys", am.getStreamVolume(AudioManager.STREAM_SYSTEM))
+                    .apply()
+            }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0) }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0) }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0) }
+        }
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                if (!p.contains("study_prev_interruption_filter")) {
+                    p.edit().putInt("study_prev_interruption_filter", nm.currentInterruptionFilter).apply()
+                }
+                runCatching {
+                    nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                }
+            }
+        }
+        if (am != null) {
+            runCatching {
                 if (!p.contains("study_prev_ringer_mode")) {
                     p.edit().putInt("study_prev_ringer_mode", am.ringerMode).apply()
                 }
                 am.ringerMode = AudioManager.RINGER_MODE_SILENT
             }
         }
-        runCatching {
-            val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (nm.isNotificationPolicyAccessGranted) {
-                    val p = prefs(c)
-                    if (!p.contains("study_prev_interruption_filter")) {
-                        p.edit().putInt("study_prev_interruption_filter", nm.currentInterruptionFilter).apply()
-                    }
-                    nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                }
-            }
-        }
     }
 
     fun restoreNotifications(c: Context) {
-        runCatching {
-            val p = prefs(c)
-            val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            if (am != null && p.contains("study_prev_ringer_mode")) {
+        val p = prefs(c)
+        val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (am != null) {
+            if (p.contains("study_prev_vol_notif")) {
+                val vRing = p.getInt("study_prev_vol_ring", 5)
+                val vNotif = p.getInt("study_prev_vol_notif", 5)
+                val vMusic = p.getInt("study_prev_vol_music", 5)
+                val vSys = p.getInt("study_prev_vol_sys", 5)
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, vNotif, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_RING, vRing, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, vMusic, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_SYSTEM, vSys, 0) }
+                p.edit()
+                    .remove("study_prev_vol_ring")
+                    .remove("study_prev_vol_notif")
+                    .remove("study_prev_vol_music")
+                    .remove("study_prev_vol_sys")
+                    .apply()
+            }
+            if (p.contains("study_prev_ringer_mode")) {
                 val prev = p.getInt("study_prev_ringer_mode", AudioManager.RINGER_MODE_NORMAL)
-                am.ringerMode = prev
+                runCatching { am.ringerMode = prev }
                 p.edit().remove("study_prev_ringer_mode").apply()
             }
         }
-        runCatching {
-            val p = prefs(c)
-            val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && p.contains("study_prev_interruption_filter")) {
-                if (nm.isNotificationPolicyAccessGranted) {
-                    val prev = p.getInt("study_prev_interruption_filter", NotificationManager.INTERRUPTION_FILTER_ALL)
-                    nm.setInterruptionFilter(prev)
-                    p.edit().remove("study_prev_interruption_filter").apply()
-                }
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && p.contains("study_prev_interruption_filter")) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                val prev = p.getInt("study_prev_interruption_filter", NotificationManager.INTERRUPTION_FILTER_ALL)
+                runCatching { nm.setInterruptionFilter(prev) }
             }
+            p.edit().remove("study_prev_interruption_filter").apply()
         }
     }
 
@@ -989,6 +1022,14 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     fun openWifiSettings(promise: Promise) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val intent = Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    ctx.startActivity(intent)
+                    promise.resolve(true)
+                    return
+                } catch (_: Exception) {}
                 val intent = Intent(Settings.Panel.ACTION_WIFI).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
@@ -1014,6 +1055,35 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             promise.resolve(wm?.isWifiEnabled ?: false)
         } catch (e: Exception) {
             promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun hasDndAccess(promise: Promise) {
+        try {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && nm != null) {
+                promise.resolve(nm.isNotificationPolicyAccessGranted)
+            } else {
+                promise.resolve(true)
+            }
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun requestDndAccess(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("FAIL", e.message)
         }
     }
 

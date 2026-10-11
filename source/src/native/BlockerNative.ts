@@ -102,6 +102,8 @@ interface BlockerNativeSpec {
   isWifiOn(): Promise<boolean>;
   openWifiSettings(): Promise<boolean>;
   setWifiEnabled(enabled: boolean): Promise<boolean>;
+  hasDndAccess(): Promise<boolean>;
+  requestDndAccess(): Promise<boolean>;
   getSchedules(): Promise<Schedule[]>;
   addSchedule(label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<string>;
   updateSchedule(id: string, label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<boolean>;

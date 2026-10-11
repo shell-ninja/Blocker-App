@@ -208,6 +208,8 @@ for perm, attrs in (
     ("android.permission.ACCESS_WIFI_STATE", ""),
     ("android.permission.CHANGE_WIFI_STATE", ""),
     ("android.permission.ACCESS_NETWORK_STATE", ""),
+    ("android.permission.ACCESS_NOTIFICATION_POLICY", ""),
+    ("android.permission.EXPAND_STATUS_BAR", ""),
 ):
     if perm not in t:
         extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')

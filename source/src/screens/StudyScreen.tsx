@@ -15,6 +15,7 @@ import {
 import {
   AlertTriangle,
   BellOff,
+  Bookmark,
   BookOpen,
   CheckCircle2,
   Coffee,
@@ -25,16 +26,17 @@ import {
   Play,
   RotateCcw,
   ShieldAlert,
-  Sparkles,
   Wifi,
   WifiOff,
 } from 'lucide-react-native';
 import { useNow, useProtection } from '../hooks/useProtection';
 import {
   endStudyEarly,
+  hasDndAccess,
   isWifiOn,
   openWifiSettings,
   refresh,
+  requestDndAccess,
   setWifiEnabled,
   skipStudyBreak,
   startStudy,
@@ -211,6 +213,21 @@ export default function StudyScreen() {
     }
   };
 
+  // Do Not Disturb (Silence) detection
+  const [dndAccess, setDndAccess] = useState(true);
+  const checkDnd = () => {
+    hasDndAccess().then(setDndAccess).catch(() => {});
+  };
+  useEffect(() => {
+    checkDnd();
+    const interval = setInterval(checkDnd, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRequestDnd = () => {
+    requestDndAccess().catch(() => {});
+  };
+
   // Quote selector
   const quote = useMemo(() => {
     const idx = (currentRound - 1) % QUOTES.length;
@@ -246,12 +263,13 @@ export default function StudyScreen() {
     : focusMinutes;
 
   const handleStartStudy = () => {
-    const wifiNotice = wifiOn ? '\n\nNote: Wi-Fi is currently ON. Blocker will attempt to switch it off automatically. For maximum focus, you can also turn it off manually beforehand.' : '';
+    const wifiNotice = wifiOn ? '\n\n• Wi-Fi is currently ON. Blocker will attempt to disable it. Turn it off in the Network Shield card for guaranteed offline focus.' : '';
+    const dndNotice = !dndAccess ? '\n\n• Note: Do Not Disturb permission is not granted. Blocker will mute volumes directly, but granting DND permission ensures complete call and alert silence.' : '';
     showAlert(
       'Activate Strict Study Mode?',
       `Your phone will be completely locked down for ${totalRounds} rounds of ${chosenFocus} min focus${
         totalRounds > 1 ? ` (${breakMinutes}m breaks in between)` : ''
-      }.\n\nAll apps, notification shade, internet toggles, and settings will be blocked until the session ends.\n\nYou can turn off the screen at any time; waking the device returns directly to your study timer.${wifiNotice}\n\nReady to commit?`,
+      }.\n\nAll apps, notification shade, internet toggles, and settings will be blocked until the session ends.\n\nYou can turn off the screen at any time; waking the device returns directly to your study timer.${wifiNotice}${dndNotice}\n\nReady to commit?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -502,7 +520,7 @@ export default function StudyScreen() {
           {/* Motivational Quote */}
           <Card>
             <View style={styles.quoteCard}>
-              <Sparkles size={16} color={t.accent} strokeWidth={2.4} />
+              <Bookmark size={16} color={t.accent} strokeWidth={2.4} />
               <Text style={[styles.quoteText, { color: t.text }]}>
                 "{quote.quote}"
               </Text>
@@ -634,7 +652,7 @@ export default function StudyScreen() {
             <BookOpen size={26} color={t.accent} strokeWidth={2.4} />
           </View>
           <View style={{ flex: 1 }}>
-            <Title size={20} icon={Sparkles}>
+            <Title size={20} icon={BookOpen}>
               Study Mode
             </Title>
             <Sub>
@@ -725,6 +743,60 @@ export default function StudyScreen() {
               {wifiOn ? 'Turn Off' : 'Turn On'}
             </Text>
           </Pressable>
+        </View>
+      </Card>
+
+      {/* Do Not Disturb Silence Card */}
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: dndAccess ? t.okSoft : t.warnSoft,
+                borderWidth: 1,
+                borderColor: dndAccess ? t.ok : t.warn,
+              }}>
+              <BellOff size={18} color={dndAccess ? t.ok : t.warn} strokeWidth={2.4} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>
+                {dndAccess ? 'Silent Mode Ready' : 'DND Permission Required'}
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
+                {dndAccess
+                  ? 'All ringtones, alerts, and notifications will be silenced during study.'
+                  : 'Grant Do Not Disturb access so Blocker can silence incoming ringtones & alerts.'}
+              </Text>
+            </View>
+          </View>
+          {!dndAccess && (
+            <Pressable
+              onPress={handleRequestDnd}
+              style={({ pressed }) => [{
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                backgroundColor: t.warnSoft,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: t.warn,
+                marginLeft: 10,
+                opacity: pressed ? 0.7 : 1,
+              }]}>
+              <Text
+                style={{
+                  color: t.warn,
+                  fontSize: 12,
+                  fontWeight: '800',
+                }}>
+                Grant DND
+              </Text>
+            </Pressable>
+          )}
         </View>
       </Card>
 
