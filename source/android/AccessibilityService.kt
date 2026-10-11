@@ -219,7 +219,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.android.settings.ZonePicker"
         )
         private val DATE_TIME_SCREEN_TITLES = setOf(
-            "date & time", "date and time", "date & time settings", "time settings", "set time", "set date",
+            "date & time", "date and time", "date & time settings",
             "automatic date & time", "automatic date and time", "change date", "change time"
         )
         private const val SCAN_GAP_MS = 1000L
@@ -623,24 +623,26 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Date & Time settings
-        val hasDateTimeTitle = "date & time" in t || "date and time" in t || "set time" in t || "set date" in t
-        val hasDateTimeMarker = "automatic date & time" in t || "automatic date and time" in t ||
-            "use network-provided time" in t || "use 24-hour format" in t || "select time zone" in t
-        if (hasDateTimeTitle || hasDateTimeMarker) {
-            pollKick("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
-            return
+        // Date & Time settings (Target system clock manipulation, NOT Do Not Disturb / Sound / Volume schedules)
+        val isDndOrSound = "do not disturb" in t || "zen" in t || "sound" in t || "volume" in t || "notification" in t
+        if (!isDndOrSound) {
+            val hasDateTimeTitle = "date & time" in t || "date and time" in t
+            val hasDateTimeMarker = "automatic date & time" in t || "automatic date and time" in t ||
+                "use network-provided time" in t || ("set date" in t && "set time" in t) ||
+                ("set time" in t && ("time zone" in t || "24-hour" in t))
+            if (hasDateTimeTitle || hasDateTimeMarker) {
+                pollKick("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+                return
+            }
         }
 
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
         val isOurApp = "blocker" in t || packageName.lowercase() in t
 
-        // Blocker-specific: kick the instant ANY settings screen mentions our app.
-        // This covers App Info, Storage, Force Stop, Uninstall — all in one sweep.
+        // Blocker-specific: kick the instant ANY settings screen mentions our app,
+        // EXCEPT legitimate permission grant screens (DND access, unknown apps, usage access).
         if (isOurApp) {
-            val isUnknownAppsPermission = ("install unknown" in t || "unknown apps" in t || "allow from this source" in t) &&
-                "force stop" !in t && "clear" !in t && "uninstall" !in t && "storage" !in t
-            if (!isUnknownAppsPermission && !isInstallOrUpdateDialog(root = root)) {
+            if (!isLegitimatePermissionScreen(t) && !isInstallOrUpdateDialog(root = root)) {
                 viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
                 autoCancelDialog(root)
                 if (isActualSettingsPkg(rootPkg)) {
@@ -881,6 +883,26 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun isLegitimatePermissionScreen(text: String): Boolean {
+        val t = text.lowercase()
+        // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen
+        if ("force stop" in t || "uninstall" in t || "clear storage" in t || "clear data" in t ||
+            "delete app data" in t || "deactivate" in t || "manage space" in t) {
+            return false
+        }
+        // Legitimate special app access / permission screens:
+        // 1. Do Not Disturb / Notification Policy Access:
+        val isDnd = "do not disturb" in t || "notification policy" in t || "zen" in t
+        // 2. Install unknown apps:
+        val isUnknownApps = "install unknown" in t || "unknown apps" in t || "allow from this source" in t
+        // 3. Usage access:
+        val isUsage = "usage access" in t || "usage data access" in t
+        // 4. Special app access list:
+        val isSpecialAccess = "special app access" in t || "special access" in t
+
+        return isDnd || isUnknownApps || isUsage || isSpecialAccess
+    }
+
     private fun isSettingsPkg(pkg: String): Boolean {
         val lower = pkg.lowercase()
         // Never treat file managers, document pickers, or downloaders as settings
@@ -1079,9 +1101,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val txt = sb.toString().lowercase()
                 val isOurApp = "blocker" in txt || packageName.lowercase() in txt
                 if (isOurApp) {
-                    val isUnknownApps = ("install unknown" in txt || "unknown apps" in txt || "allow from this source" in txt) &&
-                        "force stop" !in txt && "clear" !in txt && "uninstall" !in txt && "storage" !in txt
-                    if (!isUnknownApps && !isInstallOrUpdateDialog(ev, rootForScan)) {
+                    if (!isLegitimatePermissionScreen(txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
                         viewingBlockerSettingsUntil = now + 30_000L
                         autoCancelDialog(rootForScan)
                         if (isActualSettingsPkg(pkg)) {
@@ -1093,13 +1113,15 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             } else if (titleMatchesBlocker && !isInstallOrUpdateDialog(ev, null)) {
-                viewingBlockerSettingsUntil = now + 30_000L
-                if (isActualSettingsPkg(pkg)) {
-                    kickFromAppInfo()
-                } else {
-                    lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
+                if (!isLegitimatePermissionScreen(winTitle)) {
+                    viewingBlockerSettingsUntil = now + 30_000L
+                    if (isActualSettingsPkg(pkg)) {
+                        kickFromAppInfo()
+                    } else {
+                        lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
+                    }
+                    return
                 }
-                return
             }
 
             // ── 4. Storage sub-screen: always scan content, also check recent timer ──
@@ -1138,15 +1160,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             // ── 6. Date & Time settings screen: prevent clock advance bypass ─────────
-            val isDateTimeTitle = DATE_TIME_SCREEN_TITLES.any { it in winTitle }
-            val isDateTimeCls = evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
-                evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
-                evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
-                evCls.contains("DateSettings", ignoreCase = true) || rootCls.contains("DateSettings", ignoreCase = true) ||
-                evCls.contains("TimeSettings", ignoreCase = true) || rootCls.contains("TimeSettings", ignoreCase = true)
-            if (isDateTimeTitle || isDateTimeCls) {
-                lockOutOfSettings("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
-                return
+            val isDndOrSoundTitle = "do not disturb" in winTitle || "zen" in winTitle || "notification" in winTitle || "sound" in winTitle
+            if (!isDndOrSoundTitle) {
+                val isDateTimeTitle = DATE_TIME_SCREEN_TITLES.any { it in winTitle }
+                val isDateTimeCls = evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+                    evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
+                    evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true)
+                if (isDateTimeTitle || isDateTimeCls) {
+                    lockOutOfSettings("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+                    return
+                }
             }
         }
 
@@ -1599,7 +1622,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // 4. App Info screen for Blocker (Open / Uninstall / Force stop / Storage / Permissions)
-        val isAppInfoScreen = isOurApp && (
+        val isAppInfoScreen = isOurApp && !isLegitimatePermissionScreen(t) && (
             "app info" in t || "application info" in t || "app details" in t ||
             "force stop" in t || "storage" in t || "clear" in t ||
             ("notifications" in t && "permissions" in t) ||
@@ -1733,9 +1756,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasRiskAction = APP_RISK_TERMS.any { it in fullText } || isStorageRisk
 
         // If currently viewing Blocker's settings or app details
-        val isUnknownApps = ("install unknown" in fullText || "unknown apps" in fullText || "allow from this source" in fullText) &&
-            "force stop" !in fullText && "clear" !in fullText && "storage" !in fullText && "uninstall" !in fullText
-        if (isOurApp && !isUnknownApps && !isInstallOrUpdateDialog(ev, root)) {
+        if (isOurApp && !isLegitimatePermissionScreen(fullText) && !isInstallOrUpdateDialog(ev, root)) {
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             lockOutOfSettings("Blocker app settings and storage are locked while Protection Mode is active.")
             return
@@ -1867,9 +1888,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             val t = sb.toString().lowercase()
             val isOurApp = "blocker" in t || packageName.lowercase() in t
             if (isOurApp) {
-                val isUnknownApps = ("install unknown" in t || "unknown apps" in t || "allow from this source" in t) &&
-                    "force stop" !in t && "clear" !in t && "storage" !in t && "uninstall" !in t
-                if (!isUnknownApps && !isInstallOrUpdateDialog(ev, root)) {
+                if (!isLegitimatePermissionScreen(t) && !isInstallOrUpdateDialog(ev, root)) {
                     if (isActualSettingsPkg(pkg)) {
                         kickFromAppInfo()
                         return
@@ -1900,9 +1919,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!(isSettingsPkg(pkg) || isInstallerPkg(pkg)) || pkg in neverBlock) return
         if (!shieldEngaged()) return
         if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
-        // Do not intercept clicks if user is granting install permission in "Install unknown apps"
+        // Do not intercept clicks if user is in a legitimate permission grant screen (e.g. Do Not Disturb, Unknown apps, Usage access)
         val winTitle = ev.text.joinToString(" ").lowercase()
-        if ("install unknown" in winTitle || "unknown apps" in winTitle || "allow from this source" in winTitle) return
+        val root = rootInActiveWindow
+        val rootText = if (root != null) {
+            val sb = StringBuilder()
+            collectText(root, sb, 0, intArrayOf(200))
+            sb.toString().lowercase()
+        } else ""
+        val combined = "$winTitle $rootText"
+        if (isLegitimatePermissionScreen(combined)) return
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName
         var hit = false
