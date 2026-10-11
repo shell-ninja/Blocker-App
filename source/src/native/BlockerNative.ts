@@ -46,6 +46,14 @@ export interface Stats {
   focusUntil: number;
   focusRemainingMs: number;
   focusApps: string[];
+  studyActive: boolean;
+  studyUntil: number;
+  studyRemainingMs: number;
+  studyTotalRounds: number;
+  studyCurrentRound: number;
+  studyIsBreak: boolean;
+  studyFocusMinutes: number;
+  studyBreakMinutes: number;
 }
 export interface GranularFocusToggles {
   block_fb_reels: boolean;
@@ -88,6 +96,9 @@ interface BlockerNativeSpec {
   shortenFocus(minutes: number): Promise<boolean>;
   endFocus(): Promise<boolean>;
   setFocusApps(packages: string[]): Promise<boolean>;
+  startStudy(focusMinutes: number, breakMinutes: number, totalRounds: number): Promise<boolean>;
+  endStudy(): Promise<boolean>;
+  skipStudyBreak(): Promise<boolean>;
   getSchedules(): Promise<Schedule[]>;
   addSchedule(label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<string>;
   updateSchedule(id: string, label: string, startMin: number, endMin: number, enabled: boolean, allowedApps?: string[]): Promise<boolean>;

@@ -16,6 +16,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -163,6 +164,170 @@ object BlockerStore {
     fun pendingUntil(c: Context, key: String) = prefs(c).getLong("pending_$key", 0L)
     fun guardOpen(c: Context, key: String) = prefs(c).getLong("open_$key", 0L) > System.currentTimeMillis()
     fun consumeGuard(c: Context, key: String) = prefs(c).edit().remove("open_$key").apply()
+
+    // ---- Study Mode (Aggressive Pomodoro Phone Lockout) ----
+    fun studyActive(c: Context): Boolean {
+        advanceStudyState(c)
+        return prefs(c).getBoolean("study_active", false)
+    }
+
+    fun studyUntil(c: Context): Long {
+        advanceStudyState(c)
+        return prefs(c).getLong("study_until", 0L)
+    }
+
+    fun studyRemainingMs(c: Context): Long {
+        advanceStudyState(c)
+        val until = prefs(c).getLong("study_until", 0L)
+        return (until - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun studyTotalRounds(c: Context): Int = prefs(c).getInt("study_total_rounds", 4)
+
+    fun studyCurrentRound(c: Context): Int {
+        advanceStudyState(c)
+        return prefs(c).getInt("study_current_round", 1)
+    }
+
+    fun studyIsBreak(c: Context): Boolean {
+        advanceStudyState(c)
+        return prefs(c).getBoolean("study_is_break", false)
+    }
+
+    fun studyFocusMinutes(c: Context): Int = prefs(c).getInt("study_focus_minutes", 25)
+    fun studyBreakMinutes(c: Context): Int = prefs(c).getInt("study_break_minutes", 5)
+
+    fun startStudy(c: Context, focusMinutes: Int, breakMinutes: Int, totalRounds: Int) {
+        val fm = focusMinutes.coerceIn(1, 180)
+        val bm = breakMinutes.coerceIn(0, 60)
+        val rounds = totalRounds.coerceIn(1, 12)
+        val now = System.currentTimeMillis()
+        prefs(c).edit()
+            .putBoolean("study_active", true)
+            .putInt("study_focus_minutes", fm)
+            .putInt("study_break_minutes", bm)
+            .putInt("study_total_rounds", rounds)
+            .putInt("study_current_round", 1)
+            .putBoolean("study_is_break", false)
+            .putLong("study_started_at", now)
+            .putLong("study_until", now + fm * 60_000L)
+            .apply()
+        muteNotifications(c)
+    }
+
+    fun endStudySession(c: Context) {
+        prefs(c).edit()
+            .putBoolean("study_active", false)
+            .putLong("study_until", 0L)
+            .putBoolean("study_is_break", false)
+            .remove("study_started_at")
+            .apply()
+        restoreNotifications(c)
+    }
+
+    fun skipStudyBreak(c: Context) {
+        val p = prefs(c)
+        if (!p.getBoolean("study_active", false) || !p.getBoolean("study_is_break", false)) return
+        val totalRounds = p.getInt("study_total_rounds", 4)
+        val currentRound = p.getInt("study_current_round", 1)
+        val focusMin = p.getInt("study_focus_minutes", 25)
+        val nextRound = currentRound + 1
+        val now = System.currentTimeMillis()
+        if (nextRound <= totalRounds) {
+            p.edit()
+                .putBoolean("study_is_break", false)
+                .putInt("study_current_round", nextRound)
+                .putLong("study_until", now + focusMin * 60_000L)
+                .apply()
+        } else {
+            endStudySession(c)
+        }
+    }
+
+    @Synchronized
+    fun advanceStudyState(c: Context) {
+        val p = prefs(c)
+        if (!p.getBoolean("study_active", false)) return
+        val until = p.getLong("study_until", 0L)
+        val now = System.currentTimeMillis()
+        if (now < until) return
+
+        val totalRounds = p.getInt("study_total_rounds", 4)
+        val currentRound = p.getInt("study_current_round", 1)
+        val isBreak = p.getBoolean("study_is_break", false)
+        val focusMin = p.getInt("study_focus_minutes", 25)
+        val breakMin = p.getInt("study_break_minutes", 5)
+
+        if (!isBreak) {
+            if (currentRound < totalRounds && breakMin > 0) {
+                p.edit()
+                    .putBoolean("study_is_break", true)
+                    .putLong("study_until", now + breakMin * 60_000L)
+                    .apply()
+            } else {
+                endStudySession(c)
+            }
+        } else {
+            val nextRound = currentRound + 1
+            if (nextRound <= totalRounds) {
+                p.edit()
+                    .putBoolean("study_is_break", false)
+                    .putInt("study_current_round", nextRound)
+                    .putLong("study_until", now + focusMin * 60_000L)
+                    .apply()
+            } else {
+                endStudySession(c)
+            }
+        }
+    }
+
+    fun muteNotifications(c: Context) {
+        runCatching {
+            val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                val p = prefs(c)
+                if (!p.contains("study_prev_ringer_mode")) {
+                    p.edit().putInt("study_prev_ringer_mode", am.ringerMode).apply()
+                }
+                am.ringerMode = AudioManager.RINGER_MODE_SILENT
+            }
+        }
+        runCatching {
+            val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (nm.isNotificationPolicyAccessGranted) {
+                    val p = prefs(c)
+                    if (!p.contains("study_prev_interruption_filter")) {
+                        p.edit().putInt("study_prev_interruption_filter", nm.currentInterruptionFilter).apply()
+                    }
+                    nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                }
+            }
+        }
+    }
+
+    fun restoreNotifications(c: Context) {
+        runCatching {
+            val p = prefs(c)
+            val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null && p.contains("study_prev_ringer_mode")) {
+                val prev = p.getInt("study_prev_ringer_mode", AudioManager.RINGER_MODE_NORMAL)
+                am.ringerMode = prev
+                p.edit().remove("study_prev_ringer_mode").apply()
+            }
+        }
+        runCatching {
+            val p = prefs(c)
+            val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && p.contains("study_prev_interruption_filter")) {
+                if (nm.isNotificationPolicyAccessGranted) {
+                    val prev = p.getInt("study_prev_interruption_filter", NotificationManager.INTERRUPTION_FILTER_ALL)
+                    nm.setInterruptionFilter(prev)
+                    p.edit().remove("study_prev_interruption_filter").apply()
+                }
+            }
+        }
+    }
 
     private fun day() = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
     fun incr(c: Context, kind: String) {
@@ -748,6 +913,26 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         promise.resolve(true)
     }
 
+    // ---------- Study mode (Aggressive Pomodoro Phone Lockout) ----------
+
+    @ReactMethod
+    fun startStudy(focusMinutes: Int, breakMinutes: Int, totalRounds: Int, promise: Promise) {
+        BlockerStore.startStudy(ctx, focusMinutes, breakMinutes, totalRounds)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun endStudy(promise: Promise) {
+        BlockerStore.endStudySession(ctx)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun skipStudyBreak(promise: Promise) {
+        BlockerStore.skipStudyBreak(ctx)
+        promise.resolve(true)
+    }
+
     @ReactMethod
     fun setFocusApps(packages: ReadableArray, promise: Promise) {
         val n = normalize(packages)
@@ -913,6 +1098,14 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putArray("focusApps", Arguments.fromList(BlockerStore.focusApps(ctx).toList()))
             putBoolean("active", BlockerStore.active(ctx))
             putBoolean("shield", BlockerStore.shield(ctx))
+            putBoolean("studyActive", BlockerStore.studyActive(ctx))
+            putDouble("studyUntil", BlockerStore.studyUntil(ctx).toDouble())
+            putDouble("studyRemainingMs", BlockerStore.studyRemainingMs(ctx).toDouble())
+            putInt("studyTotalRounds", BlockerStore.studyTotalRounds(ctx))
+            putInt("studyCurrentRound", BlockerStore.studyCurrentRound(ctx))
+            putBoolean("studyIsBreak", BlockerStore.studyIsBreak(ctx))
+            putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
+            putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
         })
     }
 

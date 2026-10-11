@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.4`
+# Blocker `v1.0.5`
 
-> **Current Version:** `v1.0.4` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.5` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -30,8 +30,9 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## 🌟 Key Features in v1.0.3.1
+## 🌟 Key Features in v1.0.5
 
+- **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a top switcher. Configure focus times (15m to 180m), rest breaks, and session rounds. When activated, all apps, the notification shade, quick settings, and internet/Wi-Fi toggles are completely locked down. Waking or unlocking the device returns directly to the live Pomodoro timer.
 - **In-App GitHub Release Updater:** Checks for new GitHub releases automatically every 24 hours (or on-demand in Settings). Download, inspect release notes, and install APK updates directly within the app.
 - **Automatic APK Cache Cleanup:** Automatically purges downloaded update APK files as soon as the updated version is installed and running, keeping your phone's storage clean.
 - **Per-App Usage Timers:** Set daily usage limits for specific apps. Once the timer expires, the app is blocked for the rest of the day.

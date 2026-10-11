@@ -60,6 +60,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.kiwibrowser.browser" to listOf("com.kiwibrowser.browser:id/url_bar")
         )
 
+        private val EMERGENCY_CALL_PKGS = setOf(
+            "com.android.server.telecom",
+            "com.android.incallui",
+            "com.google.android.dialer",
+            "com.samsung.android.incallui",
+            "com.android.phone",
+            "com.samsung.android.dialer",
+            "com.android.emergency"
+        )
+
         private val SETTINGS_PKGS = setOf(
             "com.android.settings",
             "com.google.android.packageinstaller",
@@ -716,6 +726,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                     fgStartTime = System.currentTimeMillis()
+                    if (BlockerStore.studyActive(this@BlockerAccessibilityService)) {
+                        main.postDelayed({ bringBlockerToForeground() }, 150)
+                    }
                 }
             }
         }
@@ -1003,6 +1016,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
         guardBlockerAppInfo(ev, pkg)
         if (checkAdbDialog(pkg)) return
+        if (BlockerStore.studyActive(this) && studyBlocks(ev, pkg)) return
         if (pkg in neverBlock) return
         if (isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android") {
             if (checkDangerDialog(pkg, ev)) return
@@ -1136,6 +1150,64 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Safe guard against any unexpected framework or node lifecycle exceptions
     }
 }
+
+    fun bringBlockerToForeground() {
+        try {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                startActivity(intent)
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ---------- Study mode (Aggressive Pomodoro Phone Lockout) ----------
+
+    private fun studyBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (pkg == packageName) return false
+        if (pkg in EMERGENCY_CALL_PKGS) return false
+        if (pkg in imePackages()) return false
+
+        // SystemUI = notification shade or quick settings (where Wi-Fi / mobile data toggles live)
+        if (pkg == "com.android.systemui") {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            main.postDelayed({ bringBlockerToForeground() }, 100)
+            return true
+        }
+
+        val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            rootInActiveWindow?.packageName?.toString() == pkg
+        if (!trusted && pkg in neverBlock) return false
+
+        val now = System.currentTimeMillis()
+        if (now - lastHit >= 700) {
+            lastHit = now
+            BlockerStore.incr(this, "study")
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 120)
+            val isBreak = BlockerStore.studyIsBreak(this)
+            val cur = BlockerStore.studyCurrentRound(this)
+            val tot = BlockerStore.studyTotalRounds(this)
+            val phase = if (isBreak) "Break Time" else "Round $cur of $tot"
+            showOverlay(
+                "Study Mode Active",
+                "Full phone lockdown is active for your Pomodoro study session ($phase • ${studyLeftText()}).\n\nAll other apps, settings, quick toggles, and notifications are blocked until you finish.\n\n“The two blessings which many people lose are: health and free time for doing good.”\n— Sahih al-Bukhari",
+                4000,
+                "Stay dedicated to your session",
+                "Back to Study"
+            )
+        } else {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 100)
+        }
+        return true
+    }
+
+    private fun studyLeftText(): String {
+        val ms = BlockerStore.studyRemainingMs(this)
+        val m = ms.coerceAtLeast(0L) / 60_000L + 1
+        return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
+    }
 
     // ---------- Focus mode ----------
 

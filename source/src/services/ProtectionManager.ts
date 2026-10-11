@@ -52,6 +52,16 @@ export interface FocusState {
   remainingMs: number;
   apps: string[];
 }
+export interface StudyState {
+  active: boolean;
+  until: number;
+  remainingMs: number;
+  totalRounds: number;
+  currentRound: number;
+  isBreak: boolean;
+  focusMinutes: number;
+  breakMinutes: number;
+}
 export const DEFAULT_GRANULAR: GranularFocusToggles = {
   block_fb_reels: false,
   block_insta_reels: false,
@@ -66,6 +76,7 @@ export interface Snapshot {
   shield: boolean;
   delayDays: number;
   focus: FocusState;
+  study: StudyState;
   granularFocus: GranularFocusToggles;
   schedules: Schedule[];
   locks: Partial<Record<LockKey, SettingLock>>;
@@ -86,6 +97,9 @@ const EMPTY: PersistState = {
 let snap: Snapshot = {
   ready: false, state: EMPTY, active: false, shield: true, delayDays: 1,
   focus: { active: false, until: 0, remainingMs: 0, apps: [] },
+  study: {
+    active: false, until: 0, remainingMs: 0, totalRounds: 4, currentRound: 1, isBreak: false, focusMinutes: 25, breakMinutes: 5
+  },
   granularFocus: DEFAULT_GRANULAR,
   schedules: [], locks: {}, perms: null, stats: null,
   appLimits: {}, appUsageToday: {}
@@ -193,7 +207,17 @@ export async function refresh() {
   if (dirty) persist({ ...snap.state, queue });
   emit({
     perms, stats, delayDays, locks, schedules, granularFocus, appLimits, appUsageToday, active: stats.active, shield: stats.shield,
-    focus: { active: stats.focusActive, until: stats.focusUntil, remainingMs: stats.focusRemainingMs, apps: stats.focusApps }
+    focus: { active: stats.focusActive, until: stats.focusUntil, remainingMs: stats.focusRemainingMs, apps: stats.focusApps },
+    study: {
+      active: stats.studyActive,
+      until: stats.studyUntil,
+      remainingMs: stats.studyRemainingMs,
+      totalRounds: stats.studyTotalRounds,
+      currentRound: stats.studyCurrentRound,
+      isBreak: stats.studyIsBreak,
+      focusMinutes: stats.studyFocusMinutes,
+      breakMinutes: stats.studyBreakMinutes,
+    }
   });
 }
 
@@ -379,6 +403,23 @@ export async function setFocusRemaining(minutes: number): Promise<Outcome> {
 }
 
 export const endFocusEarly = () => queueAction('focus', { t: 'focus_end', label: 'End focus mode early' });
+
+// ---------- study mode (pomodoro aggressive phone lockout) ----------
+
+export async function startStudy(focusMinutes: number, breakMinutes: number, totalRounds: number) {
+  await Native.startStudy(focusMinutes, breakMinutes, totalRounds);
+  await refresh();
+}
+
+export async function endStudyEarly() {
+  await Native.endStudy();
+  await refresh();
+}
+
+export async function skipStudyBreak() {
+  await Native.skipStudyBreak();
+  await refresh();
+}
 
 export async function addFocusApp(pkg: string, label: string): Promise<Outcome> {
   const cur = snap.focus.apps;

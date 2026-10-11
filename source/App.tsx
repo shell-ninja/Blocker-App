@@ -73,8 +73,8 @@ export default function App() {
   }
   if (!p.ready || !p.perms) return <View style={shell} />;
 
-  // while focus mode runs, the only screen is the focus screen (Blocker's own settings are locked too)
-  if (p.focus.active) {
+  // while focus or study mode runs, the only screen is the focus/study screen (Blocker's own settings are locked too)
+  if (p.focus.active || p.study.active) {
     return (
       <View style={shell}>
         <StatusBar barStyle="light-content" backgroundColor={t.bg} />

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, LayoutAnimation, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
-import { ChevronDown, Trash2 } from 'lucide-react-native';
+import { BookOpen, ChevronDown, Trash2 } from 'lucide-react-native';
 import { InstalledApp, Native, Schedule } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import {
@@ -8,6 +8,7 @@ import {
   removeFocusApp, setFocusRemaining, setGranularFocusToggle, startFocus, updateSchedule
 } from '../services/ProtectionManager';
 import { AppIcon } from './AppBlockerScreen';
+import StudyScreen from './StudyScreen';
 import { AnimatedToggleRow, Badge, Btn, Card, Fab, Icons, LockBar, Sub, Title, errMsg, fmt, showAlert, useTheme } from '../ui';
 
 const PRESETS = [30, 60, 120, 240, 480, 720, 1440];
@@ -456,6 +457,7 @@ function GranularFocusCard() {
 export default function FocusScreen() {
   const t = useTheme();
   const p = useProtection();
+  const [subPage, setSubPage] = useState<'focus' | 'study'>('focus');
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [minutes, setMinutes] = useState(60);
   const [custom, setCustom] = useState('');
@@ -465,6 +467,8 @@ export default function FocusScreen() {
   }, []);
 
   const active = p.focus.active;
+  const studyActive = p.study?.active;
+  const effectivePage = studyActive ? 'study' : active ? 'focus' : subPage;
   const now = useNow(active ? 1000 : 0);
   const [newestId, setNewestId] = useState<string | null>(null);
 
@@ -521,97 +525,170 @@ export default function FocusScreen() {
     return Array.from(set);
   }, [p.focus.apps, activeSchedule]);
 
-  if (active) {
-    return (
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
-        <Card>
-          <Title size={22} icon={Icons.focus}>Focus mode</Title>
-          <Text style={{ color: t.accent, fontSize: 40, fontWeight: '800', marginVertical: 8, fontVariant: ['tabular-nums'] }}>
-            {fmt(liveRemaining)}
-          </Text>
-          <Sub>
-            {timerRunning ? 'Running from your timer' : `Running from "${activeSchedule?.label ?? 'a schedule'}"`}.
-            Settings and every app except your essential apps are locked until it ends.
-          </Sub>
-          <LockBar lockKey="focus" />
-        </Card>
-
-        <Card>
-          <Title icon={Icons.play}>Open an essential app</Title>
-          {activeFocusApps.map(pkg => {
-            const a = byPkg.get(pkg);
-            return (
-              <View key={pkg} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 12 }}>
-                <AppIcon pkg={pkg} />
-                <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>{a?.label ?? pkg}</Text>
-                <Btn label="Open" disabled={!a} onPress={() => guard(() => Native.launchApp(pkg))} />
-              </View>
-            );
-          })}
-        </Card>
-
-        {timerRunning && (
-          <Card>
-            <Title icon={Icons.clock}>Change the timer</Title>
-            <Sub>Making it longer applies now. Shortening waits for the {delayText} timer.</Sub>
-            <Chips
-              values={PRESETS}
-              onPick={m => guard(async () => {
-                const r = await setFocusRemaining(m);
-                if (r !== 'applied') {
-                  showAlert('Change requested', `The shorter timer applies only after ${delayText}, if focus is still running.`);
-                }
-              })}
-            />
-          </Card>
-        )}
-
-        <Card>
-          <Btn label="End focus now" kind="danger" icon={Icons.unlock} onPress={endNow} />
-        </Card>
-
-        <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
-        <GranularFocusCard />
-        <EssentialApps apps={apps} />
-      </ScrollView>
-    );
-  }
-
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }} keyboardShouldPersistTaps="handled">
-        <Card>
-          <Title size={22} icon={Icons.focus}>Focus mode</Title>
-          <Sub>Locks all settings and every app except your essential apps for the time you choose.</Sub>
-          <Chips values={PRESETS} selected={custom.trim() ? undefined : minutes} onPick={m => { setCustom(''); setMinutes(m); }} />
-          <TextInput
-            value={custom}
-            onChangeText={setCustom}
-            keyboardType="number-pad"
-            placeholder="Or custom minutes (1 to 10080)"
-            placeholderTextColor={t.sub}
-            style={{ marginTop: 12, backgroundColor: t.card, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 }}
-          />
-          <View style={{ height: 12 }} />
-          <Btn
-            label={`Start focus for ${label(chosenMinutes)}`}
-            icon={Icons.play}
-            onPress={() => showAlert(
-              'Start focus mode?',
-              `Everything except your ${p.focus.apps.length} essential apps will be locked for ${label(chosenMinutes)}. Ending it early takes ${delayText}.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Start', style: 'destructive', onPress: () => guard(() => startFocus(chosenMinutes)) }
-              ]
-            )}
-          />
-        </Card>
+      {/* Top Segmented Page Switcher */}
+      <View style={{
+        flexDirection: 'row',
+        backgroundColor: t.bgAlt,
+        borderRadius: 14,
+        padding: 3,
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 4,
+        borderWidth: 1,
+        borderColor: t.border
+      }}>
+        <Pressable
+          onPress={() => !studyActive && setSubPage('focus')}
+          style={({ pressed }) => [{
+            flex: 1,
+            paddingVertical: 9,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'row',
+            gap: 7,
+            backgroundColor: effectivePage === 'focus' ? t.accent : 'transparent',
+            opacity: (studyActive && effectivePage !== 'focus') ? 0.35 : pressed ? 0.8 : 1,
+            shadowColor: effectivePage === 'focus' ? t.accent : 'transparent',
+            shadowOpacity: effectivePage === 'focus' ? 0.6 : 0,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 0 },
+            elevation: effectivePage === 'focus' ? 3 : 0
+          }]}>
+          <Icons.focus size={15} color={effectivePage === 'focus' ? '#FFF' : t.sub} strokeWidth={2.4} />
+          <Text style={{
+            color: effectivePage === 'focus' ? '#FFF' : t.sub,
+            fontWeight: '700',
+            fontSize: 13,
+            letterSpacing: -0.2
+          }}>
+            Focus Mode
+          </Text>
+        </Pressable>
 
-        <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
-        <GranularFocusCard />
-        <EssentialApps apps={apps} />
-      </ScrollView>
-      <Fab onPress={addNewSchedule} />
+        <Pressable
+          onPress={() => !active && setSubPage('study')}
+          style={({ pressed }) => [{
+            flex: 1,
+            paddingVertical: 9,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'row',
+            gap: 7,
+            backgroundColor: effectivePage === 'study' ? t.accent : 'transparent',
+            opacity: (active && effectivePage !== 'study') ? 0.35 : pressed ? 0.8 : 1,
+            shadowColor: effectivePage === 'study' ? t.accent : 'transparent',
+            shadowOpacity: effectivePage === 'study' ? 0.6 : 0,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 0 },
+            elevation: effectivePage === 'study' ? 3 : 0
+          }]}>
+          <BookOpen size={15} color={effectivePage === 'study' ? '#FFF' : t.sub} strokeWidth={2.4} />
+          <Text style={{
+            color: effectivePage === 'study' ? '#FFF' : t.sub,
+            fontWeight: '700',
+            fontSize: 13,
+            letterSpacing: -0.2
+          }}>
+            Study Mode
+          </Text>
+        </Pressable>
+      </View>
+
+      {effectivePage === 'study' ? (
+        <StudyScreen />
+      ) : active ? (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 10 }}>
+          <Card>
+            <Title size={22} icon={Icons.focus}>Focus mode</Title>
+            <Text style={{ color: t.accent, fontSize: 40, fontWeight: '800', marginVertical: 8, fontVariant: ['tabular-nums'] }}>
+              {fmt(liveRemaining)}
+            </Text>
+            <Sub>
+              {timerRunning ? 'Running from your timer' : `Running from "${activeSchedule?.label ?? 'a schedule'}"`}.
+              Settings and every app except your essential apps are locked until it ends.
+            </Sub>
+            <LockBar lockKey="focus" />
+          </Card>
+
+          <Card>
+            <Title icon={Icons.play}>Open an essential app</Title>
+            {activeFocusApps.map(pkg => {
+              const a = byPkg.get(pkg);
+              return (
+                <View key={pkg} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 12 }}>
+                  <AppIcon pkg={pkg} />
+                  <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>{a?.label ?? pkg}</Text>
+                  <Btn label="Open" disabled={!a} onPress={() => guard(() => Native.launchApp(pkg))} />
+                </View>
+              );
+            })}
+          </Card>
+
+          {timerRunning && (
+            <Card>
+              <Title icon={Icons.clock}>Change the timer</Title>
+              <Sub>Making it longer applies now. Shortening waits for the {delayText} timer.</Sub>
+              <Chips
+                values={PRESETS}
+                onPick={m => guard(async () => {
+                  const r = await setFocusRemaining(m);
+                  if (r !== 'applied') {
+                    showAlert('Change requested', `The shorter timer applies only after ${delayText}, if focus is still running.`);
+                  }
+                })}
+              />
+            </Card>
+          )}
+
+          <Card>
+            <Btn label="End focus now" kind="danger" icon={Icons.unlock} onPress={endNow} />
+          </Card>
+
+          <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
+          <GranularFocusCard />
+          <EssentialApps apps={apps} />
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 10, paddingBottom: 90 }} keyboardShouldPersistTaps="handled">
+            <Card>
+              <Title size={22} icon={Icons.focus}>Focus mode</Title>
+              <Sub>Locks all settings and every app except your essential apps for the time you choose.</Sub>
+              <Chips values={PRESETS} selected={custom.trim() ? undefined : minutes} onPick={m => { setCustom(''); setMinutes(m); }} />
+              <TextInput
+                value={custom}
+                onChangeText={setCustom}
+                keyboardType="number-pad"
+                placeholder="Or custom minutes (1 to 10080)"
+                placeholderTextColor={t.sub}
+                style={{ marginTop: 12, backgroundColor: t.card, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 }}
+              />
+              <View style={{ height: 12 }} />
+              <Btn
+                label={`Start focus for ${label(chosenMinutes)}`}
+                icon={Icons.play}
+                onPress={() => showAlert(
+                  'Start focus mode?',
+                  `Everything except your ${p.focus.apps.length} essential apps will be locked for ${label(chosenMinutes)}. Ending it early takes ${delayText}.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Start', style: 'destructive', onPress: () => guard(() => startFocus(chosenMinutes)) }
+                  ]
+                )}
+              />
+            </Card>
+
+            <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
+            <GranularFocusCard />
+            <EssentialApps apps={apps} />
+          </ScrollView>
+          <Fab onPress={addNewSchedule} />
+        </View>
+      )}
     </View>
   );
 }
