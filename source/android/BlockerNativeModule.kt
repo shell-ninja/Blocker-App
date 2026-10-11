@@ -623,6 +623,9 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 Intent(Settings.ACTION_SECURITY_SETTINGS),
                 Intent(Settings.ACTION_SETTINGS)
             )
+            "dnd", "notificationPolicy" -> listOf(
+                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+            )
             else -> {
                 promise.reject("BAD_KIND", "Unknown permission: $kind")
                 return

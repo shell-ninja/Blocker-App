@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 
-export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery';
+export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery' | 'dnd';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
   | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule' | 'app_limits';
