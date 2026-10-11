@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, AppState, Easing, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
+import { Animated, AppState, BackHandler, Easing, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
@@ -58,6 +58,13 @@ export default function App() {
       sub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (p.focus.active || p.study?.active) {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+      return () => sub.remove();
+    }
+  }, [p.focus.active, p.study?.active]);
 
   const shell = { flex: 1, backgroundColor: t.bg, paddingTop: top } as const;
 

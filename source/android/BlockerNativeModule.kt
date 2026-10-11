@@ -18,6 +18,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
@@ -213,6 +214,7 @@ object BlockerStore {
             .putLong("study_until", now + fm * 60_000L)
             .apply()
         muteNotifications(c)
+        disableWifi(c)
     }
 
     fun endStudySession(c: Context) {
@@ -223,6 +225,7 @@ object BlockerStore {
             .remove("study_started_at")
             .apply()
         restoreNotifications(c)
+        restoreWifi(c)
     }
 
     fun skipStudyBreak(c: Context) {
@@ -325,6 +328,44 @@ object BlockerStore {
                     nm.setInterruptionFilter(prev)
                     p.edit().remove("study_prev_interruption_filter").apply()
                 }
+            }
+        }
+    }
+
+    fun disableWifi(c: Context) {
+        val p = prefs(c)
+        runCatching {
+            val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            if (wm != null) {
+                @Suppress("DEPRECATION")
+                if (wm.isWifiEnabled) {
+                    p.edit().putBoolean("study_prev_wifi_enabled", true).apply()
+                    @Suppress("DEPRECATION")
+                    wm.isWifiEnabled = false
+                }
+            }
+        }
+        runCatching {
+            val cur = Settings.Global.getInt(c.contentResolver, "wifi_on", 1)
+            if (cur != 0) {
+                p.edit().putBoolean("study_prev_wifi_enabled", true).apply()
+                Settings.Global.putInt(c.contentResolver, "wifi_on", 0)
+            }
+        }
+    }
+
+    fun restoreWifi(c: Context) {
+        val p = prefs(c)
+        val wasEnabled = p.getBoolean("study_prev_wifi_enabled", false)
+        if (wasEnabled) {
+            p.edit().remove("study_prev_wifi_enabled").apply()
+            runCatching {
+                val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                wm?.isWifiEnabled = true
+            }
+            runCatching {
+                Settings.Global.putInt(c.contentResolver, "wifi_on", 1)
             }
         }
     }
@@ -931,6 +972,49 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     fun skipStudyBreak(promise: Promise) {
         BlockerStore.skipStudyBreak(ctx)
         promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun isWifiOn(promise: Promise) {
+        try {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            @Suppress("DEPRECATION")
+            promise.resolve(wm?.isWifiEnabled ?: false)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun openWifiSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val intent = Intent(Settings.Panel.ACTION_WIFI).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            } else {
+                val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("FAIL", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun setWifiEnabled(enabled: Boolean, promise: Promise) {
+        try {
+            if (enabled) BlockerStore.restoreWifi(ctx) else BlockerStore.disableWifi(ctx)
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            @Suppress("DEPRECATION")
+            promise.resolve(wm?.isWifiEnabled ?: false)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
     }
 
     @ReactMethod

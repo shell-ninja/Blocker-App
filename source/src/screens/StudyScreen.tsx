@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  BackHandler,
   Easing,
   Modal,
   Pressable,
@@ -25,12 +26,16 @@ import {
   RotateCcw,
   ShieldAlert,
   Sparkles,
+  Wifi,
   WifiOff,
 } from 'lucide-react-native';
 import { useNow, useProtection } from '../hooks/useProtection';
 import {
   endStudyEarly,
+  isWifiOn,
+  openWifiSettings,
   refresh,
+  setWifiEnabled,
   skipStudyBreak,
   startStudy,
 } from '../services/ProtectionManager';
@@ -174,6 +179,38 @@ export default function StudyScreen() {
     }
   }, [liveRemaining, active]);
 
+  // Back button protection while active
+  useEffect(() => {
+    if (!active) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, [active]);
+
+  // Wi-Fi detection
+  const [wifiOn, setWifiOn] = useState(false);
+  const checkWifi = () => {
+    isWifiOn().then(setWifiOn).catch(() => {});
+  };
+  useEffect(() => {
+    checkWifi();
+    const interval = setInterval(checkWifi, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleWifi = async () => {
+    try {
+      const targetState = !wifiOn;
+      const res = await setWifiEnabled(targetState);
+      setWifiOn(res);
+      if (!targetState && res) {
+        // If system blocked direct toggle, launch system panel
+        openWifiSettings().catch(() => {});
+      }
+    } catch (_) {
+      openWifiSettings().catch(() => {});
+    }
+  };
+
   // Quote selector
   const quote = useMemo(() => {
     const idx = (currentRound - 1) % QUOTES.length;
@@ -209,20 +246,23 @@ export default function StudyScreen() {
     : focusMinutes;
 
   const handleStartStudy = () => {
+    const wifiNotice = wifiOn ? '\n\nNote: Wi-Fi is currently ON. Blocker will attempt to switch it off automatically. For maximum focus, you can also turn it off manually beforehand.' : '';
     showAlert(
       'Activate Strict Study Mode?',
       `Your phone will be completely locked down for ${totalRounds} rounds of ${chosenFocus} min focus${
         totalRounds > 1 ? ` (${breakMinutes}m breaks in between)` : ''
-      }.\n\nAll apps, notification shade, internet toggles, and settings will be blocked until the session ends.\n\nYou can turn off the screen at any time; waking the device returns directly to your study timer.\n\nReady to commit?`,
+      }.\n\nAll apps, notification shade, internet toggles, and settings will be blocked until the session ends.\n\nYou can turn off the screen at any time; waking the device returns directly to your study timer.${wifiNotice}\n\nReady to commit?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Lock In & Start',
           style: 'destructive',
           onPress: () => {
-            startStudy(chosenFocus, breakMinutes, totalRounds).catch(err => {
-              showAlert('Error', errMsg(err));
-            });
+            startStudy(chosenFocus, breakMinutes, totalRounds)
+              .then(() => checkWifi())
+              .catch(err => {
+                showAlert('Error', errMsg(err));
+              });
           },
         },
       ]
@@ -421,10 +461,25 @@ export default function StudyScreen() {
             <Title icon={ShieldAlert}>Active Lockouts</Title>
             <View style={styles.lockoutGrid}>
               <View style={styles.lockoutItem}>
-                <WifiOff size={16} color={t.danger} strokeWidth={2.4} />
-                <Text style={[styles.lockoutText, { color: t.text }]}>
-                  Internet toggles & settings blocked
+                {wifiOn ? <Wifi size={16} color={t.warn} strokeWidth={2.4} /> : <WifiOff size={16} color={t.ok} strokeWidth={2.4} />}
+                <Text style={[styles.lockoutText, { color: t.text, flex: 1 }]}>
+                  {wifiOn ? 'Wi-Fi is ON — network settings blocked' : 'Wi-Fi is OFF — device is completely offline'}
                 </Text>
+                {wifiOn && (
+                  <Pressable
+                    onPress={handleToggleWifi}
+                    style={({ pressed }) => [{
+                      paddingVertical: 4,
+                      paddingHorizontal: 9,
+                      backgroundColor: t.dangerSoft,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: t.danger,
+                      opacity: pressed ? 0.7 : 1
+                    }]}>
+                    <Text style={{ color: t.danger, fontSize: 11, fontWeight: '800' }}>Turn Off</Text>
+                  </Pressable>
+                )}
               </View>
               <View style={styles.lockoutItem}>
                 <BellOff size={16} color={t.danger} strokeWidth={2.4} />
@@ -614,6 +669,62 @@ export default function StudyScreen() {
             <WifiOff size={12} color={t.accent} strokeWidth={2.4} />
             <Text style={[styles.badgeText, { color: t.text }]}>Internet Shield</Text>
           </View>
+        </View>
+      </Card>
+
+      {/* Network Shield Card */}
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: wifiOn ? t.warnSoft : t.okSoft,
+                borderWidth: 1,
+                borderColor: wifiOn ? t.warn : t.ok,
+              }}>
+              {wifiOn ? (
+                <Wifi size={18} color={t.warn} strokeWidth={2.4} />
+              ) : (
+                <WifiOff size={18} color={t.ok} strokeWidth={2.4} />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>
+                {wifiOn ? 'Wi-Fi is currently ON' : 'Wi-Fi is currently OFF'}
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
+                {wifiOn
+                  ? 'Blocker will attempt to turn off Wi-Fi on start. You can also turn it off now.'
+                  : 'Distraction-free: device is offline and ready for deep work.'}
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={handleToggleWifi}
+            style={({ pressed }) => [{
+              paddingVertical: 7,
+              paddingHorizontal: 12,
+              backgroundColor: wifiOn ? t.dangerSoft : t.accentSoft,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: wifiOn ? t.danger : t.accent,
+              marginLeft: 10,
+              opacity: pressed ? 0.7 : 1,
+            }]}>
+            <Text
+              style={{
+                color: wifiOn ? t.danger : t.accent,
+                fontSize: 12,
+                fontWeight: '800',
+              }}>
+              {wifiOn ? 'Turn Off' : 'Turn On'}
+            </Text>
+          </Pressable>
         </View>
       </Card>
 

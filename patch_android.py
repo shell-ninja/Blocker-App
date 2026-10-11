@@ -205,6 +205,9 @@ for perm, attrs in (
     ("android.permission.FOREGROUND_SERVICE", ""),
     ("android.permission.FOREGROUND_SERVICE_SPECIAL_USE", ' tools:ignore="ProtectedPermissions"'),
     ("android.permission.RECEIVE_BOOT_COMPLETED", ""),
+    ("android.permission.ACCESS_WIFI_STATE", ""),
+    ("android.permission.CHANGE_WIFI_STATE", ""),
+    ("android.permission.ACCESS_NETWORK_STATE", ""),
 ):
     if perm not in t:
         extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
