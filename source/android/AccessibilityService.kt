@@ -216,7 +216,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.android.settings.datetime.DateTimeSettings",
             "com.android.settings.DateTimeSettings",
             "com.android.settings.DateTimeSettingsSetupWizard",
-            "com.android.settings.ZonePicker"
+            "com.android.settings.ZonePicker",
+            "com.android.settings.Settings\$DateTimeSettingsActivity",
+            "com.android.settings.Settings\$DateTimeSettingsSetupWizardActivity",
+            "com.android.settings.Settings\$ZonePickerActivity",
+            "com.samsung.android.settings.datetime.DateTimeSettings",
+            "com.samsung.android.settings.DateTimeSettings",
+            "com.android.settings.MiuiDateTimeSettings",
+            "com.oplus.settings.feature.datetime.DateTimeSettings",
+            "com.coloros.settings.feature.datetime.DateTimeSettings"
         )
         private val DATE_TIME_SCREEN_TITLES = setOf(
             "date & time", "date and time", "date & time settings",
@@ -432,11 +440,13 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var settingsPollActive = false
     private val settingsPollRunnable = object : Runnable {
         override fun run() {
-            val shieldOn = BlockerStore.active(this@BlockerAccessibilityService) &&
+            val guardActive = shouldBlockDateTime() || (
+                BlockerStore.active(this@BlockerAccessibilityService) &&
                 BlockerStore.shield(this@BlockerAccessibilityService) &&
                 !BlockerStore.guardOpen(this@BlockerAccessibilityService, "shield")
+            )
 
-            if (!shieldOn) {
+            if (!guardActive) {
                 settingsPollActive = false
                 outsideSettingsCount = 0
                 return
@@ -596,7 +606,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // ── Full text scan ──
         val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(600))
+        collectText(root, sb, 0, intArrayOf(2500))
         val rawT = sb.toString().lowercase()
         if ("🔐" in rawT || "tamper protection" in rawT || "focus mode" in rawT) return
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
@@ -623,17 +633,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Date & Time settings (Target system clock manipulation, NOT Do Not Disturb / Sound / Volume schedules)
-        val isDndOrSound = "do not disturb" in t || "zen" in t || "sound" in t || "volume" in t || "notification" in t
-        if (!isDndOrSound) {
-            val hasDateTimeTitle = "date & time" in t || "date and time" in t
-            val hasDateTimeMarker = "automatic date & time" in t || "automatic date and time" in t ||
-                "use network-provided time" in t || ("set date" in t && "set time" in t) ||
-                ("set time" in t && ("time zone" in t || "24-hour" in t))
-            if (hasDateTimeTitle || hasDateTimeMarker) {
-                pollKick("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
-                return
-            }
+        // Date & Time settings guard: strictly blocks system clock alteration
+        if (shouldBlockDateTime() && isDateTimeSettingsScreen(root, t)) {
+            pollKick("Date & Time settings are locked while protection is active to prevent clock tampering.")
+            return
         }
 
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
@@ -822,7 +825,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")),
             0
         ).mapNotNull { it.activityInfo?.packageName }
-        (s1 + s2).toSet()
+        val s3 = pm.queryIntentActivities(Intent(android.provider.Settings.ACTION_DATE_SETTINGS), 0)
+            .mapNotNull { it.activityInfo?.packageName }
+        (s1 + s2 + s3).toSet()
     }.getOrDefault(emptySet())
 
     private fun isInstallerPkg(pkg: String): Boolean {
@@ -901,6 +906,64 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isSpecialAccess = "special app access" in t || "special access" in t
 
         return isDnd || isUnknownApps || isUsage || isSpecialAccess
+    }
+
+    private fun shouldBlockDateTime(): Boolean {
+        if (BlockerStore.studyActive(this)) return true
+        if (BlockerStore.focusActive(this)) return true
+        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")) return true
+        return false
+    }
+
+    private fun isDateTimeSettingsScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
+        val t = text.lowercase()
+
+        // 1. Direct title/phrase match
+        if ("date & time" in t || "date and time" in t || "date & time settings" in t || "date and time settings" in t) {
+            return true
+        }
+
+        // 2. Standard automatic network date/time toggles across all Android versions/OEMs
+        if ("set time automatically" in t || "automatic date & time" in t || "automatic date and time" in t ||
+            "use network-provided time" in t || "use network-provided time zone" in t || "automatic time zone" in t ||
+            "set time zone automatically" in t || "set automatically" in t) {
+            return true
+        }
+
+        // 3. Date & time setting actions/controls
+        if (("set date" in t || "change date" in t) && ("set time" in t || "change time" in t)) {
+            return true
+        }
+        if (("time zone" in t || "select time zone" in t) && ("set date" in t || "set time" in t || "automatic" in t || "24-hour" in t || "24 hour" in t)) {
+            return true
+        }
+        if (("24-hour" in t || "24 hour" in t) && ("date" in t || "time" in t) &&
+            ("automatic" in t || "network" in t || "format" in t || "clock" in t || "zone" in t)) {
+            return true
+        }
+
+        // 4. Fast native node lookup on the view tree
+        if (root != null) {
+            val terms = listOf(
+                "Date & time", "Date and time", "Set time automatically",
+                "Automatic date & time", "Automatic date and time", "Use network-provided time",
+                "Set date", "Set time", "Automatic time zone", "Set time zone automatically",
+                "Select time zone", "24-hour format", "Use 24-hour format"
+            )
+            for (term in terms) {
+                val nodes = root.findAccessibilityNodeInfosByText(term)
+                if (!nodes.isNullOrEmpty()) {
+                    nodes.forEach { runCatching { it.recycle() } }
+                    return true
+                }
+            }
+            val cls = root.className?.toString().orEmpty()
+            if (cls.contains("DatePicker", ignoreCase = true) || cls.contains("TimePicker", ignoreCase = true)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private fun isSettingsPkg(pkg: String): Boolean {
@@ -1057,6 +1120,26 @@ class BlockerAccessibilityService : AccessibilityService() {
         // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
         guardBlockerAppInfo(ev, pkg)
         if (checkAdbDialog(pkg)) return
+
+        // Proactive Date & Time intercept: runs before neverBlock or active checks to catch OEM clock/settings launchers
+        if (shouldBlockDateTime() && (isSettingsPkg(pkg) || isClockPkg(pkg) || pkg == "android")) {
+            startSettingsPoll()
+            val evCls = ev.className?.toString().orEmpty()
+            val rootNow = rootInActiveWindow ?: ev.source
+            val rootCls = runCatching { rootNow?.className?.toString().orEmpty() }.getOrDefault(evCls)
+            val winTitle = ev.text.joinToString(" ").trim().lowercase()
+            if (isDateTimeSettingsScreen(rootNow, winTitle) ||
+                evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+                evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
+                evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
+                evCls.contains("DatePicker", ignoreCase = true) || rootCls.contains("DatePicker", ignoreCase = true) ||
+                evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
+                kickToHome()
+                BlockerStore.incr(this, "tamper")
+                showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                return
+            }
+        }
         if (BlockerStore.studyActive(this) && studyBlocks(ev, pkg)) return
         if (pkg in neverBlock) return
         if (isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android") {
@@ -1160,14 +1243,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             // ── 6. Date & Time settings screen: prevent clock advance bypass ─────────
-            val isDndOrSoundTitle = "do not disturb" in winTitle || "zen" in winTitle || "notification" in winTitle || "sound" in winTitle
-            if (!isDndOrSoundTitle) {
-                val isDateTimeTitle = DATE_TIME_SCREEN_TITLES.any { it in winTitle }
-                val isDateTimeCls = evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+            if (shouldBlockDateTime()) {
+                val rootNow = rootInActiveWindow ?: ev.source
+                if (isDateTimeSettingsScreen(rootNow, winTitle) ||
+                    evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
                     evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
-                    evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true)
-                if (isDateTimeTitle || isDateTimeCls) {
-                    lockOutOfSettings("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+                    evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
+                    evCls.contains("DatePicker", ignoreCase = true) || rootCls.contains("DatePicker", ignoreCase = true) ||
+                    evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
                     return
                 }
             }
@@ -1644,62 +1730,66 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun checkSettings(ev: AccessibilityEvent) {
-        if (!BlockerStore.active(this) || !BlockerStore.shield(this) || BlockerStore.guardOpen(this, "shield")) return
+        val shieldOn = shieldEngaged()
+        val dtOn = shouldBlockDateTime()
+        if (!shieldOn && !dtOn) return
         val root = rootInActiveWindow ?: ev.source ?: return
         val cls = root.className?.toString().orEmpty()
         val evCls = ev.className?.toString().orEmpty()
         val evText = ev.text.joinToString(" ").lowercase()
 
-        if (cls in DEVICE_ADMIN_LIST_CLASSES) {
-            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-            autoCancelDialog(root)
-            lockOutOfSettings()
-            return
-        }
-        if (cls in DEVICE_ADMIN_DETAIL_CLASSES ||
-            cls.contains("DeviceAdminAdd", ignoreCase = true) ||
-            cls.contains("DeviceAdmin", ignoreCase = true)) {
-            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-            autoCancelDialog(root)
-            lockOutOfSettings()
-            return
-        }
-
-        // Generic uninstall-confirmation dialog, independent of exact class/package: catches
-        // "Do you want to uninstall this app?" whether it names Blocker explicitly or not, as long
-        // as we recently saw Blocker-specific admin/app-info content (viewingBlockerSettingsUntil).
-        // This is what actually catches the follow-up install-confirmation screen that appears
-        // right after the device-admin "disable and uninstall" step.
-        run {
-            val evTextNow = ev.text.joinToString(" ").lowercase()
-            val quickSb = StringBuilder()
-            collectText(root, quickSb, 0, intArrayOf(300))
-            val quickT = "${quickSb.toString().lowercase()} $evTextNow"
-            val looksLikeUninstall = "do you want to uninstall" in quickT ||
-                ("uninstall" in quickT && ("cancel" in quickT || "ok" in quickT))
-            val nowMs = System.currentTimeMillis()
-            if (looksLikeUninstall && (nowMs < viewingBlockerSettingsUntil || "blocker" in quickT)) {
-                viewingBlockerSettingsUntil = nowMs + 30_000L
+        if (shieldOn) {
+            if (cls in DEVICE_ADMIN_LIST_CLASSES) {
+                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
                 autoCancelDialog(root)
-                lockOutOfSettings("Blocker cannot be uninstalled while Protection Mode is active.")
+                lockOutOfSettings()
                 return
             }
-        }
+            if (cls in DEVICE_ADMIN_DETAIL_CLASSES ||
+                cls.contains("DeviceAdminAdd", ignoreCase = true) ||
+                cls.contains("DeviceAdmin", ignoreCase = true)) {
+                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                autoCancelDialog(root)
+                lockOutOfSettings()
+                return
+            }
 
-        // 1. Developer options activity & event detection
-        val isDevActivity = cls in DEV_OPTIONS_CLASSES ||
-            evCls in DEV_OPTIONS_CLASSES ||
-            cls.contains("Development", ignoreCase = true) ||
-            cls.contains("Developer", ignoreCase = true) ||
-            evCls.contains("Development", ignoreCase = true) ||
-            evCls.contains("Developer", ignoreCase = true) ||
-            evText.contains("developer option") ||
-            evText.contains("developer mode") ||
-            evText.contains("development setting")
-        if (isDevActivity) {
-            if (adbFixActive()) return
-            lockOutOfSettings("Developer options are locked while Protection Mode is active.")
-            return
+            // Generic uninstall-confirmation dialog, independent of exact class/package: catches
+            // "Do you want to uninstall this app?" whether it names Blocker explicitly or not, as long
+            // as we recently saw Blocker-specific admin/app-info content (viewingBlockerSettingsUntil).
+            // This is what actually catches the follow-up install-confirmation screen that appears
+            // right after the device-admin "disable and uninstall" step.
+            run {
+                val evTextNow = ev.text.joinToString(" ").lowercase()
+                val quickSb = StringBuilder()
+                collectText(root, quickSb, 0, intArrayOf(300))
+                val quickT = "${quickSb.toString().lowercase()} $evTextNow"
+                val looksLikeUninstall = "do you want to uninstall" in quickT ||
+                    ("uninstall" in quickT && ("cancel" in quickT || "ok" in quickT))
+                val nowMs = System.currentTimeMillis()
+                if (looksLikeUninstall && (nowMs < viewingBlockerSettingsUntil || "blocker" in quickT)) {
+                    viewingBlockerSettingsUntil = nowMs + 30_000L
+                    autoCancelDialog(root)
+                    lockOutOfSettings("Blocker cannot be uninstalled while Protection Mode is active.")
+                    return
+                }
+            }
+
+            // 1. Developer options activity & event detection
+            val isDevActivity = cls in DEV_OPTIONS_CLASSES ||
+                evCls in DEV_OPTIONS_CLASSES ||
+                cls.contains("Development", ignoreCase = true) ||
+                cls.contains("Developer", ignoreCase = true) ||
+                evCls.contains("Development", ignoreCase = true) ||
+                evCls.contains("Developer", ignoreCase = true) ||
+                evText.contains("developer option") ||
+                evText.contains("developer mode") ||
+                evText.contains("development setting")
+            if (isDevActivity) {
+                if (adbFixActive()) return
+                lockOutOfSettings("Developer options are locked while Protection Mode is active.")
+                return
+            }
         }
 
         if (root.packageName?.toString() == packageName) return
@@ -1712,39 +1802,51 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
         val fullText = "$t $evText"
 
-        // 2. Comprehensive Developer Options content detection
-        val hasDevTitle = "developer options" in fullText ||
-            "developer mode" in fullText ||
-            "development settings" in fullText ||
-            "development options" in fullText ||
-            "developer settings" in fullText
+        if (shieldOn) {
+            // 2. Comprehensive Developer Options content detection
+            val hasDevTitle = "developer options" in fullText ||
+                "developer mode" in fullText ||
+                "development settings" in fullText ||
+                "development options" in fullText ||
+                "developer settings" in fullText
 
-        val hasUniqueDevMarker = "wireless debugging" in fullText ||
-            "desktop backup password" in fullText ||
-            "logger buffer" in fullText ||
-            "stay awake" in fullText ||
-            "bluetooth hci snoop log" in fullText ||
-            "running services" in fullText ||
-            "system tracing" in fullText ||
-            "mock location" in fullText ||
-            "verify apps over usb" in fullText ||
-            "pointer location" in fullText ||
-            "show taps" in fullText ||
-            "window animation scale" in fullText ||
-            "transition animation scale" in fullText ||
-            "animator duration scale" in fullText ||
-            "force 4x msaa" in fullText ||
-            "disable usb audio routing" in fullText ||
-            "strict mode enabled" in fullText ||
-            "background process limit" in fullText ||
-            "standby apps" in fullText ||
-            "show all anrs" in fullText
+            val hasUniqueDevMarker = "wireless debugging" in fullText ||
+                "desktop backup password" in fullText ||
+                "logger buffer" in fullText ||
+                "stay awake" in fullText ||
+                "bluetooth hci snoop log" in fullText ||
+                "running services" in fullText ||
+                "system tracing" in fullText ||
+                "mock location" in fullText ||
+                "verify apps over usb" in fullText ||
+                "pointer location" in fullText ||
+                "show taps" in fullText ||
+                "window animation scale" in fullText ||
+                "transition animation scale" in fullText ||
+                "animator duration scale" in fullText ||
+                "force 4x msaa" in fullText ||
+                "disable usb audio routing" in fullText ||
+                "strict mode enabled" in fullText ||
+                "background process limit" in fullText ||
+                "standby apps" in fullText ||
+                "show all anrs" in fullText
 
-        if (hasDevTitle || hasUniqueDevMarker) {
-            if (adbFixActive()) return
-            lockOutOfSettings("Developer options are locked while Protection Mode is active.")
+            if (hasDevTitle || hasUniqueDevMarker) {
+                if (adbFixActive()) return
+                lockOutOfSettings("Developer options are locked while Protection Mode is active.")
+                return
+            }
+        }
+
+        // Date & Time settings guard: strictly blocks system clock alteration
+        if (dtOn && isDateTimeSettingsScreen(root, fullText)) {
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
             return
         }
+
+        if (!shieldOn) return
 
         // 3. App Storage Clearing & App Info Protection for Blocker (even if Device Admin was removed)
         val storageRiskTerms = listOf(
@@ -1842,6 +1944,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun guardBlockerAppInfo(ev: AccessibilityEvent, pkg: String) {
         if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (guardDateTimeRowClick(ev, pkg)) return
             guardBlockerRowClick(ev, pkg)
             return
         }
@@ -1973,6 +2076,66 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
         if (hit) kickFromAppInfo()
+    }
+
+    /**
+     * Intercepts taps on "Date & time" or "Date and time" rows inside Settings before the page ever opens.
+     */
+    private fun guardDateTimeRowClick(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (!isSettingsPkg(pkg) && !isClockPkg(pkg)) return false
+        if (!shouldBlockDateTime()) return false
+        val text = ev.text.joinToString(" ").lowercase()
+        val cd = ev.contentDescription?.toString()?.lowercase().orEmpty()
+        val combined = "$text $cd"
+        val isHit = combined == "date & time" || combined == "date and time" ||
+            combined.contains("date & time") || combined.contains("date and time") ||
+            combined.contains("change date") || combined.contains("change time") ||
+            combined.contains("set time automatically") || combined.contains("automatic date") ||
+            (combined.contains("set date") && combined.contains("set time")) ||
+            combined.contains("time zone")
+        if (isHit) {
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+            return true
+        }
+        val src = ev.source
+        if (src != null) {
+            val sb = StringBuilder()
+            collectText(src, sb, 0, intArrayOf(50))
+            val srcText = sb.toString().lowercase()
+            if (isDateTimeSettingsScreen(src, srcText)) {
+                runCatching { src.recycle() }
+                kickToHome()
+                BlockerStore.incr(this, "tamper")
+                showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                return true
+            }
+
+            val terms = listOf(
+                "Date & time", "Date and time", "Set time automatically",
+                "Automatic date & time", "Automatic date and time", "Use network-provided time",
+                "Set date", "Set time", "Time zone"
+            )
+            for (term in terms) {
+                val nodes = src.findAccessibilityNodeInfosByText(term)
+                if (!nodes.isNullOrEmpty()) {
+                    nodes.forEach { runCatching { it.recycle() } }
+                    runCatching { src.recycle() }
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                    return true
+                }
+            }
+            runCatching { src.recycle() }
+        }
+        return false
+    }
+
+    private fun isClockPkg(pkg: String): Boolean {
+        val lower = pkg.lowercase()
+        return lower.contains("deskclock") || lower.contains("clockpackage") || lower.contains("clock")
     }
 
     /** Looks for the app's exact name in a tapped row: the node itself and a few levels of children. */
