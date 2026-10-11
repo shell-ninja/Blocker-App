@@ -212,6 +212,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             "storage", "storage & cache", "storage and cache",
             "clear storage", "clear data", "manage storage", "app storage"
         )
+        private val DATE_TIME_CLASSES = setOf(
+            "com.android.settings.datetime.DateTimeSettings",
+            "com.android.settings.DateTimeSettings",
+            "com.android.settings.DateTimeSettingsSetupWizard",
+            "com.android.settings.ZonePicker"
+        )
+        private val DATE_TIME_SCREEN_TITLES = setOf(
+            "date & time", "date and time", "date & time settings", "time settings", "set time", "set date",
+            "automatic date & time", "automatic date and time", "change date", "change time"
+        )
         private const val SCAN_GAP_MS = 1000L
         private const val MAX_SCAN_CHARS = 20_000
         private const val REDIRECT_URL = "https://www.google.com"
@@ -1117,6 +1127,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 lockOutOfSettings("App data deletion for Blocker is locked while Protection Mode is active.")
                 return
             }
+
+            // ── 6. Date & Time settings screen: prevent clock advance bypass ─────────
+            val isDateTimeTitle = DATE_TIME_SCREEN_TITLES.any { it in winTitle }
+            val isDateTimeCls = evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+                evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
+                evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
+                evCls.contains("DateSettings", ignoreCase = true) || rootCls.contains("DateSettings", ignoreCase = true) ||
+                evCls.contains("TimeSettings", ignoreCase = true) || rootCls.contains("TimeSettings", ignoreCase = true)
+            if (isDateTimeTitle || isDateTimeCls) {
+                lockOutOfSettings("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+                return
+            }
         }
 
         when {
@@ -1321,8 +1343,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun hostOf(t: String): String? {
-        val h = t.removePrefix("https://").removePrefix("http://")
+        val decoded = runCatching { java.net.URLDecoder.decode(t, "UTF-8") }.getOrDefault(t)
+        val h = decoded.removePrefix("https://").removePrefix("http://")
             .substringBefore('/').substringBefore('?').substringBefore('#')
+            .substringAfterLast('@')
             .substringBefore(':').removePrefix("www.")
         return h.takeIf { it.contains('.') && !it.contains(' ') }
     }

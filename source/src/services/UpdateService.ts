@@ -256,7 +256,11 @@ class UpdateManager {
         downloadUrl,
         apkName: chosenAsset.name,
         sizeBytes: Number(chosenAsset.size) || 0,
-        htmlUrl: data.html_url || `https://github.com/shell-ninja/Blocker-App/releases/tag/${tagName}`,
+        htmlUrl:
+          typeof data.html_url === 'string' &&
+          data.html_url.startsWith('https://github.com/shell-ninja/Blocker-App/releases')
+            ? data.html_url
+            : `https://github.com/shell-ninja/Blocker-App/releases/tag/${encodeURIComponent(tagName)}`,
       };
 
       const hasUpdate = compareSemVer(version, APP_VERSION) > 0;

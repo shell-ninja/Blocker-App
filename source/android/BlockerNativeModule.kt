@@ -1570,6 +1570,10 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             if (apkFile.exists()) apkFile.delete()
             throw IllegalArgumentException("Downloaded file is not a valid Android package archive")
         }
+        if (pi.packageName != rc.packageName) {
+            if (apkFile.exists()) apkFile.delete()
+            throw SecurityException("Downloaded package (${pi.packageName}) does not match application (${rc.packageName})")
+        }
 
         val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!isCurrentDebug) {
