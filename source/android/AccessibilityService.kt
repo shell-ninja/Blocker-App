@@ -60,6 +60,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.kiwibrowser.browser" to listOf("com.kiwibrowser.browser:id/url_bar")
         )
 
+        private val EMERGENCY_CALL_PKGS = setOf(
+            "com.android.server.telecom",
+            "com.android.incallui",
+            "com.google.android.dialer",
+            "com.samsung.android.incallui",
+            "com.android.phone",
+            "com.samsung.android.dialer",
+            "com.android.emergency"
+        )
+
         private val SETTINGS_PKGS = setOf(
             "com.android.settings",
             "com.google.android.packageinstaller",
@@ -201,6 +211,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         private val STORAGE_SCREEN_TITLES = setOf(
             "storage", "storage & cache", "storage and cache",
             "clear storage", "clear data", "manage storage", "app storage"
+        )
+        private val DATE_TIME_CLASSES = setOf(
+            "com.android.settings.datetime.DateTimeSettings",
+            "com.android.settings.DateTimeSettings",
+            "com.android.settings.DateTimeSettingsSetupWizard",
+            "com.android.settings.ZonePicker"
+        )
+        private val DATE_TIME_SCREEN_TITLES = setOf(
+            "date & time", "date and time", "date & time settings", "time settings", "set time", "set date",
+            "automatic date & time", "automatic date and time", "change date", "change time"
         )
         private const val SCAN_GAP_MS = 1000L
         private const val MAX_SCAN_CHARS = 20_000
@@ -603,6 +623,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Date & Time settings
+        val hasDateTimeTitle = "date & time" in t || "date and time" in t || "set time" in t || "set date" in t
+        val hasDateTimeMarker = "automatic date & time" in t || "automatic date and time" in t ||
+            "use network-provided time" in t || "use 24-hour format" in t || "select time zone" in t
+        if (hasDateTimeTitle || hasDateTimeMarker) {
+            pollKick("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+            return
+        }
+
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
         val isOurApp = "blocker" in t || packageName.lowercase() in t
 
@@ -716,6 +745,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                     fgStartTime = System.currentTimeMillis()
+                    if (BlockerStore.studyActive(this@BlockerAccessibilityService)) {
+                        main.postDelayed({ bringBlockerToForeground() }, 150)
+                    }
                 }
             }
         }
@@ -1003,6 +1035,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
         guardBlockerAppInfo(ev, pkg)
         if (checkAdbDialog(pkg)) return
+        if (BlockerStore.studyActive(this) && studyBlocks(ev, pkg)) return
         if (pkg in neverBlock) return
         if (isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android") {
             if (checkDangerDialog(pkg, ev)) return
@@ -1103,6 +1136,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 lockOutOfSettings("App data deletion for Blocker is locked while Protection Mode is active.")
                 return
             }
+
+            // ── 6. Date & Time settings screen: prevent clock advance bypass ─────────
+            val isDateTimeTitle = DATE_TIME_SCREEN_TITLES.any { it in winTitle }
+            val isDateTimeCls = evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+                evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
+                evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
+                evCls.contains("DateSettings", ignoreCase = true) || rootCls.contains("DateSettings", ignoreCase = true) ||
+                evCls.contains("TimeSettings", ignoreCase = true) || rootCls.contains("TimeSettings", ignoreCase = true)
+            if (isDateTimeTitle || isDateTimeCls) {
+                lockOutOfSettings("Date & Time settings are locked while Protection Mode is active to prevent clock tampering.")
+                return
+            }
         }
 
         when {
@@ -1136,6 +1181,104 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Safe guard against any unexpected framework or node lifecycle exceptions
     }
 }
+
+    fun bringBlockerToForeground() {
+        try {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                startActivity(intent)
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ---------- Study mode (Aggressive Pomodoro Phone Lockout) ----------
+
+    private var lastStudyRedirect = 0L
+    private var lastShadeDismiss = 0L
+
+    private fun collapseNotificationShade() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching { performGlobalAction(15) } // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE
+        }
+        runCatching {
+            val sbservice = getSystemService("statusbar")
+            val statusbarManager = Class.forName("android.app.StatusBarManager")
+            val collapse = statusbarManager.getMethod("collapsePanels")
+            collapse.invoke(sbservice)
+        }
+        runCatching {
+            @Suppress("DEPRECATION")
+            sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        }
+    }
+
+    private fun studyBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
+        // 1. If inside Blocker itself, never block! Let the user view and use the Pomodoro timer uninterrupted.
+        if (pkg == packageName) return false
+
+        // 2. Emergency phone calls and soft keyboards must always work.
+        if (pkg in EMERGENCY_CALL_PKGS) return false
+        if (pkg in imePackages()) return false
+        if (pkg == "android") return false
+
+        val now = System.currentTimeMillis()
+
+        // 3. SystemUI handling (Notification shade, Quick Settings tiles for Wi-Fi / Mobile Data):
+        // Automatically collapse the notification panel so Wi-Fi, Mobile Data, and alerts are shielded.
+        // Navigation bar touches are preserved so in-app buttons continue to function.
+        if (pkg == "com.android.systemui") {
+            val cls = ev.className?.toString().orEmpty()
+            val isNavBar = cls.contains("NavigationBar", ignoreCase = true) || cls.contains("Navigation", ignoreCase = true)
+            if (!isNavBar) {
+                if (now - lastShadeDismiss >= 400L) {
+                    lastShadeDismiss = now
+                    collapseNotificationShade()
+                }
+            }
+            return false
+        }
+
+        // 4. Home launcher:
+        // Redirect smoothly back to Blocker's Pomodoro timer without looping.
+        if (pkg in launcherPackages()) {
+            if (now - lastStudyRedirect >= 800L) {
+                lastStudyRedirect = now
+                bringBlockerToForeground()
+            }
+            return true
+        }
+
+        // 5. Unauthorized apps, Settings, Browsers, and Games:
+        // Immediately kick off the screen back to Home, bring Blocker back to front, and show study lockout dialog.
+        if (now - lastStudyRedirect >= 600L) {
+            lastStudyRedirect = now
+            BlockerStore.incr(this, "study")
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 180)
+            val isBreak = BlockerStore.studyIsBreak(this)
+            val cur = BlockerStore.studyCurrentRound(this)
+            val tot = BlockerStore.studyTotalRounds(this)
+            val phase = if (isBreak) "Break Time" else "Round $cur of $tot"
+            showOverlay(
+                "Study Mode Active",
+                "Full phone lockdown is active for your Pomodoro study session ($phase • ${studyLeftText()}).\n\nAll other apps, settings, quick toggles, and notifications are blocked until you finish.\n\n“The two blessings which many people lose are: health and free time for doing good.”\n— Sahih al-Bukhari",
+                4000,
+                "Stay dedicated to your session",
+                "Back to Study"
+            )
+        } else {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            main.postDelayed({ bringBlockerToForeground() }, 180)
+        }
+        return true
+    }
+
+    private fun studyLeftText(): String {
+        val ms = BlockerStore.studyRemainingMs(this)
+        val m = ms.coerceAtLeast(0L) / 60_000L + 1
+        return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
+    }
 
     // ---------- Focus mode ----------
 
@@ -1209,8 +1352,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun hostOf(t: String): String? {
-        val h = t.removePrefix("https://").removePrefix("http://")
+        val decoded = runCatching { java.net.URLDecoder.decode(t, "UTF-8") }.getOrDefault(t)
+        val h = decoded.removePrefix("https://").removePrefix("http://")
             .substringBefore('/').substringBefore('?').substringBefore('#')
+            .substringAfterLast('@')
             .substringBefore(':').removePrefix("www.")
         return h.takeIf { it.contains('.') && !it.contains(' ') }
     }

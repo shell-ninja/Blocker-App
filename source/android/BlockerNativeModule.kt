@@ -16,7 +16,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
@@ -163,6 +165,243 @@ object BlockerStore {
     fun pendingUntil(c: Context, key: String) = prefs(c).getLong("pending_$key", 0L)
     fun guardOpen(c: Context, key: String) = prefs(c).getLong("open_$key", 0L) > System.currentTimeMillis()
     fun consumeGuard(c: Context, key: String) = prefs(c).edit().remove("open_$key").apply()
+
+    // ---- Study Mode (Aggressive Pomodoro Phone Lockout) ----
+    fun studyActive(c: Context): Boolean {
+        advanceStudyState(c)
+        return prefs(c).getBoolean("study_active", false)
+    }
+
+    fun studyUntil(c: Context): Long {
+        advanceStudyState(c)
+        return prefs(c).getLong("study_until", 0L)
+    }
+
+    fun studyRemainingMs(c: Context): Long {
+        advanceStudyState(c)
+        val until = prefs(c).getLong("study_until", 0L)
+        return (until - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun studyTotalRounds(c: Context): Int = prefs(c).getInt("study_total_rounds", 4)
+
+    fun studyCurrentRound(c: Context): Int {
+        advanceStudyState(c)
+        return prefs(c).getInt("study_current_round", 1)
+    }
+
+    fun studyIsBreak(c: Context): Boolean {
+        advanceStudyState(c)
+        return prefs(c).getBoolean("study_is_break", false)
+    }
+
+    fun studyFocusMinutes(c: Context): Int = prefs(c).getInt("study_focus_minutes", 25)
+    fun studyBreakMinutes(c: Context): Int = prefs(c).getInt("study_break_minutes", 5)
+
+    fun startStudy(c: Context, focusMinutes: Int, breakMinutes: Int, totalRounds: Int) {
+        val fm = focusMinutes.coerceIn(1, 180)
+        val bm = breakMinutes.coerceIn(0, 60)
+        val rounds = totalRounds.coerceIn(1, 12)
+        val now = System.currentTimeMillis()
+        prefs(c).edit()
+            .putBoolean("study_active", true)
+            .putInt("study_focus_minutes", fm)
+            .putInt("study_break_minutes", bm)
+            .putInt("study_total_rounds", rounds)
+            .putInt("study_current_round", 1)
+            .putBoolean("study_is_break", false)
+            .putLong("study_started_at", now)
+            .putLong("study_until", now + fm * 60_000L)
+            .apply()
+        muteNotifications(c)
+        disableWifi(c)
+    }
+
+    fun endStudySession(c: Context) {
+        prefs(c).edit()
+            .putBoolean("study_active", false)
+            .putLong("study_until", 0L)
+            .putBoolean("study_is_break", false)
+            .remove("study_started_at")
+            .apply()
+        restoreNotifications(c)
+        restoreWifi(c)
+    }
+
+    fun skipStudyBreak(c: Context) {
+        val p = prefs(c)
+        if (!p.getBoolean("study_active", false) || !p.getBoolean("study_is_break", false)) return
+        val totalRounds = p.getInt("study_total_rounds", 4)
+        val currentRound = p.getInt("study_current_round", 1)
+        val focusMin = p.getInt("study_focus_minutes", 25)
+        val nextRound = currentRound + 1
+        val now = System.currentTimeMillis()
+        if (nextRound <= totalRounds) {
+            p.edit()
+                .putBoolean("study_is_break", false)
+                .putInt("study_current_round", nextRound)
+                .putLong("study_until", now + focusMin * 60_000L)
+                .apply()
+        } else {
+            endStudySession(c)
+        }
+    }
+
+    @Synchronized
+    fun advanceStudyState(c: Context) {
+        val p = prefs(c)
+        if (!p.getBoolean("study_active", false)) return
+        val until = p.getLong("study_until", 0L)
+        val now = System.currentTimeMillis()
+        if (now < until) return
+
+        val totalRounds = p.getInt("study_total_rounds", 4)
+        val currentRound = p.getInt("study_current_round", 1)
+        val isBreak = p.getBoolean("study_is_break", false)
+        val focusMin = p.getInt("study_focus_minutes", 25)
+        val breakMin = p.getInt("study_break_minutes", 5)
+
+        if (!isBreak) {
+            if (currentRound < totalRounds && breakMin > 0) {
+                p.edit()
+                    .putBoolean("study_is_break", true)
+                    .putLong("study_until", now + breakMin * 60_000L)
+                    .apply()
+            } else {
+                endStudySession(c)
+            }
+        } else {
+            val nextRound = currentRound + 1
+            if (nextRound <= totalRounds) {
+                p.edit()
+                    .putBoolean("study_is_break", false)
+                    .putInt("study_current_round", nextRound)
+                    .putLong("study_until", now + focusMin * 60_000L)
+                    .apply()
+            } else {
+                endStudySession(c)
+            }
+        }
+    }
+
+    fun muteNotifications(c: Context) {
+        val p = prefs(c)
+        val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (am != null) {
+            if (!p.contains("study_prev_vol_ring")) {
+                p.edit()
+                    .putInt("study_prev_vol_ring", am.getStreamVolume(AudioManager.STREAM_RING))
+                    .putInt("study_prev_vol_notif", am.getStreamVolume(AudioManager.STREAM_NOTIFICATION))
+                    .putInt("study_prev_vol_music", am.getStreamVolume(AudioManager.STREAM_MUSIC))
+                    .putInt("study_prev_vol_sys", am.getStreamVolume(AudioManager.STREAM_SYSTEM))
+                    .apply()
+            }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0) }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0) }
+            runCatching { am.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0) }
+            runCatching { am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0) }
+        }
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                if (!p.contains("study_prev_interruption_filter")) {
+                    p.edit().putInt("study_prev_interruption_filter", nm.currentInterruptionFilter).apply()
+                }
+                runCatching {
+                    nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                }
+            }
+        }
+        if (am != null) {
+            runCatching {
+                if (!p.contains("study_prev_ringer_mode")) {
+                    p.edit().putInt("study_prev_ringer_mode", am.ringerMode).apply()
+                }
+                am.ringerMode = AudioManager.RINGER_MODE_SILENT
+            }
+        }
+    }
+
+    fun restoreNotifications(c: Context) {
+        val p = prefs(c)
+        val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (am != null) {
+            if (p.contains("study_prev_vol_notif")) {
+                val vRing = p.getInt("study_prev_vol_ring", 5)
+                val vNotif = p.getInt("study_prev_vol_notif", 5)
+                val vMusic = p.getInt("study_prev_vol_music", 5)
+                val vSys = p.getInt("study_prev_vol_sys", 5)
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, vNotif, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_RING, vRing, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, vMusic, 0) }
+                runCatching { am.setStreamVolume(AudioManager.STREAM_SYSTEM, vSys, 0) }
+                p.edit()
+                    .remove("study_prev_vol_ring")
+                    .remove("study_prev_vol_notif")
+                    .remove("study_prev_vol_music")
+                    .remove("study_prev_vol_sys")
+                    .apply()
+            }
+            if (p.contains("study_prev_ringer_mode")) {
+                val prev = p.getInt("study_prev_ringer_mode", AudioManager.RINGER_MODE_NORMAL)
+                runCatching { am.ringerMode = prev }
+                p.edit().remove("study_prev_ringer_mode").apply()
+            }
+        }
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && p.contains("study_prev_interruption_filter")) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                val prev = p.getInt("study_prev_interruption_filter", NotificationManager.INTERRUPTION_FILTER_ALL)
+                runCatching { nm.setInterruptionFilter(prev) }
+            }
+            p.edit().remove("study_prev_interruption_filter").apply()
+        }
+    }
+
+    fun disableWifi(c: Context) {
+        val p = prefs(c)
+        runCatching {
+            val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            if (wm != null) {
+                @Suppress("DEPRECATION")
+                if (wm.isWifiEnabled) {
+                    p.edit().putBoolean("study_prev_wifi_enabled", true).apply()
+                    @Suppress("DEPRECATION")
+                    wm.isWifiEnabled = false
+                }
+            }
+        }
+        runCatching {
+            val cur = Settings.Global.getInt(c.contentResolver, "wifi_on", 1)
+            if (cur != 0) {
+                p.edit().putBoolean("study_prev_wifi_enabled", true).apply()
+                Settings.Global.putInt(c.contentResolver, "wifi_on", 0)
+            }
+        }
+    }
+
+    fun restoreWifi(c: Context) {
+        val p = prefs(c)
+        val wasEnabled = p.getBoolean("study_prev_wifi_enabled", false)
+        if (wasEnabled) {
+            p.edit().remove("study_prev_wifi_enabled").apply()
+            runCatching {
+                val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                wm?.isWifiEnabled = true
+            }
+            runCatching {
+                Settings.Global.putInt(c.contentResolver, "wifi_on", 1)
+            }
+        }
+    }
 
     private fun day() = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
     fun incr(c: Context, kind: String) {
@@ -748,6 +987,106 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         promise.resolve(true)
     }
 
+    // ---------- Study mode (Aggressive Pomodoro Phone Lockout) ----------
+
+    @ReactMethod
+    fun startStudy(focusMinutes: Int, breakMinutes: Int, totalRounds: Int, promise: Promise) {
+        BlockerStore.startStudy(ctx, focusMinutes, breakMinutes, totalRounds)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun endStudy(promise: Promise) {
+        BlockerStore.endStudySession(ctx)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun skipStudyBreak(promise: Promise) {
+        BlockerStore.skipStudyBreak(ctx)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun isWifiOn(promise: Promise) {
+        try {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            @Suppress("DEPRECATION")
+            promise.resolve(wm?.isWifiEnabled ?: false)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun openWifiSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val intent = Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    ctx.startActivity(intent)
+                    promise.resolve(true)
+                    return
+                } catch (_: Exception) {}
+                val intent = Intent(Settings.Panel.ACTION_WIFI).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            } else {
+                val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("FAIL", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun setWifiEnabled(enabled: Boolean, promise: Promise) {
+        try {
+            if (enabled) BlockerStore.restoreWifi(ctx) else BlockerStore.disableWifi(ctx)
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            @Suppress("DEPRECATION")
+            promise.resolve(wm?.isWifiEnabled ?: false)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun hasDndAccess(promise: Promise) {
+        try {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && nm != null) {
+                promise.resolve(nm.isNotificationPolicyAccessGranted)
+            } else {
+                promise.resolve(true)
+            }
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun requestDndAccess(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("FAIL", e.message)
+        }
+    }
+
     @ReactMethod
     fun setFocusApps(packages: ReadableArray, promise: Promise) {
         val n = normalize(packages)
@@ -913,6 +1252,14 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putArray("focusApps", Arguments.fromList(BlockerStore.focusApps(ctx).toList()))
             putBoolean("active", BlockerStore.active(ctx))
             putBoolean("shield", BlockerStore.shield(ctx))
+            putBoolean("studyActive", BlockerStore.studyActive(ctx))
+            putDouble("studyUntil", BlockerStore.studyUntil(ctx).toDouble())
+            putDouble("studyRemainingMs", BlockerStore.studyRemainingMs(ctx).toDouble())
+            putInt("studyTotalRounds", BlockerStore.studyTotalRounds(ctx))
+            putInt("studyCurrentRound", BlockerStore.studyCurrentRound(ctx))
+            putBoolean("studyIsBreak", BlockerStore.studyIsBreak(ctx))
+            putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
+            putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
         })
     }
 
@@ -1222,6 +1569,10 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         if (pi == null) {
             if (apkFile.exists()) apkFile.delete()
             throw IllegalArgumentException("Downloaded file is not a valid Android package archive")
+        }
+        if (pi.packageName != rc.packageName) {
+            if (apkFile.exists()) apkFile.delete()
+            throw SecurityException("Downloaded package (${pi.packageName}) does not match application (${rc.packageName})")
         }
 
         val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0

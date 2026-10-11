@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, AppState, Easing, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
+import { Animated, AppState, BackHandler, Easing, Platform, Pressable, StatusBar, Text, UIManager, View } from 'react-native';
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
@@ -59,6 +59,13 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (p.focus.active || p.study?.active) {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+      return () => sub.remove();
+    }
+  }, [p.focus.active, p.study?.active]);
+
   const shell = { flex: 1, backgroundColor: t.bg, paddingTop: top } as const;
 
   if (!isSupported) {
@@ -73,8 +80,8 @@ export default function App() {
   }
   if (!p.ready || !p.perms) return <View style={shell} />;
 
-  // while focus mode runs, the only screen is the focus screen (Blocker's own settings are locked too)
-  if (p.focus.active) {
+  // while focus or study mode runs, the only screen is the focus/study screen (Blocker's own settings are locked too)
+  if (p.focus.active || p.study.active) {
     return (
       <View style={shell}>
         <StatusBar barStyle="light-content" backgroundColor={t.bg} />
