@@ -911,26 +911,28 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun shouldBlockDateTime(): Boolean {
         if (BlockerStore.studyActive(this)) return true
         if (BlockerStore.focusActive(this)) return true
-        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")) return true
+        if (shieldEngaged()) return true
         return false
     }
 
     private fun isDateTimeSettingsScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
         val t = text.lowercase()
 
-        // 1. Direct title/phrase match
-        if ("date & time" in t || "date and time" in t || "date & time settings" in t || "date and time settings" in t) {
-            return true
-        }
+        // If the screen contains parent menu items, it is a settings list (e.g. System, General Management, Main Settings), NOT the Date & Time subpage!
+        val isParentMenu = "language" in t || "gesture" in t || "backup" in t || "reset" in t ||
+            "keyboard" in t || "system update" in t || "about phone" in t || "battery" in t ||
+            "display" in t || "sound" in t || "network & internet" in t || "connected devices" in t ||
+            "wallpaper" in t || "apps & notifications" in t || "accessibility" in t
+        if (isParentMenu) return false
 
-        // 2. Standard automatic network date/time toggles across all Android versions/OEMs
+        // 1. Standard automatic network date/time toggles across all Android versions/OEMs (only on actual Date & Time subscreen)
         if ("set time automatically" in t || "automatic date & time" in t || "automatic date and time" in t ||
             "use network-provided time" in t || "use network-provided time zone" in t || "automatic time zone" in t ||
             "set time zone automatically" in t || "set automatically" in t) {
             return true
         }
 
-        // 3. Date & time setting actions/controls
+        // 2. Date & time setting actions/controls
         if (("set date" in t || "change date" in t) && ("set time" in t || "change time" in t)) {
             return true
         }
@@ -942,13 +944,23 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // 4. Fast native node lookup on the view tree
+        // 3. Exact title on a subscreen without other setting sections
+        val isDateTimeTitle = t.startsWith("date & time") || t.startsWith("date and time") ||
+            t == "date & time" || t == "date and time" ||
+            "date & time settings" in t || "date and time settings" in t
+        if (isDateTimeTitle && ("time" in t || "date" in t || "clock" in t || "zone" in t)) {
+            if ("set" in t || "automatic" in t || "network" in t || "zone" in t || "format" in t || "hour" in t || "am" in t || "pm" in t) {
+                return true
+            }
+        }
+
+        // 4. Fast native node lookup on the view tree for actual controls (never match generic list titles)
         if (root != null) {
             val terms = listOf(
-                "Date & time", "Date and time", "Set time automatically",
-                "Automatic date & time", "Automatic date and time", "Use network-provided time",
-                "Set date", "Set time", "Automatic time zone", "Set time zone automatically",
-                "Select time zone", "24-hour format", "Use 24-hour format"
+                "Set time automatically", "Automatic date & time", "Automatic date and time",
+                "Use network-provided time", "Use network-provided time zone",
+                "Set time zone automatically", "Automatic time zone", "Select time zone",
+                "Set date", "Set time", "Use 24-hour format"
             )
             for (term in terms) {
                 val nodes = root.findAccessibilityNodeInfosByText(term)
@@ -1123,21 +1135,25 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Proactive Date & Time intercept: runs before neverBlock or active checks to catch OEM clock/settings launchers
         if (shouldBlockDateTime() && (isSettingsPkg(pkg) || isClockPkg(pkg) || pkg == "android")) {
-            startSettingsPoll()
-            val evCls = ev.className?.toString().orEmpty()
             val rootNow = rootInActiveWindow ?: ev.source
-            val rootCls = runCatching { rootNow?.className?.toString().orEmpty() }.getOrDefault(evCls)
-            val winTitle = ev.text.joinToString(" ").trim().lowercase()
-            if (isDateTimeSettingsScreen(rootNow, winTitle) ||
-                evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
-                evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
-                evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
-                evCls.contains("DatePicker", ignoreCase = true) || rootCls.contains("DatePicker", ignoreCase = true) ||
-                evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
-                kickToHome()
-                BlockerStore.incr(this, "tamper")
-                showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
-                return
+            if (!isInstallOrUpdateDialog(ev, rootNow)) {
+                val winTitle = ev.text.joinToString(" ").trim().lowercase()
+                if (!isLegitimatePermissionScreen(winTitle)) {
+                    startSettingsPoll()
+                    val evCls = ev.className?.toString().orEmpty()
+                    val rootCls = runCatching { rootNow?.className?.toString().orEmpty() }.getOrDefault(evCls)
+                    if (isDateTimeSettingsScreen(rootNow, winTitle) ||
+                        evCls in DATE_TIME_CLASSES || rootCls in DATE_TIME_CLASSES ||
+                        evCls.contains("DateTimeSettings", ignoreCase = true) || rootCls.contains("DateTimeSettings", ignoreCase = true) ||
+                        evCls.contains("ZonePicker", ignoreCase = true) || rootCls.contains("ZonePicker", ignoreCase = true) ||
+                        evCls.contains("DatePicker", ignoreCase = true) || rootCls.contains("DatePicker", ignoreCase = true) ||
+                        evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
+                        kickToHome()
+                        BlockerStore.incr(this, "tamper")
+                        showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                        return
+                    }
+                }
             }
         }
         if (BlockerStore.studyActive(this) && studyBlocks(ev, pkg)) return
@@ -2084,15 +2100,18 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun guardDateTimeRowClick(ev: AccessibilityEvent, pkg: String): Boolean {
         if (!isSettingsPkg(pkg) && !isClockPkg(pkg)) return false
         if (!shouldBlockDateTime()) return false
+        if (isInstallOrUpdateDialog(ev, rootInActiveWindow)) return false
+
         val text = ev.text.joinToString(" ").lowercase()
         val cd = ev.contentDescription?.toString()?.lowercase().orEmpty()
-        val combined = "$text $cd"
+        val combined = "$text $cd".trim()
+        if (isLegitimatePermissionScreen(combined)) return false
+
         val isHit = combined == "date & time" || combined == "date and time" ||
             combined.contains("date & time") || combined.contains("date and time") ||
-            combined.contains("change date") || combined.contains("change time") ||
-            combined.contains("set time automatically") || combined.contains("automatic date") ||
-            (combined.contains("set date") && combined.contains("set time")) ||
-            combined.contains("time zone")
+            combined.contains("change date & time") || combined.contains("set time automatically") ||
+            combined.contains("automatic date & time") || combined.contains("automatic date and time") ||
+            (combined.contains("set date") && combined.contains("set time"))
         if (isHit) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
@@ -2104,6 +2123,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             val sb = StringBuilder()
             collectText(src, sb, 0, intArrayOf(50))
             val srcText = sb.toString().lowercase()
+            if (isLegitimatePermissionScreen(srcText)) {
+                runCatching { src.recycle() }
+                return false
+            }
             if (isDateTimeSettingsScreen(src, srcText)) {
                 runCatching { src.recycle() }
                 kickToHome()
@@ -2114,8 +2137,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             val terms = listOf(
                 "Date & time", "Date and time", "Set time automatically",
-                "Automatic date & time", "Automatic date and time", "Use network-provided time",
-                "Set date", "Set time", "Time zone"
+                "Automatic date & time", "Automatic date and time", "Use network-provided time"
             )
             for (term in terms) {
                 val nodes = src.findAccessibilityNodeInfosByText(term)
