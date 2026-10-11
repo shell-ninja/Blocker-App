@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.5`
+# Blocker `v1.0.6`
 
-> **Current Version:** `v1.0.5` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -30,7 +30,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## 🌟 Key Features in v1.0.5
+## 🌟 Key Features in v1.0.6
 
 - **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a segmented switcher.
   - **Customizable Cycles:** Set study focus intervals (15m to 180m), rest breaks (3m to 15m), and session rounds (1 to 6).
