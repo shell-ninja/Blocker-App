@@ -51,6 +51,7 @@ export default function App() {
     if (!isSupported) return;
     init().catch(() => {});
     UpdateService.checkOnLaunch().catch(() => {});
+    const i = setInterval(() => refresh().catch(() => {}), 5000);
     const sub = AppState.addEventListener('change', s => {
       if (s === 'active') {
         refresh().catch(() => {});
