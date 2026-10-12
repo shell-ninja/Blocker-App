@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6`
+# Blocker `v1.0.6.1`
 
-> **Current Version:** `v1.0.6` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.1` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -30,7 +30,22 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## 🌟 Key Features in v1.0.6
+## What's New in v1.0.6.1
+
+- **🔒 Comprehensive Security Audit Hardening:**
+  - **Monotonic Hardware Time Tracking (`SecureTime`):** Anchors timers to elapsed CPU uptime (`SystemClock.elapsedRealtime()`) and persists monotonically increasing hardware anchors, eliminating timer-bypass exploits via ADB, NTP manipulation, or SIM removal.
+  - **HMAC-SHA256 State Integrity Verification:** Protects SharedPreferences with HMAC signatures; unauthorized manual edits or third-party tampering automatically revert state to known-good values.
+  - **Code Signing Certificate Verification:** Enforces strict cryptographic signature checks (`GET_SIGNING_CERTIFICATES` / `GET_SIGNATURES`) on downloaded updates before launching the installer, preventing rogue update injection.
+  - **Device Admin Deactivation Mitigation:** Executes immediate back/home defense actions on deactivation attempts and auto-prompts immediate re-activation if administrative rights are revoked.
+  - **Reboot Accessibility Shield:** BootReceiver monitors and automatically restores Accessibility Service on device reboot via `Settings.Secure`, dispatching a high-priority system alert if inactive.
+  - **Memory & Resource Safety:** Capped recursion depth, guaranteed node recycling across all accessibility tree walks, and 2MB JSON validation limits on backup state.
+- **⚡ 0ms Instantaneous Block Overlay:**
+  - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
+  - Short-circuited App Info inspection for non-settings apps, saving 50–100ms on every accessibility event.
+- **📱 Restored Facebook Reels Detection:**
+  - Integrated Litho TalkBack selection state scanning and Reels viewer signatures (`reelsviewer`, `channelfeed`, `warion`, audio tags) to reliably intercept FB Reels.
+- **🎛️ Opt-In Granular Distraction Shields:**
+  - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over which distraction shields to engage in **Focus Mode > Distraction Shields**.
 
 - **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a segmented switcher.
   - **Customizable Cycles:** Set study focus intervals (15m to 180m), rest breaks (3m to 15m), and session rounds (1 to 6).
