@@ -52,7 +52,12 @@ export default function App() {
     init().catch(() => {});
     UpdateService.checkOnLaunch().catch(() => {});
     const i = setInterval(() => refresh().catch(() => {}), 5000);
-    const sub = AppState.addEventListener('change', s => s === 'active' && refresh().catch(() => {}));
+    const sub = AppState.addEventListener('change', s => {
+      if (s === 'active') {
+        refresh().catch(() => {});
+        UpdateService.checkOnLaunch().catch(() => {});
+      }
+    });
     return () => {
       clearInterval(i);
       sub.remove();

@@ -35,7 +35,8 @@ export interface UpdateState {
 }
 
 const GITHUB_API_URL = 'https://api.github.com/repos/shell-ninja/Blocker-App/releases/latest';
-const CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours between background auto-checks
+const REGULAR_CHECK_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours regular check cycle
+const PENDING_UPDATE_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours backoff if update is available but user hasn't updated yet
 
 export function compareSemVer(v1: string, v2: string): number {
   const parse = (v: string) =>
@@ -77,6 +78,10 @@ class UpdateManager {
 
   constructor() {
     this.setupProgressListener();
+    // Periodically evaluate update cooldown while app process is in memory
+    setInterval(() => {
+      this.checkOnLaunch().catch(() => {});
+    }, 15 * 60 * 1000);
   }
 
   private setupProgressListener() {
@@ -137,14 +142,37 @@ class UpdateManager {
     this.cleanupOldApks().catch(() => {});
 
     let lastChecked = this.state.lastCheckedAt;
-    if (isSupported && Native.getUpdateCheckTimestamp) {
-      try {
-        lastChecked = await Native.getUpdateCheckTimestamp();
-      } catch {}
+    let hasPendingUpdate = this.state.hasUpdate;
+
+    if (isSupported) {
+      if (Native.getUpdateCheckTimestamp) {
+        try {
+          lastChecked = await Native.getUpdateCheckTimestamp();
+        } catch {}
+      }
+      if (Native.getHasPendingUpdate) {
+        try {
+          hasPendingUpdate = await Native.getHasPendingUpdate();
+        } catch {}
+      }
+      if (Native.getLastNotifiedVersion) {
+        try {
+          const lastNotified = await Native.getLastNotifiedVersion();
+          // If the last notified version is already installed (or older), reset pending update
+          if (lastNotified && compareSemVer(lastNotified, APP_VERSION) <= 0) {
+            hasPendingUpdate = false;
+            if (Native.setHasPendingUpdate) {
+              Native.setHasPendingUpdate(false).catch(() => {});
+            }
+          }
+        } catch {}
+      }
     }
+
     const now = Date.now();
-    // Only check once every 24 hours on launch
-    if (now - lastChecked < CHECK_COOLDOWN_MS) {
+    // Regular check cycle: every 2h. If update was found and pending: every 24h.
+    const cooldown = hasPendingUpdate ? PENDING_UPDATE_COOLDOWN_MS : REGULAR_CHECK_COOLDOWN_MS;
+    if (now - lastChecked < cooldown) {
       return;
     }
     await this.checkForUpdate(false);
@@ -279,9 +307,14 @@ class UpdateManager {
         this.cleanupOldApks().catch(() => {});
       }
 
-      // Persist check timestamp
-      if (isSupported && Native.setUpdateCheckTimestamp) {
-        Native.setUpdateCheckTimestamp(now).catch(() => {});
+      // Persist check timestamp and pending update status
+      if (isSupported) {
+        if (Native.setUpdateCheckTimestamp) {
+          Native.setUpdateCheckTimestamp(now).catch(() => {});
+        }
+        if (Native.setHasPendingUpdate) {
+          Native.setHasPendingUpdate(hasUpdate).catch(() => {});
+        }
       }
 
       // Show system notification only when a NEWER version is detected and not yet notified

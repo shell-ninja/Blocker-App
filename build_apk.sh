@@ -295,8 +295,8 @@ done
 
 
 if [ "$MODE" = "release" ]; then
-  # Build both Release and Release-Debug so the release version can be tested before finally installing
-  ./gradlew assembleRelease assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  ./gradlew assembleRelease "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
   OUT_RELEASE="$APK_DIR/Blocker-release-$APP_VER.apk"
   OUT_DEBUG="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
