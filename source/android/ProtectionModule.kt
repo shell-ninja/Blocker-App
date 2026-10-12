@@ -12,13 +12,10 @@ import com.facebook.react.bridge.ReactMethod
 class ProtectionModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
-    // Device Owner status/actions always use MyDeviceAdminReceiver, NOT BlockerDeviceAdminReceiver.
-    // MyDeviceAdminReceiver is a separate, dedicated admin receiver (its own manifest <receiver>,
-    // its own device_admin_policies.xml with the fuller policy set Device Owner setup expects) that
-    // exists specifically so `adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver` has
-    // a distinct target from the regular onboarding-granted admin. Passing the wrong ComponentName
-    // to setUninstallBlocked()/addUserRestriction() fails with a SecurityException even when Device
-    // Owner provisioning succeeded, since these calls require the exact owner component.
+    // Device Owner status/actions use MyDeviceAdminReceiver (which subclasses BlockerDeviceAdminReceiver).
+    // It shares all anti-tamper callbacks while binding device_admin_policies.xml specifically so that
+    // `adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver` targets the complete policy set.
+    // Passing the exact ComponentName to setUninstallBlocked()/addUserRestriction() is required by Android.
     override fun getName(): String = "ProtectionModule"
 
     /** Lets the UI show whether hardware-level protection is available/on, without side effects. */
