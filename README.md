@@ -17,10 +17,10 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 > [!WARNING]
 > **Play Protect Warning During Installation**  
 > Because Blocker is an open-source, sideloaded app that utilizes Android Accessibility Services and Device Administrator permissions for tamper resistance, Google Play Protect may warn or block installation:  
-> - **Quick Install:** On the prompt, tap **"More details"** &rarr; **"Install anyway"**.  
+> - **Quick Install:** On the prompt, tap **"More details"** -> **"Install anyway"**.  
 > - **If Blocked:** Temporarily disable Play Protect during installation:  
->   1. Open **Google Play Store** &rarr; tap your **Profile Icon** (top right) &rarr; select **Play Protect**.  
->   2. Tap the **Settings gear (⚙️)** in the top right corner.  
+>   1. Open **Google Play Store** -> tap your **Profile Icon** (top right) -> select **Play Protect**.  
+>   2. Tap the **Settings gear** in the top right corner.  
 >   3. Turn off **"Scan apps with Play Protect"**.  
 >   4. Install Blocker, then you can turn Play Protect back on once installation finishes.
 
@@ -32,43 +32,49 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## What's New in v1.0.6.1
 
-- **🔒 Comprehensive Security Audit Hardening:**
+- **Comprehensive Security Audit Hardening:**
   - **Monotonic Hardware Time Tracking (`SecureTime`):** Anchors timers to elapsed CPU uptime (`SystemClock.elapsedRealtime()`) and persists monotonically increasing hardware anchors, eliminating timer-bypass exploits via ADB, NTP manipulation, or SIM removal.
   - **HMAC-SHA256 State Integrity Verification:** Protects SharedPreferences with HMAC signatures; unauthorized manual edits or third-party tampering automatically revert state to known-good values.
   - **Code Signing Certificate Verification:** Enforces strict cryptographic signature checks (`GET_SIGNING_CERTIFICATES` / `GET_SIGNATURES`) on downloaded updates before launching the installer, preventing rogue update injection.
   - **Device Admin Deactivation Mitigation:** Executes immediate back/home defense actions on deactivation attempts and auto-prompts immediate re-activation if administrative rights are revoked.
   - **Reboot Accessibility Shield:** BootReceiver monitors and automatically restores Accessibility Service on device reboot via `Settings.Secure`, dispatching a high-priority system alert if inactive.
   - **Memory & Resource Safety:** Capped recursion depth, guaranteed node recycling across all accessibility tree walks, and 2MB JSON validation limits on backup state.
-- **⚡ 0ms Instantaneous Block Overlay:**
+- **0ms Instantaneous Block Overlay:**
   - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
-  - Short-circuited App Info inspection for non-settings apps, saving 50–100ms on every accessibility event.
-- **📱 Restored Facebook Reels Detection:**
+  - Short-circuited App Info inspection for non-settings apps, saving 50-100ms on every accessibility event.
+- **Restored Facebook Reels Detection:**
   - Integrated Litho TalkBack selection state scanning and Reels viewer signatures (`reelsviewer`, `channelfeed`, `warion`, audio tags) to reliably intercept FB Reels.
-- **🎛️ Opt-In Granular Distraction Shields:**
+- **Opt-In Granular Distraction Shields:**
   - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over which distraction shields to engage in **Focus Mode > Distraction Shields**.
+- **Pomodoro Study Mode Emergency Exit:**
+  - Restored immediate emergency unlock via 4-second long-press, properly disabling DND, unmuting audio streams, and resetting active study blocks without delay timer queue trapping.
 
-- **📚 Pomodoro Study Mode (Aggressive Phone Lockdown):** Seamlessly integrated into the Focus page with a segmented switcher.
+---
+
+## Core Features
+
+- **Pomodoro Study Mode (Full Phone Lockdown):** Seamlessly integrated into the Focus page with a segmented switcher.
   - **Customizable Cycles:** Set study focus intervals (15m to 180m), rest breaks (3m to 15m), and session rounds (1 to 6).
   - **Aggressive Phone Lockdown:** All apps, home launcher, settings, and navigation are blocked during study sessions, returning directly to the running study timer within milliseconds.
   - **Quick Settings & Status Bar Shield:** Automatically collapses notification shade pulls (`StatusBarManager.collapsePanels()`), preventing unauthorized toggling of Wi-Fi, mobile data, or airplane mode.
   - **Complete Silencing & Do Not Disturb:** Automatically activates Do Not Disturb (`INTERRUPTION_FILTER_NONE`) and zeroes ringtone, media, notification, and system volume streams, cleanly restoring prior volumes upon completion.
   - **Interactive Wi-Fi Controls:** Monitor Wi-Fi status and toggle network connectivity on demand directly within Blocker without breaking lockdown.
-  - **Display Standby & Power Lock Friendly:** Safely turn off the screen using the physical power button; unlocking returns straight to the active timer.
+  - **Display Standby Friendly:** Safely turn off the screen using the physical power button; unlocking returns straight to the active timer.
   - **Emergency Safeguard:** Dialer and emergency telecom services are explicitly whitelisted for critical safety.
-- **🛡️ Anti-Tamper & Clock Manipulation Defense:**
-  - **Date & Time Tamper Shield (Anti-Timer Bypass):** Dual-layer protection (instant window interception + 150ms continuous screen text scanner) prevents users from manipulating device date/time in Android Settings to prematurely expire delayed unlock timers.
+- **Anti-Tamper & Clock Manipulation Defense:**
+  - **Date & Time Tamper Shield:** Dual-layer protection (instant window interception + continuous screen text scanner) prevents users from manipulating device date/time in Android Settings to prematurely expire delayed unlock timers.
   - **System Settings Guard:** Strictly blocks access to Developer Options, Device Administrator settings, and App Info / Force Stop / Uninstall screens.
   - **Debugging Lockdown:** Automatically detects and disables USB and Wireless debugging if enabled.
-- **🔒 Hardened Content & Distraction Shields:**
+- **Hardened Content & Distraction Shields:**
   - **URL User-Info Domain Spoofing Defense:** Hardened domain extraction parser (`hostOf`) strips user credentials (`user@host`) and decodes percent-encoded characters, eliminating bypasses like `https://safe.org@blocked-domain.com`.
   - **Granular Distraction Shields:** Independent toggles for YouTube Shorts, Instagram Reels, and Facebook Reels without breaking main app feeds.
   - **Offline Content Database:** Fast, local, obfuscated adult domain database with custom domain blocklists and keyword whitelisting.
-- **🔄 In-App Updater & Security Verification:**
+- **In-App Updater & Security Verification:**
   - **Automated Update Checks:** Checks for official GitHub releases every 24 hours with in-app changelog viewer and direct APK installer.
   - **Package Identity Verification:** Enforces strict package name validation (`pi.packageName == rc.packageName`) before invoking Android package installer on downloaded APKs.
   - **URL Sanitization:** Release links are strictly validated against official GitHub repositories.
   - **Automatic Storage Cleanup:** Purges cached APK files immediately upon successful installation.
-- **⏳ Delayed Unlock Timers:** Any attempt to weaken protections, unblock apps, or shorten timers requires waiting out an unbreakable delay of 24 hours to 30 days.
+- **Delayed Unlock Timers:** Any attempt to weaken protections, unblock apps, or shorten timers requires waiting out an unbreakable delay of 24 hours to 30 days.
 
 ---
 
@@ -118,7 +124,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
     <td align="center" width="33%">
       <img src="ScreenShots/settings-page.jpg" width="220" alt="Settings page" /><br/>
       <b>Settings &amp; Shield</b><br/>
-      <sub>Uninstall shield, wireless debugging locks, and 1–30 day delay timers.</sub>
+      <sub>Uninstall shield, wireless debugging locks, and 1-30 day delay timers.</sub>
     </td>
     <td align="center" width="33%">
       <img src="ScreenShots/update-app-feature.jpg" width="220" alt="App update feature" /><br/>
@@ -132,7 +138,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## Architecture Overview
 
-```
+```text
 Blocker/
 ├── source/                  # Source files (working directory)
 │   ├── App.tsx              # Main entry point and bottom tab navigation
@@ -238,8 +244,8 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 1. Copy or download the compiled APK to your Android device.
 2. Open the file to start installation.
 3. If **Google Play Protect** blocks the install:
-   - Tap **"More details"** &rarr; **"Install anyway"**.
-   - If blocked completely, open **Google Play Store** &rarr; tap your **Profile** (top right) &rarr; **Play Protect** &rarr; tap **Settings (⚙️)** &rarr; temporarily turn off **"Scan apps with Play Protect"** while installing. You can turn it back on after installation.
+   - Tap **"More details"** -> **"Install anyway"**.
+   - If blocked completely, open **Google Play Store** -> tap your **Profile** (top right) -> **Play Protect** -> tap **Settings** -> temporarily turn off **"Scan apps with Play Protect"** while installing. You can turn it back on after installation.
 
 ---
 
@@ -252,7 +258,7 @@ All application development takes place under the `source/` folder:
 * **Native Android Interception:** Edit `source/android/AccessibilityService.kt` to modify window state detection, URL bar checking, or anti-tamper logic.
 * **Native Modules & Updater:** Edit `source/android/BlockerNativeModule.kt` to modify Kotlin methods exposed to React Native.
 
-**Important:** Do **not** edit directly inside `project/ (or $BLOCKER_DIR)` — that directory is the build target. Always edit inside `source/`. The build script copies files from `source/` into `project/ (or $BLOCKER_DIR)` automatically during the build process.
+**Important:** Do **not** edit directly inside `project/ (or $BLOCKER_DIR)` - that directory is the build target. Always edit inside `source/`. The build script copies files from `source/` into `project/ (or $BLOCKER_DIR)` automatically during the build process.
 
 To manually sync changes from `source/` into the build target without a full rebuild:
 ```bash
@@ -286,6 +292,12 @@ Once installed on a physical device, Blocker requires the following permissions 
 4. **Device Administrator:** Prevents immediate uninstallation while Protection Mode is active.
 5. *(Optional)* **Do Not Disturb (Notification Policy Access):** Allows Pomodoro Study Mode to automatically suppress all notifications, alerts, and ringtones during focus sessions.
 6. *(Optional)* **Write Secure Settings:** Allows Blocker to automatically and instantly turn off USB & Wireless debugging if enabled (`adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS`).
+
+---
+
+## Detailed Release History
+
+For complete release notes, changelogs, and historical version details, see [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---
 
