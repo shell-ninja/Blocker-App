@@ -72,7 +72,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
   - **Granular Distraction Shields:** Independent toggles for YouTube Shorts, Instagram Reels, and Facebook Reels without breaking main app feeds.
   - **Offline Content Database:** Fast, local, obfuscated adult domain database with custom domain blocklists and keyword whitelisting.
 - **In-App Updater & Security Verification:**
-  - **Automated Update Checks:** Checks for official GitHub releases every 24 hours with in-app changelog viewer and direct APK installer.
+  - **Automated Update Checks:** Checks for official GitHub releases on an active 2-hour cycle (with 24-hour backoff if an update is pending) with in-app changelog viewer and direct APK installer.
   - **Package Identity Verification:** Enforces strict package name validation (`pi.packageName == rc.packageName`) before invoking Android package installer on downloaded APKs.
   - **URL Sanitization:** Release links are strictly validated against official GitHub repositories.
   - **Automatic Storage Cleanup:** Purges cached APK files immediately upon successful installation.
@@ -95,29 +95,34 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
       <sub>Instant distraction-free sessions with preset or custom timers.</sub>
     </td>
     <td align="center" width="33%">
-      <img src="ScreenShots/set-daily-schedule.jpg" width="220" alt="Daily schedules" /><br/>
-      <b>Daily Schedules</b><br/>
-      <sub>Automate recurring focus blocks with precise time pickers.</sub>
+      <img src="ScreenShots/study-mode.jpg" width="220" alt="Study mode" /><br/>
+      <b>Study Mode (Lockdown)</b><br/>
+      <sub>Aggressive phone lockdown, custom intervals, DND, and quick settings shield.</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="33%">
+      <img src="ScreenShots/set-daily-schedule.jpg" width="220" alt="Daily schedules" /><br/>
+      <b>Daily Schedules</b><br/>
+      <sub>Automate recurring focus blocks with precise time pickers.</sub>
+    </td>
+    <td align="center" width="33%">
       <img src="ScreenShots/block-shots-reels.jpg" width="220" alt="Distraction shields" /><br/>
       <b>Distraction Shields</b><br/>
-      <sub>Exit YouTube Shorts, Instagram Reels, and Explore feeds automatically.</sub>
+      <sub>Exit YouTube Shorts, Instagram Reels, and Facebook video feeds automatically.</sub>
     </td>
     <td align="center" width="33%">
       <img src="ScreenShots/block-app-page.jpg" width="220" alt="App blocker" /><br/>
       <b>Apps &amp; Scans</b><br/>
       <sub>Block installed apps outright or exempt safe apps from screen scanning.</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center" width="33%">
       <img src="ScreenShots/set-usage-limit.jpg" width="220" alt="Usage limit" /><br/>
       <b>Usage Limits</b><br/>
       <sub>Enforce maximum daily screen time per app protected by delay locks.</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center" width="33%">
       <img src="ScreenShots/check-blocked-page.jpg" width="220" alt="Web and keywords" /><br/>
       <b>Web &amp; Keywords</b><br/>
@@ -128,10 +133,12 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
       <b>Settings &amp; Shield</b><br/>
       <sub>Uninstall shield, wireless debugging locks, and 1-30 day delay timers.</sub>
     </td>
-    <td align="center" width="33%">
+  </tr>
+  <tr>
+    <td align="center" colspan="3">
       <img src="ScreenShots/update-app-feature.jpg" width="220" alt="App update feature" /><br/>
       <b>In-App Updater</b><br/>
-      <sub>Check GitHub releases, view changelogs, and install APK updates directly.</sub>
+      <sub>Automated 2-hour update checks, in-app changelog viewer, and direct APK installation.</sub>
     </td>
   </tr>
 </table>
