@@ -148,14 +148,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         private val FB_REELS_PLAYER_IDS = listOf(
             // Dedicated full-screen Facebook Katana Reels viewers
             "com.facebook.katana:id/fb_shorts_viewer_container",
-            "com.facebook.katana:id/fb_shorts_video_container",
             "com.facebook.katana:id/fb_shorts_viewer_view_pager",
             "com.facebook.katana:id/fb_shorts_unified_viewer",
             "com.facebook.katana:id/fb_shorts_viewer_fragment",
-            "com.facebook.katana:id/fb_shorts_root_container",
-            "com.facebook.katana:id/fb_shorts_container",
             "com.facebook.katana:id/reels_viewer_root",
-            "com.facebook.katana:id/reels_video_view",
             "com.facebook.katana:id/watch_and_go_reels_container",
             "com.facebook.katana:id/fb_shorts_player_fragment",
             // Dedicated Facebook Lite Reels viewers
@@ -2920,9 +2916,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         val isHomeOrFeed = isHomeTabSelected || hasNewsfeedMarkers || hasHomeFeedText
 
-        // CRITICAL GUARD: If the user is on the Home/Newsfeed and NOT in a dedicated full-screen reels viewer,
-        // NEVER exit! Let the user browse their feed normally without interrupting.
-        if (isHomeOrFeed && !isDedicatedReelsViewer && !isReelsClass) {
+        // CRITICAL GUARD: If the user is on the Home/Newsfeed, NEVER exit!
+        // Let the user browse their feed and stories normally without interruption.
+        if (isHomeOrFeed) {
             return false
         }
 
