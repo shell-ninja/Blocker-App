@@ -1,14 +1,21 @@
 package com.blocker
 
+import android.accessibilityservice.AccessibilityService
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.admin.DeviceAdminReceiver
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 
 open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
+
+    companion object {
+        const val NOTIFICATION_ID_ADMIN_ALERT = 1002
+    }
 
     override fun onEnabled(context: Context, intent: Intent) {
         BlockerStore.prefs(context).edit().putBoolean("admin_lost", false).apply()
@@ -31,12 +38,20 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
             .putLong("admin_disable_requested_ts", System.currentTimeMillis())
             .apply()
 
+        // Immediate mitigation: attempt back/home actions and cancel dialog directly to minimize latency window
+        runCatching {
+            BlockerAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        }
+        runCatching {
+            BlockerAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        }
+        runCatching { BlockerAccessibilityService.instance?.kickToHomeAndCancel() }
+
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         }
         runCatching { context.startActivity(homeIntent) }
-        runCatching { BlockerAccessibilityService.instance?.kickToHomeAndCancel() }
 
         return "Blocker protection is locked. Deactivating admin will be logged and requires the delay timer."
     }
@@ -59,6 +74,23 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
             .putLong("admin_disable_requested_ts", System.currentTimeMillis())
             .apply()
         BlockerStore.incr(context, "tamper")
+
+        // Immediately prompt to re-enable Device Admin
+        runCatching {
+            val addAdminIntent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(
+                    DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                    ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+                )
+                putExtra(
+                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "Blocker protection is locked. Device Admin must remain enabled."
+                )
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(addAdminIntent)
+        }
+
         runCatching {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= 26) {
@@ -73,7 +105,8 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .build()
-            nm.notify(1001, n)
+            // Fix Finding 4.1: Use unique ID 1002 to avoid collision with foreground service ID 1001
+            nm.notify(NOTIFICATION_ID_ADMIN_ALERT, n)
         }
     }
 }

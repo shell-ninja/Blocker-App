@@ -22,8 +22,11 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
 import com.facebook.react.ReactPackage
@@ -82,6 +85,84 @@ data class FocusSchedule(
     }
 }
 
+/**
+ * Tamper-resistant monotonic time provider.
+ * Protects all delay timers, Pomodoro sessions, and daily schedules against
+ * wall-clock manipulation (ADB date -s, SIM removal, rogue NTP, and manual clock changes).
+ */
+object SecureTime {
+    private val lock = Any()
+    @Volatile private var memAnchorElapsed = 0L
+    @Volatile private var memAnchorWall = 0L
+
+    fun now(c: Context): Long = synchronized(lock) {
+        val currentElapsed = SystemClock.elapsedRealtime()
+        val currentWall = System.currentTimeMillis()
+
+        if (memAnchorElapsed == 0L || memAnchorWall == 0L) {
+            val p = BlockerStore.prefs(c)
+            memAnchorElapsed = p.getLong("sec_anchor_elapsed", 0L)
+            memAnchorWall = p.getLong("sec_anchor_wall", 0L)
+
+            if (memAnchorElapsed == 0L || memAnchorWall == 0L) {
+                memAnchorElapsed = currentElapsed
+                memAnchorWall = currentWall
+                p.edit()
+                    .putLong("sec_anchor_elapsed", currentElapsed)
+                    .putLong("sec_anchor_wall", currentWall)
+                    .apply()
+                return currentWall
+            }
+        }
+
+        // Reboot detection: elapsedRealtime resets on device boot
+        if (currentElapsed < memAnchorElapsed) {
+            val wallDelta = currentWall - memAnchorWall
+            val isAutoTime = runCatching {
+                Settings.Global.getInt(c.contentResolver, Settings.Global.AUTO_TIME, 0) == 1
+            }.getOrDefault(false)
+
+            val maxAllowedOfflineJump = if (isAutoTime) 86_400_000L * 30 else 300_000L
+            val creditedJump = if (wallDelta > 0) minOf(wallDelta, maxAllowedOfflineJump) else 0L
+
+            val newAnchorWall = memAnchorWall + creditedJump
+            memAnchorElapsed = currentElapsed
+            memAnchorWall = newAnchorWall
+            BlockerStore.prefs(c).edit()
+                .putLong("sec_anchor_elapsed", currentElapsed)
+                .putLong("sec_anchor_wall", newAnchorWall)
+                .apply()
+            return newAnchorWall
+        }
+
+        // Running device: elapsedRealtime is strictly monotonic hardware time
+        val elapsedDelta = currentElapsed - memAnchorElapsed
+        val expectedWall = memAnchorWall + elapsedDelta
+        val wallDiscrepancy = currentWall - expectedWall
+
+        // Detect tampering: clock rewind > 30s or clock forward jump > 60s
+        if (wallDiscrepancy < -30_000L || wallDiscrepancy > 60_000L) {
+            if (BlockerStore.active(c)) {
+                BlockerStore.incr(c, "tamper")
+            }
+            // Block wall-clock cheat by continuing monotonically from anchor
+            return expectedWall
+        }
+
+        // Periodically refresh persisted anchor every 15 minutes to stay current across reboots
+        if (elapsedDelta > 900_000L) {
+            memAnchorElapsed = currentElapsed
+            memAnchorWall = currentWall
+            BlockerStore.prefs(c).edit()
+                .putLong("sec_anchor_elapsed", currentElapsed)
+                .putLong("sec_anchor_wall", currentWall)
+                .apply()
+        }
+
+        return expectedWall
+    }
+}
+
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
     const val DAY_MS = 86_400_000L
@@ -90,8 +171,76 @@ object BlockerStore {
     fun prefs(c: Context): SharedPreferences =
         c.applicationContext.getSharedPreferences("blocker_store", Context.MODE_PRIVATE)
 
-    fun active(c: Context) = prefs(c).getBoolean("active", false)
-    fun shield(c: Context) = prefs(c).getBoolean("shield", true)
+    private fun getHmacSecret(c: Context): ByteArray {
+        val salt = "blocker_anti_tamper_${c.packageName}_salt_v2"
+        return salt.toByteArray(Charsets.UTF_8)
+    }
+
+    fun computeIntegrityHmac(c: Context): String {
+        val p = prefs(c)
+        val sb = java.lang.StringBuilder()
+        sb.append("active=").append(p.getBoolean("active", false)).append(";")
+        sb.append("shield=").append(p.getBoolean("shield", true)).append(";")
+        sb.append("delay_days=").append(p.getInt("delay_days", 1)).append(";")
+        sb.append("study_active=").append(p.getBoolean("study_active", false)).append(";")
+        sb.append("focus_until=").append(p.getLong("focus_until", 0L)).append(";")
+        sb.append("study_until=").append(p.getLong("study_until", 0L)).append(";")
+        val all = p.all
+        all.keys.filter { it.startsWith("open_") || it.startsWith("pending_") }
+            .sorted()
+            .forEach { k -> sb.append(k).append("=").append(all[k]).append(";") }
+
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(getHmacSecret(c), "HmacSHA256"))
+        val sig = mac.doFinal(sb.toString().toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(sig, Base64.NO_WRAP)
+    }
+
+    fun updateIntegrityHmac(c: Context) {
+        prefs(c).edit().putString("state_integrity_hmac", computeIntegrityHmac(c)).apply()
+    }
+
+    @Volatile private var lastIntegrityCheck = 0L
+    @Volatile private var cachedIntegrityValid = true
+
+    fun verifyIntegrity(c: Context): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastIntegrityCheck < 30_000L) {
+            return cachedIntegrityValid
+        }
+        lastIntegrityCheck = now
+
+        val p = prefs(c)
+        val savedHmac = p.getString("state_integrity_hmac", null) ?: run {
+            cachedIntegrityValid = true
+            return true
+        }
+        val computed = computeIntegrityHmac(c)
+        if (savedHmac != computed) {
+            incr(c, "tamper")
+            val editor = p.edit()
+            editor.putBoolean("active", true)
+            editor.putBoolean("shield", true)
+            p.all.keys.filter { it.startsWith("open_") }.forEach { editor.remove(it) }
+            editor.apply()
+            updateIntegrityHmac(c)
+            cachedIntegrityValid = false
+            return false
+        }
+        cachedIntegrityValid = true
+        return true
+    }
+
+    fun active(c: Context): Boolean {
+        verifyIntegrity(c)
+        return prefs(c).getBoolean("active", false)
+    }
+
+    fun shield(c: Context): Boolean {
+        verifyIntegrity(c)
+        return prefs(c).getBoolean("shield", true)
+    }
+
     fun delayDays(c: Context) = prefs(c).getInt("delay_days", 1)
     // Debug builds shorten every "day" to one minute so the timers can be tested quickly.
     fun delayMs(c: Context): Long {
@@ -129,32 +278,37 @@ object BlockerStore {
         prefs(c).edit().putString("schedules_json", arr.toString()).apply()
     }
 
-    private fun minuteOfDay(): Int {
+    fun minuteOfDay(c: Context? = null): Int {
         val cal = Calendar.getInstance()
+        if (c != null) {
+            cal.timeInMillis = SecureTime.now(c)
+        }
         return cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
     }
 
     private fun inWindow(start: Int, end: Int, now: Int): Boolean =
         if (start == end) false else if (start < end) now in start until end else now >= start || now < end
 
-    fun scheduleIsActiveNow(s: FocusSchedule): Boolean = s.enabled && inWindow(s.startMin, s.endMin, minuteOfDay())
-    fun anyScheduleActiveNow(c: Context) = schedules(c).any { scheduleIsActiveNow(it) }
-    fun focusActive(c: Context) = focusUntil(c) > System.currentTimeMillis() || anyScheduleActiveNow(c)
+    fun scheduleIsActiveNow(s: FocusSchedule, c: Context? = null): Boolean = s.enabled && inWindow(s.startMin, s.endMin, minuteOfDay(c))
+    fun anyScheduleActiveNow(c: Context) = schedules(c).any { scheduleIsActiveNow(it, c) }
+    fun focusActive(c: Context) = focusUntil(c) > SecureTime.now(c) || anyScheduleActiveNow(c)
 
     /** Minutes remaining until a window closes, from a given minute-of-day. */
     private fun minutesUntil(target: Int, from: Int): Int = if (target > from) target - from else 1440 - from + target
 
     fun focusRemainingMs(c: Context): Long {
-        val untilMs = (focusUntil(c) - System.currentTimeMillis()).coerceAtLeast(0L)
-        val activeEnds = schedules(c).filter { scheduleIsActiveNow(it) }
-            .map { minutesUntil(it.endMin, minuteOfDay()) * 60_000L }
+        val now = SecureTime.now(c)
+        val untilMs = (focusUntil(c) - now).coerceAtLeast(0L)
+        val mOfDay = minuteOfDay(c)
+        val activeEnds = schedules(c).filter { scheduleIsActiveNow(it, c) }
+            .map { minutesUntil(it.endMin, mOfDay) * 60_000L }
         val schedMs = activeEnds.maxOrNull() ?: 0L
         return maxOf(untilMs, schedMs)
     }
 
     /** Returns the union of allowed apps configured for all schedules currently active. */
     fun scheduleAllowedApps(c: Context): Set<String> {
-        val active = schedules(c).filter { scheduleIsActiveNow(it) }
+        val active = schedules(c).filter { scheduleIsActiveNow(it, c) }
         val set = mutableSetOf<String>()
         for (s in active) {
             set.addAll(s.allowedApps)
@@ -163,8 +317,11 @@ object BlockerStore {
     }
 
     fun pendingUntil(c: Context, key: String) = prefs(c).getLong("pending_$key", 0L)
-    fun guardOpen(c: Context, key: String) = prefs(c).getLong("open_$key", 0L) > System.currentTimeMillis()
-    fun consumeGuard(c: Context, key: String) = prefs(c).edit().remove("open_$key").apply()
+    fun guardOpen(c: Context, key: String) = prefs(c).getLong("open_$key", 0L) > SecureTime.now(c)
+    fun consumeGuard(c: Context, key: String) {
+        prefs(c).edit().remove("open_$key").apply()
+        updateIntegrityHmac(c)
+    }
 
     // ---- Study Mode (Aggressive Pomodoro Phone Lockout) ----
     fun studyActive(c: Context): Boolean {
@@ -180,7 +337,7 @@ object BlockerStore {
     fun studyRemainingMs(c: Context): Long {
         advanceStudyState(c)
         val until = prefs(c).getLong("study_until", 0L)
-        return (until - System.currentTimeMillis()).coerceAtLeast(0L)
+        return (until - SecureTime.now(c)).coerceAtLeast(0L)
     }
 
     fun studyTotalRounds(c: Context): Int = prefs(c).getInt("study_total_rounds", 4)
@@ -202,7 +359,7 @@ object BlockerStore {
         val fm = focusMinutes.coerceIn(1, 180)
         val bm = breakMinutes.coerceIn(0, 60)
         val rounds = totalRounds.coerceIn(1, 12)
-        val now = System.currentTimeMillis()
+        val now = SecureTime.now(c)
         prefs(c).edit()
             .putBoolean("study_active", true)
             .putInt("study_focus_minutes", fm)
@@ -213,6 +370,7 @@ object BlockerStore {
             .putLong("study_started_at", now)
             .putLong("study_until", now + fm * 60_000L)
             .apply()
+        updateIntegrityHmac(c)
         muteNotifications(c)
         disableWifi(c)
     }
@@ -224,6 +382,7 @@ object BlockerStore {
             .putBoolean("study_is_break", false)
             .remove("study_started_at")
             .apply()
+        updateIntegrityHmac(c)
         restoreNotifications(c)
         restoreWifi(c)
     }
@@ -235,13 +394,14 @@ object BlockerStore {
         val currentRound = p.getInt("study_current_round", 1)
         val focusMin = p.getInt("study_focus_minutes", 25)
         val nextRound = currentRound + 1
-        val now = System.currentTimeMillis()
+        val now = SecureTime.now(c)
         if (nextRound <= totalRounds) {
             p.edit()
                 .putBoolean("study_is_break", false)
                 .putInt("study_current_round", nextRound)
                 .putLong("study_until", now + focusMin * 60_000L)
                 .apply()
+            updateIntegrityHmac(c)
         } else {
             endStudySession(c)
         }
@@ -252,7 +412,7 @@ object BlockerStore {
         val p = prefs(c)
         if (!p.getBoolean("study_active", false)) return
         val until = p.getLong("study_until", 0L)
-        val now = System.currentTimeMillis()
+        val now = SecureTime.now(c)
         if (now < until) return
 
         val totalRounds = p.getInt("study_total_rounds", 4)
@@ -267,6 +427,7 @@ object BlockerStore {
                     .putBoolean("study_is_break", true)
                     .putLong("study_until", now + breakMin * 60_000L)
                     .apply()
+                updateIntegrityHmac(c)
             } else {
                 endStudySession(c)
             }
@@ -278,6 +439,7 @@ object BlockerStore {
                     .putInt("study_current_round", nextRound)
                     .putLong("study_until", now + focusMin * 60_000L)
                     .apply()
+                updateIntegrityHmac(c)
             } else {
                 endStudySession(c)
             }
@@ -665,8 +827,9 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                 val seen = HashSet<String>()
                 val out = Arguments.createArray()
                 pm.queryIntentActivities(launch, 0)
-                    .sortedBy { it.loadLabel(pm).toString().lowercase() }
-                    .forEach { ri ->
+                    .map { ri -> Pair(ri, ri.loadLabel(pm).toString()) }
+                    .sortedBy { it.second.lowercase() }
+                    .forEach { (ri, label) ->
                         val ai = ri.activityInfo.applicationInfo
                         val pkg = ai.packageName
                         if (pkg == ctx.packageName || !seen.add(pkg)) return@forEach
@@ -674,7 +837,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                         if (system && !includeSystem) return@forEach
                         out.pushMap(Arguments.createMap().apply {
                             putString("packageName", pkg)
-                            putString("label", ri.loadLabel(pm).toString())
+                            putString("label", label)
                             putBoolean("isSystem", system)
                             putString("category", categoryOf(ai))
                             putBoolean("blocked", pkg in blocked)
@@ -733,6 +896,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             BlockerStore.consumeGuard(ctx, "protection")
         }
         BlockerStore.prefs(ctx).edit().putBoolean("active", active).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
@@ -743,6 +907,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             return
         }
         BlockerStore.prefs(ctx).edit().putBoolean("shield", enabled).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
@@ -886,6 +1051,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             BlockerStore.consumeGuard(ctx, "delay_duration")
         }
         BlockerStore.prefs(ctx).edit().putInt("delay_days", d).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(d)
     }
 
@@ -896,14 +1062,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     @ReactMethod
     fun requestSettingChange(key: String, promise: Promise) {
         val existing = BlockerStore.pendingUntil(ctx, key)
-        val until = if (existing != 0L) existing else System.currentTimeMillis() + BlockerStore.delayMs(ctx)
+        val now = SecureTime.now(ctx)
+        val until = if (existing != 0L) existing else now + BlockerStore.delayMs(ctx)
         BlockerStore.prefs(ctx).edit().putLong("pending_$key", until).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(until.toDouble())
     }
 
     @ReactMethod
     fun getSettingLocks(keys: ReadableArray, promise: Promise) {
-        val now = System.currentTimeMillis()
+        val now = SecureTime.now(ctx)
         val out = Arguments.createMap()
         for (i in 0 until keys.size()) {
             val k = keys.getString(i) ?: continue
@@ -923,13 +1091,14 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     @ReactMethod
     fun confirmSettingChange(key: String, promise: Promise) {
         val until = BlockerStore.pendingUntil(ctx, key)
-        val now = System.currentTimeMillis()
+        val now = SecureTime.now(ctx)
         when {
             until == 0L -> promise.reject("NO_PENDING", "No pending change for $key")
             now < until -> promise.reject("NOT_READY", "Timer still running")
             else -> {
                 val open = now + BlockerStore.GUARD_WINDOW_MS
                 BlockerStore.prefs(ctx).edit().remove("pending_$key").putLong("open_$key", open).apply()
+                BlockerStore.updateIntegrityHmac(ctx)
                 promise.resolve(open.toDouble())
             }
         }
@@ -938,11 +1107,12 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     @ReactMethod
     fun cancelSettingChange(key: String, promise: Promise) {
         BlockerStore.prefs(ctx).edit().remove("pending_$key").remove("open_$key").apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
     // ---------- Screen monitor ----------
-    // Always on \u2014 there is no user-facing toggle for this; it's core to how Blocker works.
+    // Always on — there is no user-facing toggle for this; it's core to how Blocker works.
 
     // ---------- Focus mode ----------
     // Lengthening / enabling is immediate. Ending early, shortening, disabling the schedule, or
@@ -955,15 +1125,18 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             return
         }
         val m = minutes.coerceIn(1, 10_080)
-        BlockerStore.prefs(ctx).edit().putLong("focus_until", System.currentTimeMillis() + m * 60_000L).apply()
+        BlockerStore.prefs(ctx).edit().putLong("focus_until", SecureTime.now(ctx) + m * 60_000L).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
     @ReactMethod
     fun extendFocus(minutes: Int, promise: Promise) {
-        val base = maxOf(BlockerStore.focusUntil(ctx), System.currentTimeMillis())
+        val now = SecureTime.now(ctx)
+        val base = maxOf(BlockerStore.focusUntil(ctx), now)
         val m = minutes.coerceIn(1, 10_080)
         BlockerStore.prefs(ctx).edit().putLong("focus_until", base + m * 60_000L).apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
@@ -973,9 +1146,10 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             promise.reject("LOCKED", "Shortening focus mode requires the delay timer.")
             return
         }
-        val target = System.currentTimeMillis() + minutes.coerceAtLeast(1) * 60_000L
+        val target = SecureTime.now(ctx) + minutes.coerceAtLeast(1) * 60_000L
         if (target < BlockerStore.focusUntil(ctx)) {
             BlockerStore.prefs(ctx).edit().putLong("focus_until", target).apply()
+            BlockerStore.updateIntegrityHmac(ctx)
         }
         promise.resolve(true)
     }
@@ -987,6 +1161,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             return
         }
         BlockerStore.prefs(ctx).edit().remove("focus_until").apply()
+        BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(true)
     }
 
@@ -1236,6 +1411,16 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun saveState(json: String, promise: Promise) {
+        if (json.length > 2 * 1024 * 1024) {
+            promise.reject("PAYLOAD_TOO_LARGE", "State JSON exceeds maximum allowable size (2MB)")
+            return
+        }
+        try {
+            org.json.JSONTokener(json).nextValue()
+        } catch (e: Exception) {
+            promise.reject("INVALID_JSON", "Payload is not valid JSON")
+            return
+        }
         BlockerStore.prefs(ctx).edit().putString("js_state", json).apply()
         promise.resolve(true)
     }
@@ -1401,7 +1586,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                     return@execute
                 }
 
-                // SECURITY: Enforce HTTPS scheme and trusted GitHub hosts
+                // SECURITY: Enforce HTTPS scheme and trusted GitHub hosts from official repository
                 val initialUrl = URL(downloadUrl)
                 if (!initialUrl.protocol.equals("https", ignoreCase = true)) {
                     promise.reject("INSECURE_URL", "Only HTTPS downloads are permitted")
@@ -1413,6 +1598,11 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                                     host.endsWith(".githubusercontent.com")
                 if (!isTrustedHost) {
                     promise.reject("UNTRUSTED_HOST", "Updates can only be downloaded from official GitHub domains")
+                    return@execute
+                }
+                val path = initialUrl.path.lowercase()
+                if (!path.contains("shell-ninja/blocker-app")) {
+                    promise.reject("UNTRUSTED_REPOSITORY", "Updates can only originate from shell-ninja/Blocker-App repository")
                     return@execute
                 }
 
@@ -1568,7 +1758,13 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 
     private fun launchInstallIntent(apkFile: File) {
-        val pi = rc.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val pi = rc.packageManager.getPackageArchiveInfo(apkFile.absolutePath, flags)
         if (pi == null) {
             if (apkFile.exists()) apkFile.delete()
             throw IllegalArgumentException("Downloaded file is not a valid Android package archive")
@@ -1576,6 +1772,32 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         if (pi.packageName != rc.packageName) {
             if (apkFile.exists()) apkFile.delete()
             throw SecurityException("Downloaded package (${pi.packageName}) does not match application (${rc.packageName})")
+        }
+
+        // Verify code signing certificate matches the currently running app
+        pi.applicationInfo?.sourceDir = apkFile.absolutePath
+        pi.applicationInfo?.publicSourceDir = apkFile.absolutePath
+        val currentPkgInfo = try {
+            rc.packageManager.getPackageInfo(rc.packageName, flags)
+        } catch (e: Exception) {
+            null
+        }
+        if (currentPkgInfo != null) {
+            val isSignatureMatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val currentSigs = currentPkgInfo.signingInfo?.apkContentsSigners?.map { it.toByteArray().toList() }?.toSet().orEmpty()
+                val apkSigs = pi.signingInfo?.apkContentsSigners?.map { it.toByteArray().toList() }?.toSet().orEmpty()
+                currentSigs.isNotEmpty() && apkSigs.isNotEmpty() && currentSigs == apkSigs
+            } else {
+                @Suppress("DEPRECATION")
+                val currentSigs = currentPkgInfo.signatures?.map { it.toByteArray().toList() }?.toSet().orEmpty()
+                @Suppress("DEPRECATION")
+                val apkSigs = pi.signatures?.map { it.toByteArray().toList() }?.toSet().orEmpty()
+                currentSigs.isNotEmpty() && apkSigs.isNotEmpty() && currentSigs == apkSigs
+            }
+            if (!isSignatureMatch) {
+                if (apkFile.exists()) apkFile.delete()
+                throw SecurityException("Downloaded update signing certificate does not match authentic Blocker app certificate!")
+            }
         }
 
         val isCurrentDebug = (rc.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -1592,11 +1814,6 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         } else {
             @Suppress("DEPRECATION")
             pi.versionCode.toLong()
-        }
-        val currentPkgInfo = try {
-            rc.packageManager.getPackageInfo(rc.packageName, 0)
-        } catch (e: Exception) {
-            null
         }
         if (currentPkgInfo != null) {
             val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
