@@ -48,6 +48,8 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
   - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over which distraction shields to engage in **Focus Mode > Distraction Shields**.
 - **Pomodoro Study Mode Emergency Exit:**
   - Restored immediate emergency unlock via 4-second long-press, properly disabling DND, unmuting audio streams, and resetting active study blocks without delay timer queue trapping.
+- **Intelligent 2-Hour Update Check Cycle:**
+  - Update checks run automatically every 2 hours in both the app lifecycle and background service. If an update is detected, the user is notified and the cycle backs off to 24 hours if not updated immediately to avoid spam. Resets back to 2 hours once updated.
 
 ---
 

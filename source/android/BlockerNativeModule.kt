@@ -1528,6 +1528,17 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 
     @ReactMethod
+    fun getHasPendingUpdate(promise: Promise) {
+        promise.resolve(BlockerStore.prefs(ctx).getBoolean("has_pending_update", false))
+    }
+
+    @ReactMethod
+    fun setHasPendingUpdate(pending: Boolean, promise: Promise) {
+        BlockerStore.prefs(ctx).edit().putBoolean("has_pending_update", pending).apply()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
     fun showUpdateNotification(title: String, message: String, version: String, promise: Promise) {
         try {
             val channelId = "blocker_updates"

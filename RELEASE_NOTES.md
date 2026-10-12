@@ -40,6 +40,9 @@ This document contains release notes, changelogs, and notable changes for all re
   - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over what to block in Focus Mode > Distraction Shields.
 - **Study Mode Emergency Exit:**
   - Restored immediate emergency unlock via 4-second long-press, properly disabling DND, unmuting audio streams, and resetting active study blocks without delay timer queue trapping.
+- **Intelligent 2-Hour Update Check Cycle:**
+  - Automated update checks now run on an active 2-hour cycle (in both foreground app lifecycle and persistent background service) instead of 24 hours.
+  - When a new update is detected, the user is notified and the cycle backs off to 24 hours if not updated immediately to avoid spam. Resets back to 2 hours once updated.
 
 ---
 

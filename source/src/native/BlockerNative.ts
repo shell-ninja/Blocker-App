@@ -124,6 +124,8 @@ interface BlockerNativeSpec {
   setUpdateCheckTimestamp(timestamp: number): Promise<boolean>;
   getLastNotifiedVersion(): Promise<string | null>;
   setLastNotifiedVersion(version: string): Promise<boolean>;
+  getHasPendingUpdate?(): Promise<boolean>;
+  setHasPendingUpdate?(pending: boolean): Promise<boolean>;
   showUpdateNotification(title: string, message: string, version: string): Promise<boolean>;
   downloadAndInstallApk(downloadUrl: string, version: string): Promise<boolean>;
   installDownloadedApk(version: string): Promise<boolean>;
