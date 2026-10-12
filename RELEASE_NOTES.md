@@ -33,9 +33,9 @@ This document contains release notes, changelogs, and notable changes for all re
 - **0ms Instantaneous Block Overlay:**
   - Unified scrim and card into a single-window `FrameLayout` overlay displayed synchronously before the Home action kicks, eliminating overlay delay and IPC latency.
   - Short-circuited `guardBlockerAppInfo` for non-settings applications, saving 50-100ms on every accessibility event.
-- **Restored Facebook Reels Interception & Newsfeed Safety Guard:**
-  - Implemented multi-layered newsfeed/home screen protection (`FB_NEWSFEED_IDS`, Home tab selection, feed composer text) so opening Facebook, reading posts, and scrolling the newsfeed never exits the app.
-  - Exclusively intercepts active full-screen Reels viewer playback (`fbshortsviewer`, `reelsviewer`, playback action signatures) or dedicated Reels navigation tabs.
+- **Restored Facebook Reels & Scrollable Video Interception with Newsfeed Guard:**
+  - Blocks dedicated full-screen Reels viewer playback, dedicated Reels/Video tabs, and the full-screen scrollable video viewer (ChannelFeed / Warion) launched from newsfeed video clicks.
+  - Safely protects normal newsfeed browsing (posts, status updates, stories, header search) from false exits.
 - **Opt-In Granular Distraction Shields:**
   - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over what to block in Focus Mode > Distraction Shields.
 - **Study Mode Emergency Exit:**

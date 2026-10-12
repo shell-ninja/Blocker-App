@@ -42,8 +42,8 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 - **0ms Instantaneous Block Overlay:**
   - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
   - Short-circuited App Info inspection for non-settings apps, saving 50-100ms on every accessibility event.
-- **Restored Facebook Reels Detection & Newsfeed Safety:**
-  - Added strict newsfeed/home screen guards so opening Facebook, viewing posts, and feed scrolling never trigger false exits; only dedicated full-screen Reels viewer playback and Reels tabs are intercepted.
+- **Restored Facebook Reels & Scrollable Video Interception:**
+  - Blocks full-screen Reels viewer playback, dedicated Reels/Video tabs, and the immersive scrollable video player launched from feed posts, while keeping home newsfeed reading completely unhindered.
 - **Opt-In Granular Distraction Shields:**
   - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over which distraction shields to engage in **Focus Mode > Distraction Shields**.
 - **Pomodoro Study Mode Emergency Exit:**

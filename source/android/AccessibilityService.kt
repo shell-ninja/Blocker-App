@@ -145,7 +145,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.instagram.android:id/action_bar_search_edit_text",
             "com.instagram.android:id/search_edit_text"
         )
-        private val FB_REELS_PLAYER_IDS = listOf(
+        private val FB_VIDEO_REELS_PLAYER_IDS = listOf(
             // Dedicated full-screen Facebook Katana Reels viewers
             "com.facebook.katana:id/fb_shorts_viewer_container",
             "com.facebook.katana:id/fb_shorts_viewer_view_pager",
@@ -154,10 +154,28 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.katana:id/reels_viewer_root",
             "com.facebook.katana:id/watch_and_go_reels_container",
             "com.facebook.katana:id/fb_shorts_player_fragment",
-            // Dedicated Facebook Lite Reels viewers
+            // Channel Feed & Warion (scrollable video player launched from newsfeed)
+            "com.facebook.katana:id/warion_root_container",
+            "com.facebook.katana:id/warion_container",
+            "com.facebook.katana:id/warion_video_view",
+            "com.facebook.katana:id/channel_feed",
+            "com.facebook.katana:id/channel_feed_fragment",
+            "com.facebook.katana:id/channel_feed_view",
+            "com.facebook.katana:id/channel_view",
+            "com.facebook.katana:id/fullscreen_video",
+            "com.facebook.katana:id/fullscreen_video_player",
+            "com.facebook.katana:id/video_fullscreen_player",
+            "com.facebook.katana:id/unified_video_viewer",
+            "com.facebook.katana:id/playback_control_overlay",
+            "com.facebook.katana:id/video_seek_bar",
+            "com.facebook.katana:id/video_time_display",
+            "com.facebook.katana:id/video_controls_container",
+            // Dedicated Facebook Lite Reels & Video viewers
             "com.facebook.lite:id/reels_screen",
             "com.facebook.lite:id/reels_player",
-            "com.facebook.lite:id/video_player_reels"
+            "com.facebook.lite:id/video_player_reels",
+            "com.facebook.lite:id/watch_screen",
+            "com.facebook.lite:id/video_player"
         )
         private val FB_NEWSFEED_IDS = listOf(
             "com.facebook.katana:id/feed_composer",
@@ -2875,64 +2893,64 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
-        // 1. Check dedicated Reels tab in navigation bar (strictly Reels, only when selected)
-        val isReelsTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
+        // 1. Check dedicated Reels or Video tab in navigation bar (only when actually selected)
+        val isReelsOrVideoTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
             isTabSelectedById(root, "com.facebook.katana:id/tab_reels") ||
             isTabSelectedById(root, "com.facebook.katana:id/fb_shorts_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/video_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_video") ||
+            isTabSelectedById(root, "com.facebook.katana:id/watch_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_watch") ||
+            isTabSelectedById(root, "com.facebook.katana:id/video_home_tab") ||
             scanSelectedTab(root, listOf(
-                "reels, tab", "reels tab", "facebook reels, tab", "facebook reels tab"
+                "reels, tab", "reels tab", "facebook reels, tab", "facebook reels tab",
+                "watch, tab", "watch tab", "video, tab", "video tab", "videos, tab"
             ))
-        if (isReelsTab) return true
+        if (isReelsOrVideoTab) return true
 
-        // 2. Check dedicated full-screen Reels viewer overlay / fragment
-        val isDedicatedReelsViewer = hasAnyNodeId(root, FB_REELS_PLAYER_IDS)
+        // 2. Check full-screen / immersive Video or Reels player IDs
+        val isDedicatedVideoViewer = hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)
 
+        // 3. Check Window / Event / View class names
         val evCls = ev?.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
-        val isReelsClass = evCls.contains("fbshortsviewer") || rootCls.contains("fbshortsviewer") ||
+        val isVideoClass = evCls.contains("channelfeed") || rootCls.contains("channelfeed") ||
+            evCls.contains("warion") || rootCls.contains("warion") ||
+            evCls.contains("fullscreenvideo") || rootCls.contains("fullscreenvideo") ||
+            evCls.contains("fbshorts") || rootCls.contains("fbshorts") ||
             evCls.contains("reelsviewer") || rootCls.contains("reelsviewer") ||
-            evCls.contains("fbshortsunifiedviewer") || rootCls.contains("fbshortsunifiedviewer")
+            evCls.contains("reelwatch") || rootCls.contains("reelwatch") ||
+            evCls.contains("unifiedvideoviewer") || rootCls.contains("unifiedvideoviewer")
 
-        // 3. Check if user is on the main Newsfeed / Home screen
-        val isHomeTabSelected = isTabSelectedById(root, "com.facebook.katana:id/feed_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_feed") ||
-            isTabSelectedById(root, "com.facebook.katana:id/newsfeed_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_newsfeed") ||
-            isTabSelectedById(root, "com.facebook.katana:id/home_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_home") ||
-            scanSelectedTab(root, listOf(
-                "home, tab", "home tab", "news feed", "feed, tab", "feed tab"
-            ))
-
-        val hasNewsfeedMarkers = hasAnyNodeId(root, FB_NEWSFEED_IDS)
-
+        // 4. Content / Text inspection of active window
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(250))
         val t = sb.toString().lowercase()
 
-        val hasHomeFeedText = ("what's on your mind" in t || "what’s on your mind" in t) ||
+        // Distinguish active newsfeed header vs video player:
+        val hasNewsfeedHeader = ("what's on your mind" in t || "what’s on your mind" in t) ||
             ("stories" in t && ("create story" in t || "add to story" in t || "your story" in t)) ||
             ("search on facebook" in t || "search facebook" in t)
 
-        val isHomeOrFeed = isHomeTabSelected || hasNewsfeedMarkers || hasHomeFeedText
-
-        // CRITICAL GUARD: If the user is on the Home/Newsfeed, NEVER exit!
-        // Let the user browse their feed and stories normally without interruption.
-        if (isHomeOrFeed) {
+        // If the user is visibly on the main newsfeed header/composer and NOT in a dedicated video viewer,
+        // NEVER exit! Let the user browse their feed normally without interrupting.
+        if (hasNewsfeedHeader && !isDedicatedVideoViewer && !isVideoClass) {
             return false
         }
 
-        if (isDedicatedReelsViewer || isReelsClass) return true
+        if (isDedicatedVideoViewer || isVideoClass) return true
 
-        // 4. Fallback text inspection: only check if outside the main newsfeed
-        val hasReelsPlayback = "remix this reel" in t || "remix reel" in t ||
-            "swipe up for next reel" in t || "swipe up for more reels" in t ||
-            "share this reel" in t || "share reel" in t ||
-            "like this reel" in t || "comment on this reel" in t ||
-            "reels audio" in t || "more options for this reel" in t ||
-            ("use audio" in t && ("original audio" in t || "reel" in t))
+        // 5. Fallback UI inspection for full-screen video / reels viewer (Litho / custom TalkBack nodes):
+        // Matches the immersive video player shown in full-screen video & reels
+        val hasVideoViewerUI = ("add a comment" in t && (
+            "replay 5" in t || "rewind 5" in t || "5 seconds" in t || "seek" in t ||
+            "follow for more" in t || " · origi" in t || "original audio" in t || "original sound" in t ||
+            "play video" in t || "pause video" in t || "share" in t
+        )) ||
+        ("swipe up for next" in t || "swipe up for more" in t || "watch more videos" in t || "watch more reels" in t) ||
+        ("remix this reel" in t || "remix reel" in t || "reels audio" in t || "share this reel" in t)
 
-        return hasReelsPlayback
+        return hasVideoViewerUI
     }
 
     private fun hasAnyNodeId(root: AccessibilityNodeInfo, ids: List<String>): Boolean {
