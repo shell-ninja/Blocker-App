@@ -4,7 +4,28 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.2 (Current Release)
+## v1.0.6.3 (Current Release)
+
+**Release Date:** October 2026  
+**Version:** 1.0.6.3  
+**Build:** 29
+
+### Security & Blocking Engine Hardening
+- **Unconditional App Kick Defense (Zero-Debounce Kick):**
+  - Resolved an issue where rapidly launching a blocked game/app from the home screen or recents menu could bypass blocking: previously, the 700ms debounce guard was evaluated before kicking, allowing rapid repeated app launches to slip past.
+  - The kick action (`GLOBAL_ACTION_BACK` + `kickToHome()`) is now executed **unconditionally on 100% of detections** with zero debounce delay. The 700ms debounce window is strictly reserved for UI overlays and statistics counting.
+- **Background Process Termination (`killBackgroundProcesses`):**
+  - When a blocked app or game is kicked out, Blocker automatically terminates its background processes via `ActivityManager.killBackgroundProcesses(pkg)` with permission `KILL_BACKGROUND_PROCESSES`.
+  - Prevents intensive native games (Unity, Unreal Engine, OpenGL/Vulkan) from remaining active in the background, keeping audio running, or lingering in device RAM.
+- **Continuous Active-Window Watchdog (`appBlockWatchdog`):**
+  - Added a dedicated 350ms continuous polling watchdog that inspects `rootInActiveWindow` and `currentFgPkg`.
+  - Ensures that even if a full-screen hardware-accelerated game bypasses or silences accessibility UI event dispatches, the watchdog immediately detects the foreground package and kicks the user back home.
+- **Immediate Top-Priority Event Intercept:**
+  - Placed blocked app checks at the top of `onAccessibilityEvent` directly after interactive checks, avoiding any 75ms throttling or downstream view processing delays.
+
+---
+
+## v1.0.6.2
 
 **Release Date:** October 2026  
 **Version:** 1.0.6.2  

@@ -35,11 +35,11 @@ xml_dir = main / "res" / "xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="80"
+    android:notificationTimeout="50"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
@@ -210,6 +210,7 @@ for perm, attrs in (
     ("android.permission.ACCESS_NETWORK_STATE", ""),
     ("android.permission.ACCESS_NOTIFICATION_POLICY", ""),
     ("android.permission.EXPAND_STATUS_BAR", ""),
+    ("android.permission.KILL_BACKGROUND_PROCESSES", ""),
 ):
     if perm not in t:
         extra.append(f'<uses-permission android:name="{perm}"{attrs}/>')
