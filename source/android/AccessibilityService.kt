@@ -2414,6 +2414,85 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    /** Returns true if the screen is a launcher settings / customization menu (e.g. Desktop Settings, Home Screen Settings). */
+    private fun isLauncherSettingsMenu(cls: String, title: String, text: String): Boolean {
+        val t = text.lowercase()
+        val tit = title.lowercase()
+        val c = cls.lowercase()
+
+        val isSettingsTitle = tit.contains("desktop setting") || tit.contains("desktop settings") ||
+            tit.contains("home screen setting") || tit.contains("home screen settings") ||
+            tit.contains("launcher setting") || tit.contains("launcher settings") ||
+            tit.contains("home settings") || tit.contains("home setting") ||
+            tit.contains("preferences")
+
+        val hasLauncherControls =
+            ("desktop grid" in t || "home screen grid" in t || "app screen grid" in t || "icon size" in t ||
+             "page effect" in t || "page effects" in t || "gestures" in t || "gesture" in t ||
+             "folder style" in t || "folder arrangement" in t || "auto arrange" in t ||
+             "switch style" in t || "appearance" in t || "dock" in t || "transition effect" in t ||
+             "columns" in t || "rows" in t)
+
+        return (isSettingsTitle || c.contains("desktopsettings") || c.contains("launchersettings") || c.contains("homescreensettings")) &&
+            (hasLauncherControls || (!tit.contains("hide") && !tit.contains("freez")))
+    }
+
+    /** Returns true if the screen is dedicated to hiding or freezing apps. */
+    private fun isHideOrFreezerScreen(pkg: String, cls: String, title: String, text: String): Boolean {
+        // 1. Dedicated Freezer package: 100% purpose is freezing apps
+        if (pkg == "com.transsion.freezer" || (pkg.contains("freezer") && !isLauncherPkg(pkg))) {
+            return true
+        }
+
+        // 2. Dedicated XHide package: 100% purpose is hiding apps/files
+        if (pkg == "com.xui.xhide" || pkg.contains(".xhide")) {
+            return true
+        }
+
+        // 3. If this is a launcher settings customization menu (desktop grid, icon size, etc.), NEVER treat as hide screen!
+        if (isLauncherSettingsMenu(cls, title, text)) {
+            return false
+        }
+
+        val tit = title.lowercase()
+        val c = cls.lowercase()
+        val t = text.lowercase()
+
+        // 4. Class matches known hide/freezer activity patterns
+        if (HIDE_FREEZER_CLASS_HINTS.any { it in c }) {
+            return true
+        }
+
+        // 5. Title matches hide/freezer terms exactly or starts/ends with them
+        val titleMatches = HIDE_FREEZER_TERMS.any { term ->
+            tit == term || tit.startsWith(term) || tit.endsWith(term) || tit.contains("hide app") || tit.contains("hidden app") || tit.contains("xhide") || tit.contains("freezer")
+        }
+        if (titleMatches) {
+            return true
+        }
+
+        // 6. In launcher or settings, detect hide/freeze picker subscreen
+        val isLauncher = isLauncherPkg(pkg)
+        val isSettings = isSettingsPkg(pkg)
+        if (isLauncher || isSettings) {
+            val hasHideTitle = tit.contains("hide") || tit.contains("hidden") || tit.contains("freez") || tit.contains("private space")
+            if (hasHideTitle) {
+                return true
+            }
+
+            // In picker/vault opened from launcher or security manager
+            if ("hidden apps" in t || "hide apps" in t || "xhide" in t || "app freezer" in t) {
+                val isPicker = ("select" in t || "add" in t || "done" in t || "confirm" in t || "checkbox" in t) &&
+                    ("hide" in t || "hidden" in t || "freeze" in t || "freezer" in t)
+                if (isPicker && !isLauncherSettingsMenu(cls, title, text)) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
     private fun guardAppHidingAndFreezer(ev: AccessibilityEvent, pkg: String): Boolean {
         if (!shieldEngaged() && !BlockerStore.active(this)) return false
 
@@ -2449,10 +2528,31 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // 2. Click events:
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            val clickText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).lowercase()
+            val clickText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
 
-            // 2A. Destructive popup actions (Hide / Freeze / Uninstall / Disable / Remove) on Blocker:
-            // Intercept only if the action directly targets Blocker
+            // 2A. Clicking "Hide apps", "Hidden apps", "Freezer", "XHide" menu items:
+            val isHideMenuItem = (clickText == "hide apps" || clickText == "hide app" ||
+                clickText == "hidden apps" || clickText == "hidden app" ||
+                clickText == "xhide" || clickText == "app freezer" ||
+                clickText == "freezer" || clickText == "freeze apps" ||
+                clickText == "hide apps on home and apps screens")
+            if (isHideMenuItem && (isLauncher || isSettingsPkg(pkg))) {
+                if (now - lastHideKick > 500L) {
+                    lastHideKick = now
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    BlockerStore.incr(this, "tamper")
+                    showOverlay(
+                        "🔐 Tamper Protection",
+                        "App hiding is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                        5000,
+                        "Fear Allah and remain steadfast",
+                        "Understood"
+                    )
+                }
+                return true
+            }
+
+            // 2B. Destructive popup actions (Hide / Freeze / Uninstall / Disable / Remove) on Blocker:
             val isDestructiveAction = clickText.contains("hide") || clickText.contains("freeze") ||
                 clickText.contains("freezer") || clickText.contains("uninstall") ||
                 clickText.contains("remove") || clickText.contains("disable")
@@ -2487,67 +2587,32 @@ class BlockerAccessibilityService : AccessibilityService() {
                     return true
                 }
             }
+        }
 
-            // 2B. Tapping Blocker inside an App Hiding / Freezer picker, multi-select list, or XHide/Freezer
-            if (isTargetBlocker(ev, name)) {
-                val root = rootInActiveWindow ?: ev.source
-                val sb = StringBuilder()
-                if (root != null) collectText(root, sb, 0, intArrayOf(150))
-                val winText = sb.toString().lowercase()
+        // 3. Screen / Window intercept: Detects entering the actual Hide Apps, Hidden Apps, Freezer, or XHide screen
+        if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            val root = rootInActiveWindow ?: ev.source
+            val sb = StringBuilder()
+            if (root != null) collectText(root, sb, 0, intArrayOf(80))
+            val winText = sb.toString().lowercase()
+            val winTitle = ev.text.joinToString(" ").trim().lowercase()
 
-                val isHideContext = isHidePkg ||
-                    HIDE_FREEZER_CLASS_HINTS.any { it in evCls } ||
-                    HIDE_FREEZER_TERMS.any { it in winText } ||
-                    (isSettingsPkg(pkg) && ("hide" in winText || "freeze" in winText || "hidden" in winText || "app lock" in winText))
-
-                // Normal home screen / app drawer launch has no hide context, no checkboxes, no "select", no "done"
-                val isNormalLauncherLaunch = isLauncher && !isHideContext &&
-                    !winText.contains("checkbox") && !winText.contains("select") &&
-                    !winText.contains("add to") && !winText.contains("done")
-
-                if (isHideContext && !isNormalLauncherLaunch) {
-                    if (now - lastHideKick > 500L) {
-                        lastHideKick = now
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                        BlockerStore.incr(this, "tamper")
-                        showOverlay(
-                            "🔐 Tamper Protection",
-                            "Blocker cannot be hidden or frozen while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
-                            5000,
-                            "Fear Allah and remain steadfast",
-                            "Understood"
-                        )
-                    }
-                    return true
+            if (isHideOrFreezerScreen(pkg, evCls, winTitle, winText)) {
+                if (now - lastHideKick > 500L) {
+                    lastHideKick = now
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    main.postDelayed({ performGlobalAction(GLOBAL_ACTION_HOME) }, 120L)
+                    BlockerStore.incr(this, "tamper")
+                    showOverlay(
+                        "🔐 Tamper Protection",
+                        "App hiding and freezing is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                        5000,
+                        "Fear Allah and remain steadfast",
+                        "Understood"
+                    )
                 }
-            }
-
-            // 2C. Confirm / Save / Done button in a Hide Apps screen when Blocker is selected:
-            val isConfirmClick = clickText.contains("done") || clickText.contains("save") ||
-                clickText.contains("apply") || clickText.contains("confirm") ||
-                clickText.contains("ok")
-            if (isConfirmClick) {
-                val root = rootInActiveWindow ?: ev.source
-                val sb = StringBuilder()
-                if (root != null) collectText(root, sb, 0, intArrayOf(150))
-                val winText = sb.toString().lowercase()
-                val isHideScreen = isHidePkg || HIDE_FREEZER_TERMS.any { it in winText } ||
-                    (isSettingsPkg(pkg) && ("hide" in winText || "freeze" in winText || "hidden" in winText))
-                if (isHideScreen && ("blocker" in winText || (name.isNotEmpty() && name.lowercase() in winText))) {
-                    if (now - lastHideKick > 500L) {
-                        lastHideKick = now
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                        BlockerStore.incr(this, "tamper")
-                        showOverlay(
-                            "🔐 Tamper Protection",
-                            "Blocker cannot be hidden or frozen while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
-                            5000,
-                            "Fear Allah and remain steadfast",
-                            "Understood"
-                        )
-                    }
-                    return true
-                }
+                return true
             }
         }
 
