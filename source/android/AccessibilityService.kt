@@ -2,6 +2,7 @@ package com.blocker
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -776,6 +777,26 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
+    private val appBlockWatchdog = object : Runnable {
+        override fun run() {
+            if (BlockerStore.active(this@BlockerAccessibilityService)) {
+                val root = runCatching { rootInActiveWindow }.getOrNull()
+                val rootPkg = root?.packageName?.toString()
+                val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else currentFgPkg
+                if (activePkg != null && activePkg in apps) {
+                    hit(
+                        "apps",
+                        "Fear Allah",
+                        "${labelOf(activePkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:34)",
+                        "Do not destroy your Akhirah",
+                        activePkg
+                    )
+                }
+            }
+            main.postDelayed(this, 350L)
+        }
+    }
+
     @Volatile private var blockFbReels = false
     @Volatile private var blockInstaReels = false
     @Volatile private var blockInstaSearch = false
@@ -842,10 +863,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         enforceAdbOff(notify = false)
         main.post(appLimitWatchdog)
+        main.post(appBlockWatchdog)
     }
 
     override fun onDestroy() {
         main.removeCallbacks(appLimitWatchdog)
+        main.removeCallbacks(appBlockWatchdog)
         if (instance === this) instance = null
         BlockerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener)
         runCatching { unregisterReceiver(screenReceiver) }
@@ -1217,7 +1240,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                 "apps",
                 "Fear Allah",
                 "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
-                "Do not destroy your Akhirah"
+                "Do not destroy your Akhirah",
+                pkg
             )
             return true
         }
@@ -1236,6 +1260,18 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             if (pm?.isInteractive == false) {
+                return
+            }
+
+            // INSTANT PRIORITY INTERCEPT: Blocked apps are kicked out immediately before any other checks
+            if (BlockerStore.active(this) && pkg in apps) {
+                hit(
+                    "apps",
+                    "Fear Allah",
+                    "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:34)",
+                    "Do not destroy your Akhirah",
+                    pkg
+                )
                 return
             }
 
@@ -1437,7 +1473,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                     "apps",
                     "Fear Allah",
                     "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:36)",
-                    "Do not destroy your Akhirah"
+                    "Do not destroy your Akhirah",
+                    pkg
                 )
                 return
             }
@@ -1569,19 +1606,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             rootInActiveWindow?.packageName?.toString() == pkg
         if (!trusted) return false
-        val now = System.currentTimeMillis()
-        if (now - lastHit >= 700) {
-            lastHit = now
-            BlockerStore.incr(this, "focus")
-            performGlobalAction(GLOBAL_ACTION_HOME)
-            showOverlay(
-                "Focus Mode Active",
-                "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
-                5000,
-                "Guard your time for what benefits you",
-                "Astaghfirullah"
-            )
-        }
+        hit(
+            "focus",
+            "Focus Mode Active",
+            "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
+            "Guard your time for what benefits you",
+            pkg
+        )
         return true
     }
 
@@ -3313,13 +3344,29 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun hit(kind: String, heading: String, msg: String, subheading: String? = null) {
+    private fun hit(kind: String, heading: String, msg: String, subheading: String? = null, targetPkg: String? = null) {
         val now = System.currentTimeMillis()
-        if (now - lastHit < 700) return
-        lastHit = now
-        BlockerStore.incr(this, kind)
-        showOverlay(heading, msg, 5000, subheading, "Astaghfirullah")
-        performGlobalAction(GLOBAL_ACTION_HOME)
+
+        // 1. Unconditionally kick out of the blocked app (NEVER skip or debounce the kick!)
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        kickToHome()
+
+        // 2. Terminate background processes of the blocked app so it does not linger in memory/recents
+        val killPkg = targetPkg ?: currentFgPkg
+        if (!killPkg.isNullOrEmpty() && killPkg != packageName && killPkg !in neverBlock) {
+            main.postDelayed({
+                runCatching {
+                    (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.killBackgroundProcesses(killPkg)
+                }
+            }, 150L)
+        }
+
+        // 3. Debounce visual overlay and stats increment so rapid hits don't flicker or inflate stats
+        if (now - lastHit >= 700L) {
+            lastHit = now
+            BlockerStore.incr(this, kind)
+            showOverlay(heading, msg, 5000, subheading, "Astaghfirullah")
+        }
     }
 
     // ---------- Popup ----------
