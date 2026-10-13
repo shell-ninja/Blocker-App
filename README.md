@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.2`
+# Blocker `v1.0.6.3`
 
-> **Current Version:** `v1.0.6.2` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.3` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -30,39 +30,16 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## What's New in v1.0.6.2
+## What's New in v1.0.6.3
 
-- **Universal App Hiding & Freezer Defense (`guardAppHidingAndFreezer`):**
-  - Defeats package hibernation and freezing bypasses across **all Android OEM launchers** (Samsung One UI, Xiaomi/Redmi/POCO HyperOS & MIUI, OnePlus OxygenOS, Oppo/Realme ColorOS, Vivo/iQOO Funtouch OS, Infinix/Tecno XOS & HiOS, Huawei/Honor EMUI/MagicOS, Pixel Launcher, Nothing Launcher, Motorola) and **third-party launchers** (Nova, Lawnchair, Microsoft Launcher, Niagara, Smart Launcher).
-  - Also shields against dedicated OEM privacy and freezing tools (Infinix/Tecno XHide `com.xui.xhide`, App Freezer `com.transsion.freezer`, Vivo Privacy, ColorOS SafeCenter).
-  - **Multi-Layer Defense:**
-    - **Launcher Desktop & Drawer Long-Press Shield:** Traps `TYPE_VIEW_LONG_CLICKED` on Blocker's icon in the launcher desktop and drawer, kicking immediately to home and preventing the context menu (Hide / Freeze / Uninstall / Drag) from appearing. Regular taps (`TYPE_VIEW_CLICKED`) launch Blocker normally.
-    - **Destructive Action Interception:** Intercepts clicks on "Hide", "Freeze", "Send to Freezer", "Disable", or "Uninstall" in launcher popups.
-    - **Hide Apps & Freezer Activity Interception:** Detects and kicks users out of hidden app configuration screens, App Freezer, and XHide.
-    - **Multi-Select Picker Protection:** Intercepts taps on Blocker's row or toggle switch inside any batch app hiding or freezing list.
-
----
-
-## What's New in v1.0.6.1
-
-- **Comprehensive Security Audit Hardening:**
-  - **Monotonic Hardware Time Tracking (`SecureTime`):** Anchors timers to elapsed CPU uptime (`SystemClock.elapsedRealtime()`) and persists monotonically increasing hardware anchors, eliminating timer-bypass exploits via ADB, NTP manipulation, or SIM removal.
-  - **HMAC-SHA256 State Integrity Verification:** Protects SharedPreferences with HMAC signatures; unauthorized manual edits or third-party tampering automatically revert state to known-good values.
-  - **Code Signing Certificate Verification:** Enforces strict cryptographic signature checks (`GET_SIGNING_CERTIFICATES` / `GET_SIGNATURES`) on downloaded updates before launching the installer, preventing rogue update injection.
-  - **Device Admin Deactivation Mitigation:** Executes immediate back/home defense actions on deactivation attempts and auto-prompts immediate re-activation if administrative rights are revoked.
-  - **Reboot Accessibility Shield:** BootReceiver monitors and automatically restores Accessibility Service on device reboot via `Settings.Secure`, dispatching a high-priority system alert if inactive.
-  - **Memory & Resource Safety:** Capped recursion depth, guaranteed node recycling across all accessibility tree walks, and 2MB JSON validation limits on backup state.
-- **0ms Instantaneous Block Overlay:**
-  - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
-  - Short-circuited App Info inspection for non-settings apps, saving 50-100ms on every accessibility event.
-- **Restored Facebook Reels & Scrollable Video Interception:**
-  - Blocks full-screen Reels viewer playback, dedicated Reels/Video tabs, and the immersive scrollable video player launched from feed posts, while keeping home newsfeed reading completely unhindered.
-- **Opt-In Granular Distraction Shields:**
-  - Facebook Reels, Instagram Reels, Instagram Search, and YouTube Shorts now default to **OFF (`false`)**, giving users complete choice over which distraction shields to engage in **Focus Mode > Distraction Shields**.
-- **Pomodoro Study Mode Emergency Exit:**
-  - Restored immediate emergency unlock via 4-second long-press, properly disabling DND, unmuting audio streams, and resetting active study blocks without delay timer queue trapping.
-- **Intelligent 2-Hour Update Check Cycle:**
-  - Update checks run automatically every 2 hours in both the app lifecycle and background service. If an update is detected, the user is notified and the cycle backs off to 24 hours if not updated immediately to avoid spam. Resets back to 2 hours once updated.
+- **Unconditional App & Game Kick Defense:**
+  - Fixed a bypass where rapidly launching a blocked app or game from recents or home screen could slip past due to the 700ms debounce guard. Kicking to home and back actions (`GLOBAL_ACTION_BACK` + `kickToHome()`) now run **unconditionally on 100% of detection events** with 0ms debounce.
+- **Background Process Termination:**
+  - Terminating background processes of blocked applications via `ActivityManager.killBackgroundProcesses(pkg)` immediately after kicking, preventing heavy native games (OpenGL/Vulkan/Unity) from remaining active in RAM or background.
+- **Continuous Active-Window Watchdog:**
+  - Added a 350ms continuous polling watchdog inspecting `rootInActiveWindow` and foreground packages, guaranteeing instant kicks even if a full-screen hardware-accelerated game silences accessibility event dispatches.
+- **Top-Priority Accessibility Interception:**
+  - Blocked app detection now takes immediate top priority in `onAccessibilityEvent` directly after interactive checks, avoiding any 75ms throttling or downstream view processing delays.
 
 ---
 
