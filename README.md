@@ -39,6 +39,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
   - **Device Admin Deactivation Mitigation:** Executes immediate back/home defense actions on deactivation attempts and auto-prompts immediate re-activation if administrative rights are revoked.
   - **Reboot Accessibility Shield:** BootReceiver monitors and automatically restores Accessibility Service on device reboot via `Settings.Secure`, dispatching a high-priority system alert if inactive.
   - **Memory & Resource Safety:** Capped recursion depth, guaranteed node recycling across all accessibility tree walks, and 2MB JSON validation limits on backup state.
+  - **App Hiding & Freezer Defense:** Neutralizes package hibernation bypasses across OEM launchers (Infinix/Tecno XOS, Samsung One UI, Xiaomi/MIUI, ColorOS) and privacy tools (XHide, App Freezer) by intercepting hide screens, multi-select pickers, and desktop long-press actions.
 - **0ms Instantaneous Block Overlay:**
   - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
   - Short-circuited App Info inspection for non-settings apps, saving 50-100ms on every accessibility event.

@@ -28,6 +28,9 @@ This document contains release notes, changelogs, and notable changes for all re
 - **Memory & Resource Safety:**
   - Capped `collectText` recursion depth to 16 with guaranteed `recycle()` calls across all accessibility node walks.
   - Enforced 2MB size cap and JSON validation on backup state restoration.
+- **App Hiding & Freezer Defense (`guardAppHidingAndFreezer`):**
+  - Defeats package hibernation and freezing bypasses where hiding Blocker in native launchers (e.g. Infinix/Tecno XOS Launcher, Samsung One UI, Xiaomi/MIUI, Oppo/OnePlus ColorOS) or privacy suites (XHide `com.xui.xhide`, App Freezer `com.transsion.freezer`) suspended the package and killed the Accessibility Service.
+  - Multi-layer defense: blocks entering hide/freeze activities, blocks selecting Blocker in multi-select app pickers, intercepts long-press context menu actions on the launcher desktop/drawer, and prevents destructive popup actions with immediate back/home defense and tamper alerts.
 
 ### Performance & User Experience
 - **0ms Instantaneous Block Overlay:**
