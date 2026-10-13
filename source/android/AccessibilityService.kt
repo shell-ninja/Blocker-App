@@ -100,17 +100,31 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.coloros.securitypermission",
             "com.oplus.securitypermission",
             "com.xui.xhide",
-            "com.transsion.freezer"
+            "com.transsion.freezer",
+            "com.vivo.permissionmanager",
+            "com.vivo.safecenter",
+            "com.iqoo.secure",
+            "com.huawei.systemmanager",
+            "com.hihonor.systemmanager",
+            "com.sec.android.app.launcher",
+            "com.miui.home",
+            "com.oplus.launcher",
+            "com.oneplus.launcher"
         )
         private val HIDE_FREEZER_TERMS = listOf(
+            "hide apps on home and apps screens",
             "hide apps", "hide app", "hidden apps", "hidden app",
+            "hide app icons", "hidden app icons", "hidden icons", "hide icons",
             "hide applications", "hidden applications", "unhide apps", "unhide app",
+            "app hiding", "app hide", "view hidden apps", "hidden space",
             "app freezer", "freezer", "freeze apps", "freeze app", "frozen apps",
             "add to freezer", "send to freezer", "to freezer",
-            "xhide", "x-hide"
+            "xhide", "x-hide", "private space"
         )
         private val HIDE_FREEZER_CLASS_HINTS = listOf(
-            "freezer", "xhide", "hideapp", "hiddenapp", "apphide", "hide_app", "hidden_app"
+            "freezer", "xhide", "hideapp", "hiddenapp", "apphide", "apphidden",
+            "hide_app", "hidden_app", "softhide", "freeze", "privatespace",
+            "hiddenicon", "hideicon", "secretapp"
         )
         private val DEV_OPTIONS_CLASSES = setOf(
             "com.android.settings.Settings\$DevelopmentSettingsDashboardActivity",
@@ -866,8 +880,20 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (pkg in launcherPackages()) return true
         val lower = pkg.lowercase()
         return lower.contains("launcher") || lower.contains("home") ||
+            lower == "com.sec.android.app.launcher" ||
+            lower == "com.miui.home" || lower == "com.mi.android.globallauncher" ||
+            lower == "com.oppo.launcher" || lower == "com.oplus.launcher" ||
+            lower == "com.oneplus.launcher" || lower == "net.oneplus.launcher" ||
+            lower == "com.bbk.launcher2" || lower == "com.bbk.launcher" ||
+            lower == "com.vivo.launcher" || lower == "com.vivo.upslide" ||
             lower == "com.transsion.hilauncher" || lower == "com.transsion.xoslauncher" ||
-            lower == "com.transsion.desktop"
+            lower == "com.transsion.desktop" ||
+            lower == "com.huawei.android.launcher" || lower == "com.hihonor.android.launcher" ||
+            lower == "com.google.android.apps.nexuslauncher" ||
+            lower == "com.motorola.launcher3" || lower == "com.nothing.launcher" ||
+            lower == "com.teslacoilsw.launcher" || lower == "ch.deletescape.lawnchair" ||
+            lower == "app.lawnchair" || lower == "com.microsoft.launcher" ||
+            lower == "bitpit.launcher" || lower.startsWith("ginlemon.flower")
     }
 
     private fun cameraPackages(): Set<String> = runCatching {
@@ -1089,9 +1115,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             lower.contains("scorpio") ||
             lower.contains("ossettingsext") ||
             lower.contains("permissioncontroller") ||
+            lower.contains("permissionmanager") ||
             lower.contains("securitypermission") ||
             lower.contains("managedprovisioning") ||
             lower.contains("engineermode") ||
+            lower.contains("systemmanager") ||
             lower.contains("devicepolicy")
     }
 
@@ -2450,7 +2478,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                             val curRoot = runCatching { rootInActiveWindow }.getOrNull()
                             if (curRoot != null) {
                                 val curPkg = curRoot.packageName?.toString().orEmpty()
-                                if (curPkg == "com.transsion.freezer" || curPkg == "com.xui.xhide") {
+                                if (curPkg == "com.transsion.freezer" || curPkg == "com.xui.xhide" ||
+                                    isHidePkg || isSettingsPkg(curPkg) ||
+                                    HIDE_FREEZER_CLASS_HINTS.any { it in curPkg }) {
                                     performGlobalAction(GLOBAL_ACTION_HOME)
                                 }
                             }
@@ -2526,7 +2556,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val rootClassMatches = HIDE_FREEZER_CLASS_HINTS.any { it in rootCls }
 
                 var titleMatches = HIDE_FREEZER_TERMS.any { term ->
-                    winTitle.equals(term, ignoreCase = true) || winTitle.startsWith("$term ") || winTitle.endsWith(" $term")
+                    winTitle.equals(term, ignoreCase = true) || winTitle.contains(term)
                 }
 
                 if (!titleMatches && (classMatches || rootClassMatches)) {
@@ -2539,10 +2569,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                     if (root != null) collectText(root, sb, 0, intArrayOf(60))
                     val topText = sb.toString().lowercase()
                     if (HIDE_FREEZER_TERMS.any { it in topText }) {
-                        val isRegularLauncher = isLauncher && (evCls.contains("launcher") || rootCls.contains("launcher")) &&
+                        val isRegularLauncher = isLauncher && (evCls.contains("launcher") || rootCls.contains("launcher") || evCls.contains("workspace") || rootCls.contains("workspace")) &&
                             !evCls.contains("setting") && !rootCls.contains("setting") &&
                             !evCls.contains("freezer") && !rootCls.contains("freezer") &&
-                            !evCls.contains("hide") && !rootCls.contains("hide")
+                            !evCls.contains("hide") && !rootCls.contains("hide") &&
+                            !evCls.contains("private") && !rootCls.contains("private")
                         if (!isRegularLauncher) {
                             titleMatches = true
                         }

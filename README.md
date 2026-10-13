@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.1`
+# Blocker `v1.0.6.2`
 
-> **Current Version:** `v1.0.6.1` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.2` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -30,6 +30,19 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
+## What's New in v1.0.6.2
+
+- **Universal App Hiding & Freezer Defense (`guardAppHidingAndFreezer`):**
+  - Defeats package hibernation and freezing bypasses across **all Android OEM launchers** (Samsung One UI, Xiaomi/Redmi/POCO HyperOS & MIUI, OnePlus OxygenOS, Oppo/Realme ColorOS, Vivo/iQOO Funtouch OS, Infinix/Tecno XOS & HiOS, Huawei/Honor EMUI/MagicOS, Pixel Launcher, Nothing Launcher, Motorola) and **third-party launchers** (Nova, Lawnchair, Microsoft Launcher, Niagara, Smart Launcher).
+  - Also shields against dedicated OEM privacy and freezing tools (Infinix/Tecno XHide `com.xui.xhide`, App Freezer `com.transsion.freezer`, Vivo Privacy, ColorOS SafeCenter).
+  - **Multi-Layer Defense:**
+    - **Launcher Desktop & Drawer Long-Press Shield:** Traps `TYPE_VIEW_LONG_CLICKED` on Blocker's icon in the launcher desktop and drawer, kicking immediately to home and preventing the context menu (Hide / Freeze / Uninstall / Drag) from appearing. Regular taps (`TYPE_VIEW_CLICKED`) launch Blocker normally.
+    - **Destructive Action Interception:** Intercepts clicks on "Hide", "Freeze", "Send to Freezer", "Disable", or "Uninstall" in launcher popups.
+    - **Hide Apps & Freezer Activity Interception:** Detects and kicks users out of hidden app configuration screens, App Freezer, and XHide.
+    - **Multi-Select Picker Protection:** Intercepts taps on Blocker's row or toggle switch inside any batch app hiding or freezing list.
+
+---
+
 ## What's New in v1.0.6.1
 
 - **Comprehensive Security Audit Hardening:**
@@ -39,7 +52,6 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
   - **Device Admin Deactivation Mitigation:** Executes immediate back/home defense actions on deactivation attempts and auto-prompts immediate re-activation if administrative rights are revoked.
   - **Reboot Accessibility Shield:** BootReceiver monitors and automatically restores Accessibility Service on device reboot via `Settings.Secure`, dispatching a high-priority system alert if inactive.
   - **Memory & Resource Safety:** Capped recursion depth, guaranteed node recycling across all accessibility tree walks, and 2MB JSON validation limits on backup state.
-  - **App Hiding & Freezer Defense:** Neutralizes package hibernation bypasses across OEM launchers (Infinix/Tecno XOS, Samsung One UI, Xiaomi/MIUI, ColorOS) and privacy tools (XHide, App Freezer) by intercepting hide screens, multi-select pickers, and desktop long-press actions.
 - **0ms Instantaneous Block Overlay:**
   - Refactored popup overlays into a unified single-window layout displayed synchronously before the Home action kicks, completely eliminating overlay delay and IPC latency.
   - Short-circuited App Info inspection for non-settings apps, saving 50-100ms on every accessibility event.

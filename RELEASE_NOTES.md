@@ -4,7 +4,32 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.1 (Current Release)
+## v1.0.6.2 (Current Release)
+
+**Release Date:** October 2026  
+**Version:** 1.0.6.2  
+**Build:** 24
+
+### Security & Anti-Tamper Hardening
+- **Universal App Hiding & Freezer Defense (`guardAppHidingAndFreezer`):**
+  - Defeats package hibernation and freezing bypasses across all Android OEM launchers and privacy suites where hiding Blocker suspended the package and killed the Accessibility Service.
+  - **Comprehensive Multi-OEM Coverage:**
+    - **Samsung One UI:** Traps Home screen "Hide apps on Home and Apps screens" (`HideAppsActivity`, `HideAppsSettingActivity`) and drawer long-press popups.
+    - **Xiaomi / Redmi / POCO (HyperOS & MIUI):** Intercepts Security app "Hidden apps" (`com.miui.securitycenter`, `AppLockHiddenAppsActivity`) and MIUI Home drawer hide gestures.
+    - **OnePlus / Oppo / Realme (OxygenOS, ColorOS, Realme UI):** Blocks Privacy "Hide apps" (`com.coloros.safecenter`, `com.oplus.safecenter`, `HideAppActivity`).
+    - **Vivo / iQOO (Funtouch OS & OriginOS):** Intercepts Privacy and App Encryption "Hide App" (`com.vivo.permissionmanager`, `SoftHideActivity`).
+    - **Transsion (Infinix XOS & Tecno HiOS):** Intercepts XOS Launcher Desktop Settings, XHide (`com.xui.xhide`), and App Freezer (`com.transsion.freezer`).
+    - **Huawei & Honor (EMUI & MagicOS):** Intercepts PrivateSpace and hidden application settings (`com.huawei.systemmanager`, `com.hihonor.systemmanager`).
+    - **Stock & Third-Party Launchers:** Covers Pixel Launcher, Nothing Launcher, Motorola Launcher, Nova Launcher, Lawnchair, Microsoft Launcher, Niagara Launcher, and Smart Launcher.
+  - **Multi-Tier Defense Architecture:**
+    1. **Desktop & Drawer Long-Press Interception:** Intercepts `TYPE_VIEW_LONG_CLICKED` on Blocker's icon on the launcher desktop and drawer, kicking immediately to home and preventing the context menu (Hide / Freeze / Uninstall / Drag) from appearing. Regular taps (`TYPE_VIEW_CLICKED`) continue to launch Blocker normally.
+    2. **Destructive Action Interception:** Intercepts clicks on "Hide", "Freeze", "Send to Freezer", "Disable", or "Uninstall" in launcher popups.
+    3. **Screen & Activity Interception:** Detects and kicks users out of hidden app configuration screens, App Freezer, and XHide.
+    4. **Multi-Select Picker Protection:** Proactively intercepts taps on Blocker's row or toggle switch inside any app hiding or freezing list.
+
+---
+
+## v1.0.6.1
 
 **Release Date:** October 2026  
 **Version:** 1.0.6.1  
@@ -28,9 +53,6 @@ This document contains release notes, changelogs, and notable changes for all re
 - **Memory & Resource Safety:**
   - Capped `collectText` recursion depth to 16 with guaranteed `recycle()` calls across all accessibility node walks.
   - Enforced 2MB size cap and JSON validation on backup state restoration.
-- **App Hiding & Freezer Defense (`guardAppHidingAndFreezer`):**
-  - Defeats package hibernation and freezing bypasses where hiding Blocker in native launchers (e.g. Infinix/Tecno XOS Launcher, Samsung One UI, Xiaomi/MIUI, Oppo/OnePlus ColorOS) or privacy suites (XHide `com.xui.xhide`, App Freezer `com.transsion.freezer`) suspended the package and killed the Accessibility Service.
-  - Multi-layer defense: blocks entering hide/freeze activities, blocks selecting Blocker in multi-select app pickers, intercepts long-press context menu actions on the launcher desktop/drawer, and prevents destructive popup actions with immediate back/home defense and tamper alerts.
 
 ### Performance & User Experience
 - **0ms Instantaneous Block Overlay:**
