@@ -24,6 +24,7 @@ class BootReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             BlockerForegroundService.start(context)
+            DeviceOwnerHelper.enforceDisallowSafeBoot(context)
 
             // Auto-restore Accessibility Service if WRITE_SECURE_SETTINGS is granted
             if (BlockerStore.active(context) && BlockerStore.shield(context)) {

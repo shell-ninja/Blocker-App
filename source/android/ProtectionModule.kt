@@ -63,11 +63,49 @@ class ProtectionModule(private val reactContext: ReactApplicationContext) :
             if (enabled) {
                 dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_DEBUGGING_FEATURES)
                 dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_APPS_CONTROL)
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_SAFE_BOOT)
             } else {
                 dpm.clearUserRestriction(adminComponent, UserManager.DISALLOW_DEBUGGING_FEATURES)
                 dpm.clearUserRestriction(adminComponent, UserManager.DISALLOW_APPS_CONTROL)
             }
 
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("PROTECTION_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun isDeviceOwner(promise: Promise) {
+        try {
+            val dpm = reactContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            promise.resolve(dpm?.isDeviceOwnerApp(reactContext.packageName) == true)
+        } catch (e: Exception) {
+            promise.reject("PROTECTION_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun removeDeviceOwner(promise: Promise) {
+        try {
+            val dpm = reactContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            if (dpm == null) {
+                promise.reject("DPM_UNAVAILABLE", "DevicePolicyManager service is unavailable.")
+                return
+            }
+            if (!dpm.isDeviceOwnerApp(reactContext.packageName)) {
+                promise.reject("NOT_DEVICE_OWNER", "App is not set as device owner.")
+                return
+            }
+
+            val isProtected = BlockerStore.active(reactContext) || BlockerStore.shield(reactContext)
+            val guardAllowed = BlockerStore.guardOpen(reactContext, "device_owner") || BlockerStore.guardOpen(reactContext, "shield")
+            if (isProtected && !guardAllowed) {
+                promise.reject("LOCKED", "Deactivating Device Owner requires the delay timer.")
+                return
+            }
+
+            DeviceOwnerHelper.removeDeviceOwner(reactContext)
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("PROTECTION_ERROR", e.message, e)

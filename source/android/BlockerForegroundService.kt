@@ -39,6 +39,7 @@ class BlockerForegroundService : Service {
         const val PENDING_UPDATE_COOLDOWN_MS = 24L * 60 * 60 * 1000L // 24 hours
 
         fun start(ctx: Context) {
+            DeviceOwnerHelper.enforceDisallowSafeBoot(ctx)
             runCatching {
                 val intent = Intent(ctx, BlockerForegroundService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

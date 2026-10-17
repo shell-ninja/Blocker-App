@@ -10,7 +10,7 @@ export type ActionType =
   | 'protection_off' | 'shield_off' | 'delay' | 'rm_app' | 'rm_domain' | 'rm_keyword' | 'cat_off'
   | 'add_whitelist' | 'exempt_app'
   | 'focus_end' | 'focus_shorten' | 'focus_add_app' | 'schedule_update' | 'schedule_delete'
-  | 'granular_focus_disable' | 'app_limit_set';
+  | 'granular_focus_disable' | 'app_limit_set' | 'device_owner_off' | 'power_menu_off';
 export interface SchedulePatch {
   label: string;
   startMin: number;
@@ -293,13 +293,17 @@ export async function confirm(key: LockKey) {
       }
       s = { ...s, appLimits: nextLimits };
       await Native.setAppUsageLimit(a.v!, a.n ?? 0).catch(() => {});
+    } else if (a.t === 'device_owner_off') {
+      await Native.removeDeviceOwner().catch(() => {});
+    } else if (a.t === 'power_menu_off') {
+      await Native.setPreventPowerOff(false).catch(() => {});
     } else s = reduce(s, a);
   }
   s = { ...s, savedSchedules };
   if (key === 'remove_apps') await sync(s);
   if (key === 'remove_blocklist' || key === 'whitelist') await sync(s);
   if (key === 'exempt_apps') await sync(s);
-  if (key === 'schedule' || key === 'app_limits') await refresh();
+  if (key === 'schedule' || key === 'app_limits' || key === 'device_owner' || key === 'power_menu') await refresh();
   const queue = { ...s.queue };
   delete queue[key];
   persist({ ...s, queue });
@@ -373,6 +377,26 @@ export async function setDelay(days: number): Promise<Outcome> {
     return 'applied';
   }
   return queueAction('delay_duration', { t: 'delay', days, label: `Shorten delay to ${days} day(s)` });
+}
+
+export async function deactivateDeviceOwner(): Promise<Outcome> {
+  const hasActiveLock = Object.values(snap.locks).some(l => l && (l.pending || (l.remainingMs ?? 0) > 0));
+  const hasActiveSession = snap.focus.active || snap.study.active;
+  if (!snap.active && !snap.shield && !hasActiveLock && !hasActiveSession) {
+    await Native.removeDeviceOwner();
+    await refresh();
+    return 'applied';
+  }
+  return queueAction('device_owner', { t: 'device_owner_off', label: 'Deactivate Device Owner' });
+}
+
+export async function setPreventPowerOff(on: boolean): Promise<Outcome> {
+  if (on) {
+    await Native.setPreventPowerOff(true);
+    await refresh();
+    return 'applied';
+  }
+  return queueAction('power_menu', { t: 'power_menu_off', label: 'Turn off Power Menu shield' });
 }
 
 // ---------- focus mode (one-off timer) ----------
