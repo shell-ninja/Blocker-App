@@ -9,7 +9,129 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.UserManager
 import androidx.core.app.NotificationCompat
+
+/**
+ * Helper to manage Device Owner operations, Safe Boot restriction, and deactivation.
+ */
+object DeviceOwnerHelper {
+    fun getAdminComponent(context: Context): ComponentName {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val myAdmin = ComponentName(context, MyDeviceAdminReceiver::class.java)
+        val blockerAdmin = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+        return when {
+            dpm?.isAdminActive(myAdmin) == true -> myAdmin
+            dpm?.isAdminActive(blockerAdmin) == true -> blockerAdmin
+            else -> myAdmin
+        }
+    }
+
+    fun isDeviceOwner(context: Context): Boolean {
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            dpm?.isDeviceOwnerApp(context.packageName) == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * When the app is a Device Owner, enforce DISALLOW_SAFE_BOOT so users cannot
+     * bypass protection by booting into Android Safe Mode (Volume Down during boot).
+     * Wrapped in try-catch so normal Device Admin mode is unaffected.
+     */
+    fun enforceDisallowSafeBoot(context: Context) {
+        try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+            if (dpm.isDeviceOwnerApp(context.packageName)) {
+                val candidates = listOf(
+                    ComponentName(context, MyDeviceAdminReceiver::class.java),
+                    ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+                )
+                for (admin in candidates) {
+                    try {
+                        dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                    } catch (_: Exception) {}
+                    // Freeze / hide scheduled power-off packages so RTC hardware alarms cannot trigger
+                    val scheduledPowerPackages = listOf(
+                        "com.mediatek.schpwronoff",
+                        "com.coloros.oppopowermanager",
+                        "com.vivo.scheduledpower"
+                    )
+                    for (p in scheduledPowerPackages) {
+                        try {
+                            dpm.setApplicationHidden(admin, p, true)
+                        } catch (_: Exception) {}
+                    }
+                    break
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Clears DISALLOW_SAFE_BOOT user restriction when deactivating Device Owner.
+     */
+    fun clearDisallowSafeBoot(context: Context) {
+        try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+            val candidates = listOf(
+                ComponentName(context, MyDeviceAdminReceiver::class.java),
+                ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+            )
+            for (admin in candidates) {
+                try {
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                } catch (_: Exception) {}
+                val scheduledPowerPackages = listOf(
+                    "com.mediatek.schpwronoff",
+                    "com.coloros.oppopowermanager",
+                    "com.vivo.scheduledpower"
+                )
+                for (p in scheduledPowerPackages) {
+                    try {
+                        dpm.setApplicationHidden(admin, p, false)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Deactivates Device Owner: clears DISALLOW_SAFE_BOOT, removes restrictions,
+     * and calls dpm.clearDeviceOwnerApp.
+     */
+    fun removeDeviceOwner(context: Context): Boolean {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            ?: throw IllegalStateException("DevicePolicyManager service is unavailable.")
+        if (!dpm.isDeviceOwnerApp(context.packageName)) {
+            throw IllegalStateException("App is not set as device owner.")
+        }
+
+        // 1. Clear DISALLOW_SAFE_BOOT restriction
+        clearDisallowSafeBoot(context)
+
+        // 2. Clear any additional restrictions and uninstall block
+        try {
+            val candidates = listOf(
+                ComponentName(context, MyDeviceAdminReceiver::class.java),
+                ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+            )
+            for (admin in candidates) {
+                try {
+                    dpm.setUninstallBlocked(admin, context.packageName, false)
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_APPS_CONTROL)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+
+        // 3. Clear device owner status in Android OS
+        dpm.clearDeviceOwnerApp(context.packageName)
+        return true
+    }
+}
 
 open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
 
@@ -17,8 +139,19 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
         const val NOTIFICATION_ID_ADMIN_ALERT = 1002
     }
 
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        DeviceOwnerHelper.enforceDisallowSafeBoot(context)
+    }
+
     override fun onEnabled(context: Context, intent: Intent) {
         BlockerStore.prefs(context).edit().putBoolean("admin_lost", false).apply()
+        DeviceOwnerHelper.enforceDisallowSafeBoot(context)
+    }
+
+    override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
+        super.onProfileProvisioningComplete(context, intent)
+        DeviceOwnerHelper.enforceDisallowSafeBoot(context)
     }
 
     // Both Protection and the Uninstall & settings shield must be on for any kick/cancel action here —

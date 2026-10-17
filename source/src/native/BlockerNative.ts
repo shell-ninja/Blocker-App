@@ -3,10 +3,10 @@ import { NativeModules, Platform } from 'react-native';
 export type PermissionKind = 'accessibility' | 'overlay' | 'usageAccess' | 'deviceAdmin' | 'battery' | 'dnd';
 export type LockKey =
   | 'protection' | 'shield' | 'delay_duration' | 'remove_apps' | 'remove_blocklist'
-  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule' | 'app_limits';
+  | 'whitelist' | 'exempt_apps' | 'focus' | 'granular_focus' | 'schedule' | 'app_limits' | 'device_owner' | 'power_menu';
 export const LOCK_KEYS: LockKey[] = [
   'protection', 'shield', 'delay_duration', 'remove_apps', 'remove_blocklist',
-  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule', 'app_limits'
+  'whitelist', 'exempt_apps', 'focus', 'granular_focus', 'schedule', 'app_limits', 'device_owner', 'power_menu'
 ];
 
 export interface PermissionStatus {
@@ -14,9 +14,11 @@ export interface PermissionStatus {
   overlay: boolean;
   usageAccess: boolean;
   deviceAdmin: boolean;
+  isDeviceOwner?: boolean;
   adminLost: boolean;
   /** true when Blocker is exempt from battery optimization (can keep running in the background) */
   battery?: boolean;
+  dnd?: boolean;
   /** true when WRITE_SECURE_SETTINGS was granted over adb, which enables the USB-debugging lock */
   secureSettings?: boolean;
 }
@@ -54,6 +56,7 @@ export interface Stats {
   studyIsBreak: boolean;
   studyFocusMinutes: number;
   studyBreakMinutes: number;
+  preventPowerOff?: boolean;
 }
 export interface GranularFocusToggles {
   block_fb_reels: boolean;
@@ -133,6 +136,9 @@ interface BlockerNativeSpec {
   cleanupOldUpdateApks(currentVersion: string): Promise<number>;
   clearAllUpdateApks(): Promise<{ deletedCount: number; freedBytes: number }>;
   getUpdateCacheStats(): Promise<{ fileCount: number; totalBytes: number }>;
+  isDeviceOwner(): Promise<boolean>;
+  removeDeviceOwner(): Promise<boolean>;
+  setPreventPowerOff(enabled: boolean): Promise<boolean>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;
@@ -145,5 +151,7 @@ export interface ProtectionStatus {
 export interface ProtectionNativeSpec {
   getStatus(): Promise<ProtectionStatus>;
   setProtectionMode(enabled: boolean): Promise<boolean>;
+  isDeviceOwner(): Promise<boolean>;
+  removeDeviceOwner(): Promise<boolean>;
 }
 export const ProtectionNative = NativeModules.ProtectionModule as ProtectionNativeSpec;

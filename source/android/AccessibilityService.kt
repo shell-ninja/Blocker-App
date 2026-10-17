@@ -697,6 +697,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Scheduled Power Off guard: strictly blocks scheduled shutdown configuration
+        if (shouldBlockScheduledPower() && isScheduledPowerSettingsScreen(root, t, "", rootPkg)) {
+            pollKick("Scheduled power off is locked while protection is active.")
+            return
+        }
+
         // Blocker-specific: check if screen is Blocker's App Info, Storage, or Settings
         val isOurApp = "blocker" in t || packageName.lowercase() in t
 
@@ -845,6 +851,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         BlockerForegroundService.start(this)
+        DeviceOwnerHelper.enforceDisallowSafeBoot(this)
         loadAppIdentity()
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
@@ -1313,6 +1320,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
         guardBlockerAppInfo(ev, pkg)
         if (checkAdbDialog(pkg)) return
+        if (checkPowerMenuDialog(ev, pkg)) return
+        if (checkScheduledPowerOff(ev, pkg)) return
 
         // Proactive Date & Time intercept: runs before neverBlock or active checks to catch OEM clock/settings launchers
         if (shouldBlockDateTime() && (isSettingsPkg(pkg) || isClockPkg(pkg) || pkg == "android")) {
@@ -1462,6 +1471,17 @@ class BlockerAccessibilityService : AccessibilityService() {
                     kickToHome()
                     BlockerStore.incr(this, "tamper")
                     showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                    return
+                }
+            }
+
+            // ── 7. Scheduled Power Off settings screen: prevent scheduled shutdown bypass ───
+            if (shouldBlockScheduledPower()) {
+                val rootNow = rootInActiveWindow ?: ev.source
+                if (isScheduledPowerSettingsScreen(rootNow, winTitle, evCls, pkg)) {
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
                     return
                 }
             }
@@ -1854,6 +1874,222 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private var lastPowerMenuHit = 0L
+
+    private fun checkPowerMenuDialog(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (!BlockerStore.preventPowerOff(this)) return false
+        if (BlockerStore.guardOpen(this, "power_menu")) return false
+        if (pkg == packageName) return false
+
+        val pkgLower = pkg.lowercase()
+        // Must originate from OS / System UI or dedicated power/globalactions system components
+        val isSystemPkg = pkg == "android" || pkg == "com.android.systemui" ||
+            pkgLower.contains("globalactions") || pkgLower.contains("power") ||
+            pkgLower.contains("systemui") || pkgLower.contains("transsion")
+        if (!isSystemPkg) return false
+
+        // Determine dialog node to inspect. NEVER inspect our own app or non-system nodes.
+        val dialogNode = when {
+            ev.source != null && ev.source?.packageName?.toString()?.lowercase() != packageName.lowercase() -> ev.source
+            rootInActiveWindow != null && rootInActiveWindow?.packageName?.toString()?.lowercase() != packageName.lowercase() -> rootInActiveWindow
+            else -> null
+        } ?: return false
+
+        val nodePkg = dialogNode.packageName?.toString().orEmpty().lowercase()
+        if (nodePkg == packageName.lowercase()) return false
+
+        val isSystemNode = nodePkg == "android" || nodePkg == "com.android.systemui" ||
+            nodePkg.contains("globalactions") || nodePkg.contains("systemui") ||
+            nodePkg.contains("transsion") || nodePkg.contains("power")
+        if (!isSystemNode) return false
+
+        val evCls = ev.className?.toString().orEmpty()
+        val isGlobalActionsCls = evCls.contains("GlobalActions", ignoreCase = true) ||
+            evCls.contains("PowerDialog", ignoreCase = true) ||
+            evCls.contains("ShutdownActivity", ignoreCase = true) ||
+            evCls.contains("RestartActivity", ignoreCase = true)
+
+        val sb = StringBuilder()
+        collectText(dialogNode, sb, 0, intArrayOf(100))
+        val text = sb.toString().lowercase()
+
+        // Absolute safeguard: if this node mentions Blocker or our own settings toggles, do NOT block
+        if ("blocker" in text || "prevent power off" in text || packageName.lowercase() in text) return false
+
+        val hasPowerOff = "power off" in text || "shut down" in text || "power down" in text || "turn off" in text
+        val hasRestart = "restart" in text || "reboot" in text
+        val hasEmergencyOrLockdown = "emergency" in text || "lockdown" in text || "safe mode" in text
+
+        // A power menu contains power actions (e.g. power off AND restart, or power action + emergency/lockdown)
+        val isPowerMenu = isGlobalActionsCls ||
+            (hasPowerOff && hasRestart) ||
+            ((hasPowerOff || hasRestart) && hasEmergencyOrLockdown)
+
+        if (isPowerMenu) {
+            val now = System.currentTimeMillis()
+            if (now - lastPowerMenuHit < 600L) return true
+            lastPowerMenuHit = now
+
+            // Immediately dismiss power dialog via back action, collapse panels, and kick
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            collapseNotificationShade()
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+
+            showOverlay(
+                "🔐 Power Off Locked",
+                "Powering off and restarting are locked for your protection.\n\nTake a breather and remain steadfast.",
+                4000,
+                "Protection Active",
+                "Understood"
+            )
+            return true
+        }
+        return false
+    }
+
+    private var lastScheduledPowerHit = 0L
+
+    private fun shouldBlockScheduledPower(): Boolean {
+        if (BlockerStore.preventPowerOff(this)) return true
+        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")) return true
+        if (BlockerStore.active(this)) return true
+        return false
+    }
+
+    private fun clickCancelOrDismiss(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val cancelLabels = listOf("cancel", "dismiss", "stop", "postpone", "later", "abort", "close")
+        for (label in cancelLabels) {
+            val nodes = runCatching { root.findAccessibilityNodeInfosByText(label) }.getOrNull() ?: continue
+            for (node in nodes) {
+                if (node == null) continue
+                if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true
+                }
+                val parent = node.parent
+                if (parent != null && parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun isScheduledPowerSettingsScreen(root: AccessibilityNodeInfo?, text: String, evCls: String, pkg: String): Boolean {
+        var t = text.lowercase()
+        if (t.isEmpty() && root != null) {
+            val sb = StringBuilder()
+            collectText(root, sb, 0, intArrayOf(100))
+            t = sb.toString().lowercase()
+        }
+        val cls = evCls.lowercase()
+        val pkgLower = pkg.lowercase()
+
+        // 1. MediaTek or OEM scheduled power package
+        if (pkgLower == "com.mediatek.schpwronoff" || pkgLower.contains("schpwronoff")) return true
+
+        // 2. Class names across Android skins
+        if (cls.contains("schedulepower") || cls.contains("schpwronoff") ||
+            cls.contains("scheduledpower") || cls.contains("autopoweronoff") ||
+            cls.contains("poweronoffschedule")) {
+            return true
+        }
+
+        // Parent menu exclusion (so we don't accidentally block the top-level System or Settings menu)
+        val isParentMenu = "language" in t || "gesture" in t || "backup" in t || "reset" in t ||
+            "keyboard" in t || "system update" in t || "about phone" in t || "battery" in t ||
+            "display" in t || "sound" in t || "network & internet" in t || "wallpaper" in t ||
+            "accessibility" in t || "apps & notifications" in t
+        if (isParentMenu) return false
+
+        // 3. Screen content phrases indicating the scheduled power subpage
+        if ("scheduled power" in t || "schedule power" in t || "auto power on/off" in t ||
+            "auto power off" in t || "power on/off schedule" in t || "automatic power on/off" in t ||
+            "scheduled shutdown" in t || "schedule shutdown" in t) {
+            return true
+        }
+
+        // 4. Samsung Auto restart at set times subpage
+        if ("auto restart at set times" in t || ("auto restart" in t && ("restart when needed" in t || "schedule" in t))) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun checkScheduledPowerOff(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (!shouldBlockScheduledPower()) return false
+        if (pkg == packageName) return false
+
+        val pkgLower = pkg.lowercase()
+        val evCls = runCatching { ev.className?.toString().orEmpty().lowercase() }.getOrDefault("")
+        val isMtkSch = pkgLower == "com.mediatek.schpwronoff" || pkgLower.contains("schpwronoff")
+
+        val root = ev.source ?: rootInActiveWindow
+        val rootPkg = runCatching { root?.packageName?.toString().orEmpty().lowercase() }.getOrDefault("")
+        if (rootPkg == packageName.lowercase()) return false
+
+        val sb = StringBuilder()
+        if (root != null) {
+            collectText(root, sb, 0, intArrayOf(200))
+        }
+        val text = sb.toString().lowercase()
+
+        // Never trigger on Blocker settings
+        if ("blocker" in text || "prevent power off" in text || packageName.lowercase() in text) return false
+
+        // A. Countdown / Scheduled Shutdown Dialog: when a scheduled shutdown alarm actually fires!
+        val isShutdownAlert = (isMtkSch || isSettingsPkg(pkgLower) || pkgLower == "android" || pkgLower == "com.android.systemui") &&
+            (evCls.contains("shutdown") || evCls.contains("alert") || evCls.contains("dialog")) &&
+            ("shut down" in text || "shutdown" in text || "power off" in text || "scheduled power" in text || "will shut down" in text || "will power off" in text)
+
+        if (isShutdownAlert || (isMtkSch && (evCls.contains("shutdown") || "cancel" in text))) {
+            val now = System.currentTimeMillis()
+            if (now - lastScheduledPowerHit < 800L) return true
+            lastScheduledPowerHit = now
+
+            // Immediately abort the scheduled shutdown by pressing Cancel
+            clickCancelOrDismiss(root)
+
+            // Dismiss dialog via back action, collapse shade, kick to home
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            collapseNotificationShade()
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+
+            showOverlay(
+                "🔐 Power Off Locked",
+                "Scheduled power off was cancelled for your protection.\n\nRemain steadfast.",
+                5000,
+                "Protection Active",
+                "Understood"
+            )
+            return true
+        }
+
+        // B. Scheduled Power On/Off settings screen: prevent user from scheduling a shutdown
+        if (isScheduledPowerSettingsScreen(root, text, evCls, pkgLower)) {
+            val now = System.currentTimeMillis()
+            if (now - lastScheduledPowerHit < 800L) return true
+            lastScheduledPowerHit = now
+
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+
+            showOverlay(
+                "🔐 Tamper Protection",
+                "Scheduled power off is locked while protection is active.",
+                5000,
+                "Protection Active",
+                "Understood"
+            )
+            return true
+        }
+
+        return false
+    }
+
     private fun checkDangerDialog(pkg: String, ev: AccessibilityEvent): Boolean {
         if (pkg == packageName) return false
         if (pkg in neverBlock) return false
@@ -1947,7 +2183,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun checkSettings(ev: AccessibilityEvent) {
         val shieldOn = shieldEngaged()
         val dtOn = shouldBlockDateTime()
-        if (!shieldOn && !dtOn) return
+        val schOn = shouldBlockScheduledPower()
+        if (!shieldOn && !dtOn && !schOn) return
         val root = rootInActiveWindow ?: ev.source ?: return
         val cls = root.className?.toString().orEmpty()
         val evCls = ev.className?.toString().orEmpty()
@@ -2061,6 +2298,14 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Scheduled Power Off guard: strictly blocks scheduled shutdown configuration
+        if (schOn && isScheduledPowerSettingsScreen(root, fullText, evCls, root.packageName?.toString().orEmpty())) {
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+            return
+        }
+
         if (!shieldOn) return
 
         // 3. App Storage Clearing & App Info Protection for Blocker (even if Device Admin was removed)
@@ -2170,6 +2415,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isInstallOrUpdateDialog(ev, null)) return
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (guardDateTimeRowClick(ev, pkg)) return
+            if (guardScheduledPowerRowClick(ev, pkg)) return
             guardBlockerRowClick(ev, pkg)
             return
         }
@@ -2366,6 +2612,50 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
             }
             runCatching { src.recycle() }
+        }
+        return false
+    }
+
+    /**
+     * Intercepts taps on "Scheduled power on/off" rows inside Settings before the page ever opens.
+     */
+    private fun guardScheduledPowerRowClick(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (!isSettingsPkg(pkg) && pkg != "com.mediatek.schpwronoff") return false
+        if (!shouldBlockScheduledPower()) return false
+        if (isInstallOrUpdateDialog(ev, null)) return false
+
+        val text = ev.text.joinToString(" ").lowercase()
+        val cd = ev.contentDescription?.toString()?.lowercase().orEmpty()
+        val combined = "$text $cd".trim()
+        if (isLegitimatePermissionScreen(combined)) return false
+
+        val isHit = combined.contains("scheduled power") ||
+            combined.contains("schedule power") ||
+            combined.contains("auto power on/off") ||
+            combined.contains("auto power off") ||
+            combined.contains("auto restart") ||
+            combined.contains("power on/off schedule") ||
+            combined.contains("scheduled shutdown") ||
+            combined.contains("schedule shutdown")
+
+        if (isHit) {
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+            return true
+        }
+
+        val src = ev.source
+        if (src != null) {
+            val sb = StringBuilder()
+            collectText(src, sb, 0, intArrayOf(50))
+            val srcText = sb.toString().lowercase()
+            if (isScheduledPowerSettingsScreen(src, srcText, "", pkg)) {
+                kickToHome()
+                BlockerStore.incr(this, "tamper")
+                showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+                return true
+            }
         }
         return false
     }

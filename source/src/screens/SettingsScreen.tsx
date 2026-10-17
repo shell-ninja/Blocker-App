@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-react-native';
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
-import { setDelay, setProtection, setShield } from '../services/ProtectionManager';
+import { deactivateDeviceOwner, setDelay, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
@@ -23,7 +23,9 @@ const NAMES: Record<LockKey, string> = {
   focus: 'Focus mode',
   granular_focus: 'Distraction shield changes',
   schedule: 'Daily schedules',
-  app_limits: 'App usage timers'
+  app_limits: 'App usage timers',
+  device_owner: 'Device Owner deactivation',
+  power_menu: 'Power Menu shield'
 };
 
 export default function SettingsScreen() {
@@ -87,6 +89,27 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleDeactivateDeviceOwner = () => {
+    const hasActiveLock = Object.values(p.locks).some(l => l && (l.pending || (l.remainingMs ?? 0) > 0));
+    const isLocked = p.active || p.shield || hasActiveLock || p.focus.active || p.study.active;
+    if (!isLocked) {
+      Alert.alert(
+        'Deactivate Device Owner?',
+        'This will clear Device Owner status and deactivate hardware-level protections.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Deactivate',
+            style: 'destructive',
+            onPress: () => run(() => deactivateDeviceOwner(), 'Device Owner')
+          }
+        ]
+      );
+    } else {
+      run(() => deactivateDeviceOwner(), 'Device Owner');
+    }
+  };
+
   const grantDeviceAdmin = async () => {
     try {
       const direct = await Native.openPermissionSettings('deviceAdmin');
@@ -145,6 +168,29 @@ export default function SettingsScreen() {
           <Sub>If the button doesn't open the right screen, go to Settings → Security → Device admin apps → Blocker.</Sub>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <Text style={{ color: t.text }}>Device Owner</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Badge
+              label={p.perms?.isDeviceOwner ? 'Active' : 'Inactive'}
+              tone={p.perms?.isDeviceOwner ? 'ok' : 'idle'}
+            />
+            {p.perms?.isDeviceOwner && (
+              <Btn
+                label="Deactivate"
+                kind="ghost"
+                icon={Icons.shieldOff}
+                onPress={handleDeactivateDeviceOwner}
+              />
+            )}
+          </View>
+        </View>
+        <Sub>
+          {p.perms?.isDeviceOwner
+            ? 'Hardware-level device ownership is active and tamper-proof.'
+            : 'For advanced hardware-level anti-tamper protection, set Device Owner via ADB: adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver'}
+        </Sub>
+        <LockBar lockKey="device_owner" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
           <Text style={{ color: t.text }}>USB & Wireless debugging lock</Text>
           <Badge
             label={!p.shield ? 'Off' : p.perms?.secureSettings ? 'Instant lock' : 'On'}
@@ -158,6 +204,19 @@ export default function SettingsScreen() {
               'Optional instant lock (needs a computer once): adb shell pm grant com.blocker android.permission.WRITE_SECURE_SETTINGS'}
         </Sub>
         <LockBar lockKey="shield" />
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={{ color: t.text, fontWeight: '700' }}>Prevent Power off & Restart</Text>
+            <Sub>Dismisses power and restart dialogs to prevent impulse shutdowns. Disabling requires a 2-hour delay.</Sub>
+          </View>
+          <Switch
+            value={p.stats?.preventPowerOff ?? false}
+            onValueChange={v => run(() => setPreventPowerOff(v), 'Prevent Power off')}
+            trackColor={{ true: t.ok }}
+          />
+        </View>
+        <LockBar lockKey="power_menu" />
       </Card>
 
       <Card>
@@ -222,6 +281,8 @@ export default function SettingsScreen() {
         <LockBar lockKey="remove_blocklist" />
         <LockBar lockKey="whitelist" />
         <LockBar lockKey="exempt_apps" />
+        <LockBar lockKey="device_owner" />
+        <LockBar lockKey="power_menu" />
       </Card>
 
       <Card style={update.hasUpdate ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>

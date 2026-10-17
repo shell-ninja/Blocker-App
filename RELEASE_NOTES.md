@@ -4,11 +4,42 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.3 (Current Release)
+## v1.0.6.4 (Current Release)
+
+**Release Date:** October 2026  
+**Version:** 1.0.6.4  
+**Build:** 32
+
+### Hardware-Level Anti-Tamper & Power Lockdown
+- **Hardware Anti-Tamper Enforcement (`DISALLOW_SAFE_BOOT` via Device Owner):**
+  - Resolved hardware-level anti-tamper vulnerabilities where restricted boot modes could be leveraged to bypass protection.
+  - When provisioned as Device Owner, Blocker automatically enforces `UserManager.DISALLOW_SAFE_BOOT` through `DevicePolicyManager.addUserRestriction()`.
+  - Automatically verified and applied on device boot (`BootReceiver`), package update (`MY_PACKAGE_REPLACED`), Device Admin/Owner activation (`BlockerDeviceAdminReceiver`), app startup (`BlockerNativeModule`), Accessibility Service connection, and Foreground Service start (`BlockerForegroundService`).
+  - Wrapped safely in error guards so regular Device Admin functionality remains fully intact and unaffected.
+- **Scheduled Power Off Prevention & Auto-Cancellation:**
+  - Prevents users from scheduling an automated shutdown (e.g. 1 minute later) to bypass delay timers or power restrictions.
+  - Intercepts and blocks access to "Scheduled power on/off", "Auto power off", and "Auto restart" configuration screens across MediaTek (`com.mediatek.schpwronoff`), Transsion (Infinix/Tecno), Xiaomi, Samsung, and ColorOS.
+  - Actively intercepts scheduled shutdown countdown dialogs, automatically clicks "Cancel" / "Dismiss", sends back commands, and kicks to home to prevent the phone from powering down.
+  - When provisioned as Device Owner, automatically freezes and hides scheduled power-off packages so RTC hardware alarms cannot trigger.
+- **Prevent Power off & Restart Shield (2-Hour Cooldown Delay):**
+  - Added an active barrier in the Accessibility Service that immediately intercepts and dismisses the on-screen Power Menu (Global Actions dialog) across AOSP, Samsung, Transsion (Infinix/Tecno), Xiaomi, and ColorOS devices.
+  - Instantly fires back/collapse actions the moment the power menu dialog is summoned, preventing users from tapping "Power off" or "Restart".
+  - Can be toggled from Settings under the Uninstall & Settings Shield card.
+  - Turning ON takes effect immediately. Turning OFF is protected behind a **2-hour delay timer** (`power_menu`), giving the user a cool-off window to reconsider and stay focused before the change can be confirmed.
+- **Deactivate Device Owner in Settings with Anti-Tamper Lock Protection:**
+  - Added Device Owner status indicator ("Active" / "Inactive") in the Settings screen under the Uninstall & Settings Shield section.
+  - When Device Owner is active, provides a "Deactivate" action.
+  - Immediate deactivation is strictly prevented while master protection or uninstall shield is active, or while any lock/cooldown timer is running.
+  - Deactivation requests queue into the tamper-resistant countdown delay timer (`device_owner`), requiring confirmation only after the cooldown delay finishes.
+  - Deactivation cleanly unhides packages and removes restrictions before calling `dpm.clearDeviceOwnerApp()`.
+
+---
+
+## v1.0.6.3
 
 **Release Date:** October 2026  
 **Version:** 1.0.6.3  
-**Build:** 29
+**Build:** 28
 
 ### Security & Blocking Engine Hardening
 - **Unconditional App Kick Defense (Zero-Debounce Kick):**

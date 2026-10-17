@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.3`
+# Blocker `v1.0.6.4`
 
-> **Current Version:** `v1.0.6.3` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.4` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -27,6 +27,25 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 ---
 
 Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetry, and no account required. It blocks distracting websites, full-screen short-form video players (YouTube Shorts, Instagram Reels, Facebook Reels), and adult domains across browsers and apps.
+
+---
+
+## What's New in v1.0.6.4
+
+- **Hardware Anti-Tamper Enforcement (`DISALLOW_SAFE_BOOT`):**
+  - Fixes an anti-tamper loophole where restricted boot modes could be leveraged to bypass accessibility services and uninstall the app.
+  - When provisioned as Device Owner (`adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver`), Blocker enforces `UserManager.DISALLOW_SAFE_BOOT` across startup, reboots, and service connections.
+- **Scheduled Power Off Prevention & Auto-Cancellation:**
+  - Prevents setting scheduled shutdowns (e.g. 1 minute later) to bypass locks or restart restrictions.
+  - Intercepts and blocks access to "Scheduled power on/off", "Auto power off", and "Auto restart" settings across OEM skins (Infinix XOS, MediaTek, Samsung, Xiaomi, ColorOS).
+  - Actively intercepts scheduled shutdown countdown dialogs, automatically presses "Cancel" / "Dismiss", and kicks to home to keep the phone powered on.
+  - Freezes and hides scheduled power packages via Device Owner to stop RTC hardware alarms from triggering.
+- **Prevent Power off & Restart Shield (2-Hour Cooldown):**
+  - Actively intercepts and dismisses the on-screen Power Menu (Global Actions dialog) across OEM skins (Infinix XOS, Samsung OneUI, Pixel, MIUI, ColorOS), preventing impulsive power offs and restarts.
+  - Can be toggled on immediately from Settings. Disabling requires waiting for a **2-hour delay timer** before the change can be confirmed.
+- **Deactivate Device Owner with Delay Lock Protection:**
+  - View Device Owner status directly in Settings.
+  - Deactivate Device Owner when needed, protected behind the anti-tamper countdown delay timer if master protection, shield, or any lock is active. Cleanly clears restrictions and unregisters device ownership.
 
 ---
 

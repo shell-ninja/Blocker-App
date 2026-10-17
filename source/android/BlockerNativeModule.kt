@@ -181,6 +181,7 @@ object BlockerStore {
         val sb = java.lang.StringBuilder()
         sb.append("active=").append(p.getBoolean("active", false)).append(";")
         sb.append("shield=").append(p.getBoolean("shield", true)).append(";")
+        sb.append("prevent_power_off=").append(p.getBoolean("prevent_power_off", false)).append(";")
         sb.append("delay_days=").append(p.getInt("delay_days", 1)).append(";")
         sb.append("study_active=").append(p.getBoolean("study_active", false)).append(";")
         sb.append("focus_until=").append(p.getLong("focus_until", 0L)).append(";")
@@ -239,6 +240,16 @@ object BlockerStore {
     fun shield(c: Context): Boolean {
         verifyIntegrity(c)
         return prefs(c).getBoolean("shield", true)
+    }
+
+    fun preventPowerOff(c: Context): Boolean {
+        verifyIntegrity(c)
+        return prefs(c).getBoolean("prevent_power_off", false)
+    }
+
+    fun setPreventPowerOff(c: Context, enable: Boolean) {
+        prefs(c).edit().putBoolean("prevent_power_off", enable).apply()
+        updateIntegrityHmac(c)
     }
 
     fun delayDays(c: Context) = prefs(c).getInt("delay_days", 1)
@@ -706,6 +717,7 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     init {
         BlockerForegroundService.start(ctx)
+        DeviceOwnerHelper.enforceDisallowSafeBoot(ctx)
         io.execute {
             try {
                 val pInfo = rc.packageManager.getPackageInfo(rc.packageName, 0)
@@ -722,15 +734,56 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     @ReactMethod
     fun getPermissionStatus(promise: Promise) {
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val isDevOwner = DeviceOwnerHelper.isDeviceOwner(ctx)
+        val myAdmin = ComponentName(ctx, MyDeviceAdminReceiver::class.java)
+        val isAdmin = dpm.isAdminActive(admin) || dpm.isAdminActive(myAdmin) || isDevOwner
         promise.resolve(Arguments.createMap().apply {
             putBoolean("accessibility", isAccessibilityOn())
             putBoolean("overlay", Settings.canDrawOverlays(ctx))
             putBoolean("usageAccess", hasUsageAccess())
-            putBoolean("deviceAdmin", dpm.isAdminActive(admin))
+            putBoolean("deviceAdmin", isAdmin)
+            putBoolean("isDeviceOwner", isDevOwner)
             putBoolean("adminLost", BlockerStore.prefs(ctx).getBoolean("admin_lost", false))
             putBoolean("battery", isIgnoringBatteryOptimizations())
             putBoolean("secureSettings", ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
         })
+    }
+
+    @ReactMethod
+    fun isDeviceOwner(promise: Promise) {
+        try {
+            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            promise.resolve(dpm?.isDeviceOwnerApp(ctx.packageName) == true)
+        } catch (e: Exception) {
+            promise.reject("DEVICE_OWNER_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun removeDeviceOwner(promise: Promise) {
+        try {
+            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            if (dpm == null) {
+                promise.reject("DPM_UNAVAILABLE", "DevicePolicyManager service is unavailable.")
+                return
+            }
+            if (!dpm.isDeviceOwnerApp(ctx.packageName)) {
+                promise.reject("NOT_DEVICE_OWNER", "App is not set as device owner.")
+                return
+            }
+
+            val isProtected = BlockerStore.active(ctx) || BlockerStore.shield(ctx)
+            val guardAllowed = BlockerStore.guardOpen(ctx, "device_owner") || BlockerStore.guardOpen(ctx, "shield")
+            if (isProtected && !guardAllowed) {
+                promise.reject("LOCKED", "Deactivating Device Owner requires the delay timer.")
+                return
+            }
+
+            DeviceOwnerHelper.removeDeviceOwner(ctx)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("DEVICE_OWNER_ERROR", e.message, e)
+        }
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean = runCatching {
@@ -1063,7 +1116,13 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     fun requestSettingChange(key: String, promise: Promise) {
         val existing = BlockerStore.pendingUntil(ctx, key)
         val now = SecureTime.now(ctx)
-        val until = if (existing != 0L) existing else now + BlockerStore.delayMs(ctx)
+        val duration = if (key == "power_menu") {
+            val debug = (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (debug) 2 * 60_000L else 2 * 3600_000L // 2 hours delay
+        } else {
+            BlockerStore.delayMs(ctx)
+        }
+        val until = if (existing != 0L) existing else now + duration
         BlockerStore.prefs(ctx).edit().putLong("pending_$key", until).apply()
         BlockerStore.updateIntegrityHmac(ctx)
         promise.resolve(until.toDouble())
@@ -1448,7 +1507,18 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putBoolean("studyIsBreak", BlockerStore.studyIsBreak(ctx))
             putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
             putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
+            putBoolean("preventPowerOff", BlockerStore.preventPowerOff(ctx))
         })
+    }
+
+    @ReactMethod
+    fun setPreventPowerOff(enabled: Boolean, promise: Promise) {
+        if (!enabled && BlockerStore.preventPowerOff(ctx) && !BlockerStore.guardOpen(ctx, "power_menu")) {
+            promise.reject("LOCKED", "Disabling Power Menu shield requires the 2-hour delay timer.")
+            return
+        }
+        BlockerStore.setPreventPowerOff(ctx, enabled)
+        promise.resolve(true)
     }
 
     // ---------- Event Emitter support ----------
