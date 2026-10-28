@@ -639,3 +639,23 @@ export async function setGranularFocusToggle(key: GranularFocusKey, on: boolean)
     t: 'granular_focus_disable', v: key, label: GRANULAR_LABEL[key]
   });
 }
+
+// ---------- Popup Language Selection ----------
+
+export async function getPopupLanguage(): Promise<'en' | 'bn'> {
+  try {
+    return (await Native.getPopupLanguage()) || 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+export async function setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean> {
+  try {
+    const res = await Native.setPopupLanguage(lang);
+    await refresh();
+    return res;
+  } catch {
+    return false;
+  }
+}

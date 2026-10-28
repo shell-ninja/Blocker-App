@@ -4,7 +4,7 @@ import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-re
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
-import { deactivateDeviceOwner, setDelay, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
+import { deactivateDeviceOwner, getPopupLanguage, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
@@ -36,6 +36,20 @@ export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const isAhead = update.release ? compareSemVer(APP_VERSION, update.release.version) > 0 : false;
   const [cacheStats, setCacheStats] = useState<{ fileCount: number; totalBytes: number }>({ fileCount: 0, totalBytes: 0 });
+  const [popupLang, setPopupLang] = useState<'en' | 'bn'>('en');
+
+  useEffect(() => {
+    getPopupLanguage().then(setPopupLang).catch(() => {});
+  }, []);
+
+  const handleSetPopupLanguage = async (lang: 'en' | 'bn') => {
+    setPopupLang(lang);
+    try {
+      await setPopupLanguage(lang);
+    } catch (e) {
+      showAlert('Error', errMsg(e));
+    }
+  };
 
   useEffect(() => {
     update.getCacheStats().then(setCacheStats).catch(() => {});
@@ -258,6 +272,57 @@ export default function SettingsScreen() {
         </View>
         <Sub>Lengthening applies immediately; shortening is protected by the active delay.</Sub>
         <LockBar lockKey="delay_duration" />
+      </Card>
+
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <Title icon={Icons.layers}>Popup Messages Language</Title>
+          <Badge label={popupLang === 'bn' ? 'বাংলা' : 'English'} tone="ok" />
+        </View>
+        <Sub>
+          Choose the language for blocker warning overlays, Quranic verses, and Hadiths (app UI remains in English).
+        </Sub>
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+          <Pressable
+            onPress={() => handleSetPopupLanguage('en')}
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              borderRadius: 10,
+              borderWidth: 1.5,
+              borderColor: popupLang === 'en' ? t.accent : t.border,
+              backgroundColor: popupLang === 'en' ? t.accentSoft : 'transparent',
+              alignItems: 'center'
+            }}>
+            <Text style={{ color: popupLang === 'en' ? t.accent : t.text, fontWeight: '700', fontSize: 14 }}>
+              English
+            </Text>
+            <Text style={{ color: t.sub, fontSize: 11, marginTop: 2 }}>
+              Fear Allah
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => handleSetPopupLanguage('bn')}
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              borderRadius: 10,
+              borderWidth: 1.5,
+              borderColor: popupLang === 'bn' ? t.accent : t.border,
+              backgroundColor: popupLang === 'bn' ? t.accentSoft : 'transparent',
+              alignItems: 'center'
+            }}>
+            <Text style={{ color: popupLang === 'bn' ? t.accent : t.text, fontWeight: '700', fontSize: 14 }}>
+              বাংলা (Bangla)
+            </Text>
+            <Text style={{ color: t.sub, fontSize: 11, marginTop: 2 }}>
+              আল্লাহকে ভয় করুন
+            </Text>
+          </Pressable>
+        </View>
       </Card>
 
       <Card>

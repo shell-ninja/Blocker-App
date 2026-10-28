@@ -57,6 +57,7 @@ export interface Stats {
   studyFocusMinutes: number;
   studyBreakMinutes: number;
   preventPowerOff?: boolean;
+  popupLanguage?: 'en' | 'bn';
 }
 export interface GranularFocusToggles {
   block_fb_reels: boolean;
@@ -139,6 +140,8 @@ interface BlockerNativeSpec {
   isDeviceOwner(): Promise<boolean>;
   removeDeviceOwner(): Promise<boolean>;
   setPreventPowerOff(enabled: boolean): Promise<boolean>;
+  getPopupLanguage(): Promise<'en' | 'bn'>;
+  setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;

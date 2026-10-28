@@ -125,3 +125,11 @@ print(
     f"Imported {len(domains)} websites, {len(keywords)} keywords, {len(tlds)} TLDs, "
     f"{len(whitelist)} whitelist phrases"
 )
+
+try:
+    from compile_blocklist_bin import compile_binary
+    out_asset = here / "source" / "android" / "assets" / "blocklist.bin"
+    compile_binary(domains, keywords, out_asset)
+except Exception as e:
+    print(f"Warning: could not pre-compile blocklist.bin: {e}")
+

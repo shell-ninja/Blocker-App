@@ -30,16 +30,30 @@ for kt in (src / "android").glob("*.kt"):
 for ks in (src / "android").glob("*.keystore"):
     shutil.copy(ks, proj / "android" / "app" / ks.name)
 
+# 2b. Native C++ engine (CMake + C++ sources)
+cpp_src = src / "android" / "cpp"
+if cpp_src.exists():
+    cpp_dest = main / "cpp"
+    shutil.copytree(cpp_src, cpp_dest, dirs_exist_ok=True)
+
+# 2c. Pre-compiled binary assets
+assets_src = src / "android" / "assets"
+if assets_src.exists():
+    assets_dest = main / "assets"
+    shutil.copytree(assets_src, assets_dest, dirs_exist_ok=True)
+
+
+
 # 3. XML resources
 xml_dir = main / "res" / "xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewLongClicked|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="50"
+    android:notificationTimeout="0"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
@@ -242,6 +256,15 @@ if "BootReceiver" not in t:
             <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
         </intent-filter>
     </receiver>""")
+if "BlockerVpnService" not in t:
+    extra_components.append("""    <service
+        android:name=".BlockerVpnService"
+        android:exported="false"
+        android:permission="android.permission.BIND_VPN_SERVICE">
+        <intent-filter>
+            <action android:name="android.net.VpnService"/>
+        </intent-filter>
+    </service>""")
 if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)
@@ -314,16 +337,57 @@ if "versionCodeOverride" not in g:
 }
 """
     g = re.sub(r"\n\}\s*\n(dependencies\s*\{)", variant_hook + r"\1", g, count=1)
+
+if "externalNativeBuild" not in g:
+    cmake_block = """
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
+"""
+    g = re.sub(r"(defaultConfig\s*\{)", r"\1" + cmake_block, g, count=1)
+    cmake_root = """
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+            version "3.22.1"
+        }
+    }
+"""
+    g = re.sub(r"(buildTypes\s*\{)", cmake_root + r"\1", g, count=1)
 write(gr, g)
 
-# 6. Register the native package
+# 6. Decouple React Native in MainApplication.kt and register native package
 a = read(app_kt)
+if "val reactNativeHost: ReactNativeHost =" in a:
+    a = re.sub(
+        r"override\s+val\s+reactNativeHost:\s*ReactNativeHost\s*=\s*(object\s*:\s*DefaultReactNativeHost\(this\)\s*\{[\s\S]*?\n\s*\})",
+        r"override val reactNativeHost: ReactNativeHost by lazy {\n      \1\n  }",
+        a,
+        count=1
+    )
+if "ReactNativeFlipper.initializeFlipper(this, reactNativeHost.reactInstanceManager)" in a:
+    a = a.replace("ReactNativeFlipper.initializeFlipper(this, reactNativeHost.reactInstanceManager)", "// ReactNativeFlipper.initializeFlipper(this, reactNativeHost.reactInstanceManager)")
+if "NativeBlockerBridge.load" not in a:
+    a = re.sub(
+        r"(super\.onCreate\(\))",
+        r'\1\n    val binFile = java.io.File(filesDir, "blocklist.bin")\n    if (!binFile.exists()) { runCatching { assets.open("blocklist.bin").use { it.copyTo(binFile.outputStream()) } } }\n    if (binFile.exists()) { NativeBlockerBridge.load(binFile) }',
+        a,
+        count=1
+    )
+
 if "BlockerPackage()" not in a:
     a, n = re.subn(r"//\s*add\(MyReactNativePackage\(\)\)", "add(BlockerPackage())", a, count=1)
     if n:
         write(app_kt, a)
     else:
         warnings.append(f"Add `add(BlockerPackage())` inside PackageList(this).packages.apply {{ ... }} in {app_kt}")
+else:
+    write(app_kt, a)
 
 print("Patched project:", proj)
 for w in warnings:
