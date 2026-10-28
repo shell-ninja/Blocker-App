@@ -252,6 +252,12 @@ object BlockerStore {
         updateIntegrityHmac(c)
     }
 
+    fun popupLanguage(c: Context): String = prefs(c).getString("popup_language", "en") ?: "en"
+
+    fun setPopupLanguage(c: Context, lang: String) {
+        prefs(c).edit().putString("popup_language", if (lang == "bn") "bn" else "en").apply()
+    }
+
     fun delayDays(c: Context) = prefs(c).getInt("delay_days", 1)
     // Debug builds shorten every "day" to one minute so the timers can be tested quickly.
     fun delayMs(c: Context): Long {
@@ -259,7 +265,38 @@ object BlockerStore {
         return delayDays(c) * (if (debug) 60_000L else DAY_MS)
     }
     fun set(c: Context, key: String): Set<String> = prefs(c).getStringSet(key, emptySet())?.toSet() ?: emptySet()
-    fun putSet(c: Context, key: String, v: Set<String>) = prefs(c).edit().putStringSet(key, v).apply()
+    fun putSet(c: Context, key: String, v: Set<String>) {
+        prefs(c).edit().putStringSet(key, v).apply()
+        if (key == "domains" || key == "keywords") {
+            syncBinaryBlocklist(c)
+        }
+    }
+
+    fun syncBinaryBlocklist(c: Context) {
+        Executors.newSingleThreadExecutor().execute {
+            try {
+                val binFile = File(c.filesDir, "blocklist.bin")
+                if (!binFile.exists()) {
+                    try {
+                        c.assets.open("blocklist.bin").use { input ->
+                            binFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+                val d = set(c, "domains").toTypedArray()
+                val k = (set(c, "keywords") - RETIRED_KEYWORDS).toTypedArray()
+                if (d.isNotEmpty() || k.isNotEmpty()) {
+                    if (NativeBlockerBridge.compileBinary(d, k, binFile.absolutePath)) {
+                        NativeBlockerBridge.load(binFile)
+                    }
+                } else if (binFile.exists() && !NativeBlockerBridge.isEngineReady()) {
+                    NativeBlockerBridge.load(binFile)
+                }
+            } catch (_: Throwable) {}
+        }
+    }
 
     /** Apps blocked out of the box. Mirrored by DEFAULT_BLOCKED_APPS in ProtectionManager.ts. */
     val DEFAULT_BLOCKED_APPS = setOf("com.streamdev.aiostreamer", "org.xbmc.kodi")
@@ -1508,7 +1545,19 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
             putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
             putBoolean("preventPowerOff", BlockerStore.preventPowerOff(ctx))
+            putString("popupLanguage", BlockerStore.popupLanguage(ctx))
         })
+    }
+
+    @ReactMethod
+    fun getPopupLanguage(promise: Promise) {
+        promise.resolve(BlockerStore.popupLanguage(ctx))
+    }
+
+    @ReactMethod
+    fun setPopupLanguage(lang: String, promise: Promise) {
+        BlockerStore.setPopupLanguage(ctx, if (lang == "bn") "bn" else "en")
+        promise.resolve(true)
     }
 
     @ReactMethod
@@ -2040,8 +2089,71 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 }
 
+class BlockerCompilerModule(reactContext: ReactApplicationContext) :
+    ReactContextBaseJavaModule(reactContext) {
+
+    private val executor = Executors.newSingleThreadExecutor()
+
+    override fun getName(): String = "BlockerCompilerModule"
+
+    @ReactMethod
+    fun compileAndSyncBlocklist(
+        domains: ReadableArray,
+        keywords: ReadableArray,
+        promise: Promise
+    ) {
+        executor.execute {
+            try {
+                val domainList = Array(domains.size()) { domains.getString(it) ?: "" }
+                val keywordList = Array(keywords.size()) { keywords.getString(it) ?: "" }
+
+                val binFile = File(reactApplicationContext.filesDir, "blocklist.bin")
+                val success = NativeBlockerBridge.compileBinary(
+                    domainList,
+                    keywordList,
+                    binFile.absolutePath
+                )
+
+                if (success) {
+                    NativeBlockerBridge.load(binFile)
+                    promise.resolve(true)
+                } else {
+                    promise.reject("COMPILE_ERROR", "Failed to compile blocklist binary")
+                }
+            } catch (e: Exception) {
+                promise.reject("ERROR", e.localizedMessage)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun syncCurrentStore(promise: Promise) {
+        executor.execute {
+            try {
+                val ctx = reactApplicationContext
+                val domains = BlockerStore.set(ctx, "domains").toTypedArray()
+                val keywords = (BlockerStore.set(ctx, "keywords") - RETIRED_KEYWORDS).toTypedArray()
+                val binFile = File(ctx.filesDir, "blocklist.bin")
+                val success = NativeBlockerBridge.compileBinary(
+                    domains,
+                    keywords,
+                    binFile.absolutePath
+                )
+                if (success) {
+                    NativeBlockerBridge.load(binFile)
+                    promise.resolve(true)
+                } else {
+                    promise.reject("COMPILE_ERROR", "Failed to compile store to binary")
+                }
+            } catch (e: Exception) {
+                promise.reject("ERROR", e.localizedMessage)
+            }
+        }
+    }
+}
+
 class BlockerPackage : ReactPackage {
     override fun createNativeModules(rc: ReactApplicationContext): List<NativeModule> =
-        listOf(BlockerNativeModule(rc), ProtectionModule(rc))
+        listOf(BlockerNativeModule(rc), ProtectionModule(rc), BlockerCompilerModule(rc))
     override fun createViewManagers(rc: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, ScrollView, Switch, Text, View } from 'react-native';
+import { AppState, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { PermissionKind, Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { markOnboarded, refresh, setProtection, setShield } from '../services/ProtectionManager';
+import { getPopupLanguage, markOnboarded, refresh, setPopupLanguage, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 
 const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: string; how: string }[] = [
@@ -40,10 +40,17 @@ const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: strin
 export default function OnboardingPermissions({ onDone }: { onDone: () => void }) {
   const t = useTheme();
   const { perms } = useProtection();
-  const [step, setStep] = useState<'permissions' | 'defaults'>('permissions');
+  const [step, setStep] = useState<'language' | 'permissions' | 'defaults'>('language');
+  const [selectedLang, setSelectedLang] = useState<'en' | 'bn'>('en');
   const [enableProtection, setEnableProtection] = useState(true);
   const [enableShield, setEnableShield] = useState(true);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getPopupLanguage().then(l => {
+      if (l === 'bn' || l === 'en') setSelectedLang(l);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const i = setInterval(() => refresh().catch(() => {}), 1500);
@@ -53,6 +60,13 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
       sub.remove();
     };
   }, []);
+
+  const handleSelectLanguage = async (lang: 'en' | 'bn') => {
+    setSelectedLang(lang);
+    try {
+      await setPopupLanguage(lang);
+    } catch {}
+  };
 
   const granted = (k: PermissionKind) => !!perms?.[k];
   const all = STEPS.every(s => granted(s.kind));
@@ -90,6 +104,139 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
       setLoading(false);
     }
   };
+
+  // Step 0: Initial Language Selection for Blocker Popups
+  if (step === 'language') {
+    return (
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Title size={26} icon={Icons.shieldOn}>Popup Message Language</Title>
+        <Text style={{ color: t.sub, marginTop: 6, marginBottom: 20, lineHeight: 21 }}>
+          Choose your preferred language for the blocker warning popups, Quranic reminders, and Hadiths.
+          {'\n'}(The main application settings and navigation remain in English.)
+        </Text>
+
+        {/* Option 1: English */}
+        <Pressable
+          onPress={() => handleSelectLanguage('en')}
+          style={{ marginBottom: 14 }}>
+          <Card
+            style={{
+              borderColor: selectedLang === 'en' ? t.accent : t.cardBorder,
+              borderWidth: selectedLang === 'en' ? 2 : 1,
+              backgroundColor: selectedLang === 'en' ? t.accentSoft : t.card
+            }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    borderWidth: 2,
+                    borderColor: selectedLang === 'en' ? t.accent : t.sub,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                  {selectedLang === 'en' && (
+                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.accent }} />
+                  )}
+                </View>
+                <Title size={18}>English</Title>
+              </View>
+              {selectedLang === 'en' && <Badge label="Selected" tone="ok" />}
+            </View>
+
+            <Sub>Displays verses & Hadiths in English:</Sub>
+            <View
+              style={{
+                marginTop: 10,
+                padding: 12,
+                borderRadius: 10,
+                backgroundColor: 'rgba(0,0,0,0.25)',
+                borderLeftWidth: 3,
+                borderLeftColor: selectedLang === 'en' ? t.accent : t.border
+              }}>
+              <Text style={{ color: '#F3F0FF', fontWeight: '700', fontSize: 13, marginBottom: 3 }}>
+                🛡️ Fear Allah
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 12, fontStyle: 'italic', lineHeight: 17 }}>
+                “Does he not know that Allah sees?”
+                {'\n'}— Surah Al-Alaq (96:14)
+              </Text>
+              <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                <Text style={{ color: t.accent, fontSize: 11, fontWeight: '700' }}>[ Astaghfirullah ]</Text>
+              </View>
+            </View>
+          </Card>
+        </Pressable>
+
+        {/* Option 2: বাংলা (Bangla) */}
+        <Pressable
+          onPress={() => handleSelectLanguage('bn')}
+          style={{ marginBottom: 20 }}>
+          <Card
+            style={{
+              borderColor: selectedLang === 'bn' ? t.accent : t.cardBorder,
+              borderWidth: selectedLang === 'bn' ? 2 : 1,
+              backgroundColor: selectedLang === 'bn' ? t.accentSoft : t.card
+            }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    borderWidth: 2,
+                    borderColor: selectedLang === 'bn' ? t.accent : t.sub,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                  {selectedLang === 'bn' && (
+                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.accent }} />
+                  )}
+                </View>
+                <Title size={18}>বাংলা (Bangla)</Title>
+              </View>
+              {selectedLang === 'bn' && <Badge label="নির্বাচিত" tone="ok" />}
+            </View>
+
+            <Sub>পপআপে পবিত্র কুরআনের আয়াত ও হাদিস বাংলায় প্রদর্শিত হবে:</Sub>
+            <View
+              style={{
+                marginTop: 10,
+                padding: 12,
+                borderRadius: 10,
+                backgroundColor: 'rgba(0,0,0,0.25)',
+                borderLeftWidth: 3,
+                borderLeftColor: selectedLang === 'bn' ? t.accent : t.border
+              }}>
+              <Text style={{ color: '#F3F0FF', fontWeight: '700', fontSize: 13, marginBottom: 3 }}>
+                🛡️ আল্লাহকে ভয় করুন
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 12, lineHeight: 18 }}>
+                “সে কি জানে না যে, নিশ্চয়ই আল্লাহ সবকিছু দেখেন?”
+                {'\n'}— সূরা আল-আলাক (৯৬:১৪)
+              </Text>
+              <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                <Text style={{ color: t.accent, fontSize: 11, fontWeight: '700' }}>[ আস্তাগফিরুল্লাহ ]</Text>
+              </View>
+            </View>
+          </Card>
+        </Pressable>
+
+        <Text style={{ color: t.sub, fontSize: 12, textAlign: 'center', marginBottom: 14 }}>
+          💡 You can change this language setting at any time from Settings.
+        </Text>
+
+        <Btn
+          label={selectedLang === 'bn' ? 'এগিয়ে যান / Continue to Setup' : 'Continue to Setup'}
+          icon={Icons.chevronRight}
+          onPress={() => setStep('permissions')}
+        />
+      </ScrollView>
+    );
+  }
 
   // Step 2: Guide user on which buttons to enable by default
   if (step === 'defaults') {
@@ -153,8 +300,24 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
   // Step 1: Required system permissions
   return (
     <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <Title size={26} icon={Icons.shieldOn}>Set up Blocker</Title>
-      <Text style={{ color: t.sub, marginTop: 6, marginBottom: 20, lineHeight: 20 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <Title size={26} icon={Icons.shieldOn}>Set up Blocker</Title>
+        <Pressable
+          onPress={() => setStep('language')}
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 8,
+            backgroundColor: t.accentSoft,
+            borderWidth: 1,
+            borderColor: t.accent
+          }}>
+          <Text style={{ color: t.accent, fontSize: 12, fontWeight: '700' }}>
+            {selectedLang === 'bn' ? 'ভাষা: বাংলা' : 'Lang: English'}
+          </Text>
+        </Pressable>
+      </View>
+      <Text style={{ color: t.sub, marginTop: 4, marginBottom: 20, lineHeight: 20 }}>
         Grant these four permissions. Status updates live when you return to the app.
       </Text>
 

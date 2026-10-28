@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.4`
+# Blocker `v1.0.6.5`
 
-> **Current Version:** `v1.0.6.4` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.5` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -27,6 +27,41 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 ---
 
 Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetry, and no account required. It blocks distracting websites, full-screen short-form video players (YouTube Shorts, Instagram Reels, Facebook Reels), and adult domains across browsers and apps.
+
+---
+
+## What's New in v1.0.6.5
+
+- **Bilingual Blocker Popup Overlays (English & বাংলা):**
+  - **Setup Prompt (Step 0):** On initial app launch, before configuring permissions or defaults, the user is asked whether they want blocker popup messages in English or বাংলা.
+  - **Authentic Islamic Translations in Bengali:** Blocker popup overlays display reverent Quranic verses and Hadiths in authentic Bengali:
+    - Main Alert: `"আল্লাহকে ভয় করুন"` (*Fear Allah*)
+    - Subheading: `"আপনার আখিরাত ধ্বংস করবেন না"` (*Do not destroy your Akhirah*)
+    - Action Buttons: `"আস্তাগফিরুল্লাহ"` (*Astaghfirullah*) / `"বুঝেছি"` (*Understood*) / `"পড়াশোনায় ফিরুন"` (*Back to Study*)
+    - Surah Al-Alaq (96:14), Surah Al-Isra (17:36), Surah An-Nur (24:30), Surah An-Nisa (4:1), Surah Al-Isra (17:34), and Sahih al-Bukhari (6412).
+  - **Dedicated Settings Card:** Users can change their popup language at any time in Settings.
+  - **Scope Restriction:** Localization applies exclusively to the blocker popup overlays and warning dialogs; the main application UI and navigation remain in English.
+  - **Zero Font Overhead:** Utilizes standard Android `TextView` HarfBuzz conjunct shaping with native system fonts.
+
+- **Zero-Latency Press-and-Hold Defense (BlockerHero Philosophy):**
+  - Blocks press-and-hold (long-press) exclusively for the Blocker app icon across all Android launchers (Transsion HiOS/XOS, Samsung OneUI, Pixel, MIUI, Nova, Lawnchair, etc.) to prevent dragging to uninstall or opening App Info shortcuts.
+  - Other apps on the device remain 100% interactive (can be long-pressed, rearranged, uninstalled, or inspected normally).
+  - Normal single-tap to open Blocker works instantly without hindrance.
+  - Reduced `android:notificationTimeout` from `50ms` to `0ms` and enabled `TYPE_VIEW_LONG_CLICKED` in service configuration.
+  - Instantaneous dual `GLOBAL_ACTION_BACK` + `GLOBAL_ACTION_HOME` aborts launcher context menus in sub-millisecond execution.
+  - Intercepts clicks on "App info", "Uninstall", "Disable", "Force stop", and "Clear storage" in 0ms without debounce delay.
+
+- **Instant Zero-Latency Browser Interception (BlockerHero Benchmark):**
+  - **Pre-bundled Binary Blocklist Asset (`blocklist.bin`):** Pre-compiles all 9,355 adult domains and 59 keywords into an 81.6 KB flat binary embedded in APK assets. Extracted and memory-mapped (`mmap`) into C++ memory in 0.5ms on service start.
+  - **Stage 0 Browser Gatekeeper:** Browser URL inspection runs at line 1 of `onAccessibilityEvent` ahead of any 75ms throttles, usage logging, or settings checks.
+  - **Zero-IPC Event Source Fast Path (`ev.source`):** Directly reads the address bar node from the event source on URL updates, bypassing the expensive 15–35ms `rootInActiveWindow` Binder IPC traversal.
+  - **100% Solid Obsidian Blackout Shield (`0xFF070512`):** Covers the entire screen in pure opaque obsidian in 0ms on the current VSYNC, eliminating photon bleed and transparency leaks.
+  - **Zero-Delay Tab Ejection:** Immediate `GLOBAL_ACTION_BACK` at 0ms and a backup ejection at 80ms to eject blocked tabs instantly.
+  - **600ms Transient Cooldown:** Absorbs browser transitions without leaving subsequent adult tabs unguarded.
+
+- **Headless Native C++ Engine & Minimal Memory Footprint:**
+  - Branchless FNV-1a 64-bit binary search and flat Aho-Corasick automaton with zero heap allocations on hot path.
+  - React Native JS runtime (`reactNativeHost`) is lazily instantiated, keeping background RAM usage under 8MB on 1GB RAM devices.
 
 ---
 

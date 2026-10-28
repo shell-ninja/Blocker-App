@@ -33,6 +33,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.view.animation.LinearInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -349,6 +350,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var appVersionName: String = ""    // what Settings shows as the app's version
     @Volatile private var lastAppInfoKick = 0L
     @Volatile private var lastHideKick = 0L
+    @Volatile private var lastBlockerLongPressUp = 0L
     private val appInfoLock = Any()
     private var appInfoCandidatePkg = ""                 // guarded by appInfoLock
     private var appInfoHotUntil = 0L                     // guarded by appInfoLock (uptime ms)
@@ -619,12 +621,12 @@ class BlockerAccessibilityService : AccessibilityService() {
     /** Direct kick used by the poll loop — auto-cancels any dialog and forces Home immediately. */
     private fun pollKick(message: String) {
         val now = System.currentTimeMillis()
-        if (now - lastPollKick < 1000L) return
-        lastPollKick = now
         runCatching { autoCancelDialog(rootInActiveWindow) }
         kickToHome()
+        if (now - lastPollKick < 1000L) return
+        lastPollKick = now
         BlockerStore.incr(this, "tamper")
-        showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+        showOverlay(getTamperHeading(), formatTamperCovenantBody(message), 5000, getTamperSubheading(), getUnderstoodButton())
     }
 
     /**
@@ -792,10 +794,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (activePkg != null && activePkg in apps) {
                     hit(
                         "apps",
-                        "Fear Allah",
-                        "${labelOf(activePkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:34)",
-                        "Do not destroy your Akhirah",
-                        activePkg
+                        getFearAllahHeading(),
+                        formatBlockedAppBody(activePkg),
+                        getFearAllahSubheading(),
+                        activePkg,
+                        getAstaghfirullahButton()
                     )
                 }
             }
@@ -856,6 +859,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
+        runCatching {
+            val info = serviceInfo
+            if (info != null) {
+                info.notificationTimeout = 0L
+                info.eventTypes = info.eventTypes or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED
+                serviceInfo = info
+            }
+        }
         BlockerStore.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
         runCatching {
             val filter = IntentFilter().apply {
@@ -869,6 +880,22 @@ class BlockerAccessibilityService : AccessibilityService() {
             for (k in ADB_SETTING_KEYS) contentResolver.registerContentObserver(Settings.Global.getUriFor(k), false, adbObserver)
         }
         enforceAdbOff(notify = false)
+        val binFile = java.io.File(filesDir, "blocklist.bin")
+        if (!binFile.exists()) {
+            try {
+                assets.open("blocklist.bin").use { input ->
+                    binFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+        if (binFile.exists()) {
+            NativeBlockerBridge.load(binFile)
+        } else {
+            BlockerStore.syncBinaryBlocklist(this)
+        }
+        initPreInflatedOverlay()
         main.post(appLimitWatchdog)
         main.post(appBlockWatchdog)
     }
@@ -888,6 +915,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             appInfoLoopRunning = false
         }
         removeOverlay()
+        preInflatedOverlay?.let { v ->
+            runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
+        }
+        preInflatedOverlay = null
+        NativeBlockerBridge.unload()
         super.onDestroy()
     }
 
@@ -1245,10 +1277,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             val limitStr = formatLimitDuration(limitMin)
             hit(
                 "apps",
-                "Fear Allah",
-                "${labelOf(pkg)} has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
-                "Do not destroy your Akhirah",
-                pkg
+                getFearAllahHeading(),
+                formatAppUsageLimitBody(pkg, limitStr),
+                getFearAllahSubheading(),
+                pkg,
+                getAstaghfirullahButton()
             )
             return true
         }
@@ -1270,16 +1303,25 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return
             }
 
+            // --- 0MS TOP-PRIORITY INTERCEPT: Launcher press-and-hold & shortcut protection ---
+            if (guardLauncherInstant(ev, pkg)) return
+
             // INSTANT PRIORITY INTERCEPT: Blocked apps are kicked out immediately before any other checks
             if (BlockerStore.active(this) && pkg in apps) {
                 hit(
                     "apps",
-                    "Fear Allah",
-                    "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:34)",
-                    "Do not destroy your Akhirah",
-                    pkg
+                    getFearAllahHeading(),
+                    formatBlockedAppBody(pkg),
+                    getFearAllahSubheading(),
+                    pkg,
+                    getAstaghfirullahButton()
                 )
                 return
+            }
+
+            // --- 0MS ZERO-LATENCY BROWSER GATEKEEPER: Instant check before throttles, usage, or settings ---
+            if (BlockerStore.active(this) && pkg in BROWSER_URL_IDS) {
+                if (checkBrowserFast(pkg, ev)) return
             }
 
             val now = System.currentTimeMillis()
@@ -1340,7 +1382,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
                         kickToHome()
                         BlockerStore.incr(this, "tamper")
-                        showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                        showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                         return
                     }
                 }
@@ -1470,7 +1512,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     evCls.contains("TimePicker", ignoreCase = true) || rootCls.contains("TimePicker", ignoreCase = true)) {
                     kickToHome()
                     BlockerStore.incr(this, "tamper")
-                    showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                    showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                     return
                 }
             }
@@ -1481,7 +1523,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (isScheduledPowerSettingsScreen(rootNow, winTitle, evCls, pkg)) {
                     kickToHome()
                     BlockerStore.incr(this, "tamper")
-                    showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+                    showOverlay(getTamperHeading(), formatScheduledPowerLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                     return
                 }
             }
@@ -1491,14 +1533,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             pkg in apps -> {
                 hit(
                     "apps",
-                    "Fear Allah",
-                    "${labelOf(pkg)} is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:36)",
-                    "Do not destroy your Akhirah",
-                    pkg
+                    getFearAllahHeading(),
+                    formatBlockedAppBody(pkg),
+                    getFearAllahSubheading(),
+                    pkg,
+                    getAstaghfirullahButton()
                 )
                 return
             }
-            pkg in BROWSER_URL_IDS -> if (checkBrowser(pkg)) return
+            pkg in BROWSER_URL_IDS -> if (checkBrowserFast(pkg, ev)) return
             isSettingsPkg(pkg) -> {
                 startSettingsPoll()   // start continuous 200-ms guard whenever we enter settings
                 checkSettings(ev)
@@ -1597,13 +1640,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             val isBreak = BlockerStore.studyIsBreak(this)
             val cur = BlockerStore.studyCurrentRound(this)
             val tot = BlockerStore.studyTotalRounds(this)
-            val phase = if (isBreak) "Break Time" else "Round $cur of $tot"
+            val phase = if (isBreak) (if (isBangla()) "বিরতির সময়" else "Break Time") else (if (isBangla()) "রাউন্ড $cur / $tot" else "Round $cur of $tot")
             showOverlay(
-                "Study Mode Active",
-                "Full phone lockdown is active for your Pomodoro study session ($phase • ${studyLeftText()}).\n\nAll other apps, settings, quick toggles, and notifications are blocked until you finish.\n\n“The two blessings which many people lose are: health and free time for doing good.”\n— Sahih al-Bukhari",
+                if (isBangla()) "স্টাডি মোড সক্রিয়" else "Study Mode Active",
+                formatStudyModeBody(phase, studyLeftText()),
                 4000,
-                "Stay dedicated to your session",
-                "Back to Study"
+                if (isBangla()) "আপনার অধ্যয়নে মনোযোগী থাকুন" else "Stay dedicated to your session",
+                if (isBangla()) "পড়াশোনায় ফিরুন" else "Back to Study"
             )
         } else {
             performGlobalAction(GLOBAL_ACTION_HOME)
@@ -1628,10 +1671,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!trusted) return false
         hit(
             "focus",
-            "Focus Mode Active",
-            "Only your essential apps are available (${leftText()} remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith",
-            "Guard your time for what benefits you",
-            pkg
+            if (isBangla()) "ফোকাস মোড সক্রিয়" else "Focus Mode Active",
+            formatFocusModeBody(leftText()),
+            if (isBangla()) "কল্যাণকর কাজে সময় ব্যয় করুন" else "Guard your time for what benefits you",
+            pkg,
+            getUnderstoodButton()
         )
         return true
     }
@@ -1644,35 +1688,101 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     // ---------- URL bar ----------
 
-    private fun checkBrowser(pkg: String): Boolean {
+    private var lastCheckedUrlHash = 0L
+    private val reusableCharBuffer = CharArray(2048)
+
+    private fun checkBrowserFast(pkg: String, ev: AccessibilityEvent): Boolean {
         if (System.currentTimeMillis() < (quietUntil[pkg] ?: 0L)) return true
+        val targetIds = BROWSER_URL_IDS[pkg] ?: return false
+
+        // 1. Ultra-fast path: Check ev.source directly to bypass rootInActiveWindow Binder IPC
+        val src = ev.source
+        if (src != null) {
+            try {
+                val srcId = src.viewIdResourceName
+                if (srcId != null && srcId in targetIds) {
+                    val text = src.text
+                    if (text != null && text.isNotEmpty()) {
+                        if (checkUrlText(text, pkg)) return true
+                    }
+                } else {
+                    for (id in targetIds) {
+                        val subNodes = src.findAccessibilityNodeInfosByViewId(id)
+                        if (!subNodes.isNullOrEmpty()) {
+                            var matched = false
+                            val t = subNodes[0].text
+                            if (t != null && t.isNotEmpty()) {
+                                matched = checkUrlText(t, pkg)
+                            }
+                            for (n in subNodes) recycleNode(n)
+                            if (matched) return true
+                        }
+                    }
+                }
+            } finally {
+                recycleNode(src)
+            }
+        }
+
+        // 2. Fallback: inspect root window if event source didn't hold the address bar
         val root = rootInActiveWindow ?: return false
         if (root.packageName?.toString() != pkg) {
-            runCatching { root.recycle() }
+            recycleNode(root)
             return false
         }
         try {
-            for (id in BROWSER_URL_IDS[pkg].orEmpty()) {
+            for (id in targetIds) {
                 val nodes = root.findAccessibilityNodeInfosByViewId(id)
-                var rule: String? = null
                 if (!nodes.isNullOrEmpty()) {
-                    val text = nodes.firstOrNull()?.text?.toString()
-                    for (n in nodes) runCatching { n.recycle() }
-                    if (!text.isNullOrBlank()) rule = matchAddress(text)
-                }
-                if (rule != null) {
-                    redirectBrowser(
-                        pkg,
-                        "sites",
-                        "Fear Allah",
-                        "“$rule” was blocked to safeguard your modesty and purity.\n\n“Does he not know that Allah sees?”\n— Surah Al-Alaq (96:14)",
-                        "Do not destroy your Akhirah"
-                    )
-                    return true
+                    var matched = false
+                    val target = nodes[0]
+                    val text = target.text
+                    if (text != null && text.isNotEmpty()) {
+                        matched = checkUrlText(text, pkg)
+                    }
+                    for (n in nodes) recycleNode(n)
+                    if (matched) return true
                 }
             }
         } finally {
-            runCatching { root.recycle() }
+            recycleNode(root)
+        }
+        return false
+    }
+
+    private fun checkUrlText(text: CharSequence, pkg: String): Boolean {
+        val len = minOf(text.length, reusableCharBuffer.size)
+        for (i in 0 until len) {
+            reusableCharBuffer[i] = text[i]
+        }
+        // STAGE 3: Deduplicate identical events via FNV-1a 64-bit hash
+        val currentHash = NativeBlockerBridge.computeFnv1a(reusableCharBuffer, len)
+        if (currentHash == lastCheckedUrlHash) {
+            return false
+        }
+        lastCheckedUrlHash = currentHash
+
+        var rule: String? = null
+        // C++ Zero-Heap mmap engine check (sub-microsecond)
+        if (NativeBlockerBridge.isEngineReady()) {
+            if (NativeBlockerBridge.matchUrlFast(reusableCharBuffer, len)) {
+                rule = "Harmful URL"
+            }
+        }
+        if (rule == null) {
+            val str = text.toString()
+            if (str.isNotBlank()) rule = matchAddress(str)
+        }
+
+        if (rule != null) {
+            redirectBrowser(
+                pkg,
+                "sites",
+                getFearAllahHeading(),
+                formatBlockedUrlBody(rule),
+                getFearAllahSubheading()
+            )
+            return true
         }
         return false
     }
@@ -1708,17 +1818,42 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun scanScreen(pkg: String) {
         val root = rootInActiveWindow ?: return
-        if (root.packageName?.toString() != pkg) return
+        if (root.packageName?.toString() != pkg) {
+            recycleNode(root)
+            return
+        }
         val now = System.currentTimeMillis()
-        if (now < (quietUntil[pkg] ?: 0L)) return
-        if (now - (lastScan[pkg] ?: 0L) < SCAN_GAP_MS) return
+        if (now < (quietUntil[pkg] ?: 0L)) {
+            recycleNode(root)
+            return
+        }
+        if (now - (lastScan[pkg] ?: 0L) < SCAN_GAP_MS) {
+            recycleNode(root)
+            return
+        }
         lastScan[pkg] = now
 
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(800))
-        if (sb.isEmpty()) return
-        val kw = wholeWordHit(sb.toString().lowercase()) ?: return
-        screenHit(pkg, kw)
+        try {
+            val sb = StringBuilder()
+            collectText(root, sb, 0, intArrayOf(200))
+            if (sb.isEmpty()) return
+
+            if (NativeBlockerBridge.isEngineReady()) {
+                val len = minOf(sb.length, reusableCharBuffer.size)
+                for (i in 0 until len) {
+                    reusableCharBuffer[i] = sb[i]
+                }
+                if (NativeBlockerBridge.matchTextFast(reusableCharBuffer, len)) {
+                    screenHit(pkg, "Harmful Content")
+                    return
+                }
+            }
+
+            val kw = wholeWordHit(sb.toString().lowercase()) ?: return
+            screenHit(pkg, kw)
+        } finally {
+            recycleNode(root)
+        }
     }
 
     /**
@@ -1774,62 +1909,41 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun screenHit(pkg: String, kw: String) {
-        // a longer cooldown than the 1s scan gap: stops the same static or recurring text from
-        // re-triggering the popup over and over while the user is looking at (or reopens) that screen
-        quietUntil[pkg] = System.currentTimeMillis() + 5000
+        quietUntil[pkg] = System.currentTimeMillis() + 600L
         if (pkg in BROWSER_URL_IDS) {
             BlockerStore.incr(this, "screen")
-            if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
             showOverlay(
-                "Fear Allah",
-                "Inappropriate content was detected and redirected.\n\n“Tell the believing men to lower their gaze and guard their modesty. That is purer for them. Indeed, Allah is aware of what they do.”\n— Surah An-Nur (24:30)",
+                getFearAllahHeading(),
+                formatScreenHitBrowserBody(),
                 5000,
-                "Do not destroy your Akhirah",
-                "Astaghfirullah"
+                getFearAllahSubheading(),
+                getAstaghfirullahButton()
             )
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            main.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 80)
             return
         }
         BlockerStore.incr(this, "screen")
         showOverlay(
-            "Fear Allah",
-            "Inappropriate content appeared in ${labelOf(pkg)}, so it was closed.\n\n“Indeed, Allah is ever, over you, an Observer.”\n— Surah An-Nisa (4:1)",
+            getFearAllahHeading(),
+            formatScreenHitOtherAppBody(pkg),
             5000,
-            "Do not destroy your Akhirah",
-            "Astaghfirullah"
+            getFearAllahSubheading(),
+            getAstaghfirullahButton()
         )
         performGlobalAction(GLOBAL_ACTION_HOME)
     }
 
-    /** Sends the current tab straight to google.com. Browsers are never locked or held open. */
+    /** Immediately ejects the blocked browser tab and displays the opaque protection shield in 0ms. */
     private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String, subheading: String? = null) {
-        quietUntil[pkg] = System.currentTimeMillis() + 5000L
+        lastCheckedUrlHash = 0L
+        quietUntil[pkg] = System.currentTimeMillis() + 600L
         BlockerStore.incr(this, kind)
-        if (Build.VERSION.SDK_INT < 30 || !goToGoogle(pkg)) performGlobalAction(GLOBAL_ACTION_BACK)
-        showOverlay(heading, body, 5000, subheading, "Astaghfirullah")
-    }
-
-    @SuppressLint("NewApi")
-    private fun goToGoogle(pkg: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val id = BROWSER_URL_IDS[pkg].orEmpty()
-            .firstOrNull { root.findAccessibilityNodeInfosByViewId(it).isNotEmpty() } ?: return false
-        val bar = root.findAccessibilityNodeInfosByViewId(id).first()
-        bar.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        showOverlay(heading, body, 5000, subheading, getAstaghfirullahButton())
+        performGlobalAction(GLOBAL_ACTION_BACK)
         main.postDelayed({
-            val b2 = rootInActiveWindow?.findAccessibilityNodeInfosByViewId(id)?.firstOrNull() ?: return@postDelayed
-            val args = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, REDIRECT_URL)
-            }
-            if (!b2.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                performGlobalAction(GLOBAL_ACTION_BACK) // this browser's address bar can't be edited directly
-                return@postDelayed
-            }
-            main.postDelayed({
-                rootInActiveWindow?.findAccessibilityNodeInfosByViewId(id)?.firstOrNull()
-                    ?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
-            }, 150)
-        }, 150)
-        return true
+            performGlobalAction(GLOBAL_ACTION_BACK)
+        }, 80)
     }
 
     private fun labelOf(pkg: String): String = runCatching {
@@ -1868,7 +1982,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             } else {
                 performGlobalAction(GLOBAL_ACTION_BACK)
             }
-            showOverlay("🔐 Tamper Protection", "Debugging authorization is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay(getTamperHeading(), formatAdbLockedBody(), 5000, getTamperSubheading(), getUnderstoodButton())
             return true
         }
         return false
@@ -1937,11 +2051,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             BlockerStore.incr(this, "tamper")
 
             showOverlay(
-                "🔐 Power Off Locked",
-                "Powering off and restarting are locked for your protection.\n\nTake a breather and remain steadfast.",
+                if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
+                formatPowerOffLockedBody(),
                 4000,
-                "Protection Active",
-                "Understood"
+                getProtectionActiveSubheading(),
+                getUnderstoodButton()
             )
             return true
         }
@@ -2059,11 +2173,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             BlockerStore.incr(this, "tamper")
 
             showOverlay(
-                "🔐 Power Off Locked",
-                "Scheduled power off was cancelled for your protection.\n\nRemain steadfast.",
+                if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
+                if (isBangla()) "আপনার সুরক্ষার জন্য স্বয়ংক্রিয় পাওয়ার অফ বাতিল করা হয়েছে।\n\nঅবিচল থাকুন।" else "Scheduled power off was cancelled for your protection.\n\nRemain steadfast.",
                 5000,
-                "Protection Active",
-                "Understood"
+                getProtectionActiveSubheading(),
+                getUnderstoodButton()
             )
             return true
         }
@@ -2078,11 +2192,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             BlockerStore.incr(this, "tamper")
 
             showOverlay(
-                "🔐 Tamper Protection",
-                "Scheduled power off is locked while protection is active.",
+                getTamperHeading(),
+                formatScheduledPowerLockedBody(),
                 5000,
-                "Protection Active",
-                "Understood"
+                getProtectionActiveSubheading(),
+                getUnderstoodButton()
             )
             return true
         }
@@ -2294,7 +2408,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (dtOn && isDateTimeSettingsScreen(root, fullText)) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+            showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
             return
         }
 
@@ -2302,7 +2416,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (schOn && isScheduledPowerSettingsScreen(root, fullText, evCls, root.packageName?.toString().orEmpty())) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+            showOverlay(getTamperHeading(), formatScheduledPowerLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
             return
         }
 
@@ -2416,6 +2530,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (guardDateTimeRowClick(ev, pkg)) return
             if (guardScheduledPowerRowClick(ev, pkg)) return
+            if (guardDestructiveAppInfoClick(ev, pkg)) return
             guardBlockerRowClick(ev, pkg)
             return
         }
@@ -2576,7 +2691,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isHit) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+            showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
             return true
         }
         val src = ev.source
@@ -2592,7 +2707,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 runCatching { src.recycle() }
                 kickToHome()
                 BlockerStore.incr(this, "tamper")
-                showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                 return true
             }
 
@@ -2607,7 +2722,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     runCatching { src.recycle() }
                     kickToHome()
                     BlockerStore.incr(this, "tamper")
-                    showOverlay("🔐 Tamper Protection", "Date & Time settings are locked while protection is active to prevent clock tampering.", 5000, "Protection Active", "Understood")
+                    showOverlay(getTamperHeading(), formatDateTimeLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                     return true
                 }
             }
@@ -2641,7 +2756,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isHit) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+            showOverlay(getTamperHeading(), formatScheduledPowerLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
             return true
         }
 
@@ -2653,7 +2768,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (isScheduledPowerSettingsScreen(src, srcText, "", pkg)) {
                 kickToHome()
                 BlockerStore.incr(this, "tamper")
-                showOverlay("🔐 Tamper Protection", "Scheduled power off is locked while protection is active.", 5000, "Protection Active", "Understood")
+                showOverlay(getTamperHeading(), formatScheduledPowerLockedBody(), 5000, getProtectionActiveSubheading(), getUnderstoodButton())
                 return true
             }
         }
@@ -2689,16 +2804,32 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isTargetBlocker(ev: AccessibilityEvent, name: String): Boolean {
         val ver = appVersionName
+
+        fun matchesBlockerText(raw: String): Boolean {
+            val s = raw.trim()
+            if (s.isEmpty() || s.contains(".apk", ignoreCase = true)) return false
+            if (s.equals(name, ignoreCase = true) || s.equals("Blocker", ignoreCase = true)) return true
+            if (isAppNameText(s, name, ver) || isAppNameText(s, "Blocker", ver)) return true
+            val lower = s.lowercase()
+            for (prefix in listOf(name.lowercase(), "blocker")) {
+                if (lower.startsWith(prefix)) {
+                    if (lower.length == prefix.length) return true
+                    val sep = lower[prefix.length]
+                    if (sep in listOf(' ', ',', ':', '-', '·', '•', '\n', '\r', '(', '.')) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
         for (t in ev.text) {
             val s = t?.toString().orEmpty()
-            if (isAppNameText(s, name, ver) || s.equals(name, ignoreCase = true) || s.equals("Blocker", ignoreCase = true)) {
-                return true
-            }
+            if (matchesBlockerText(s)) return true
         }
         val cd = ev.contentDescription?.toString().orEmpty()
-        if (isAppNameText(cd, name, ver) || cd.equals(name, ignoreCase = true) || cd.equals("Blocker", ignoreCase = true)) {
-            return true
-        }
+        if (matchesBlockerText(cd)) return true
+
         val src = ev.source ?: return false
         try {
             // Direct row / node check
@@ -2814,6 +2945,231 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    /**
+     * 0MS ZERO-LATENCY LAUNCHER INTERCEPT:
+     * Directly intercepts long-press on Blocker icon and destructive shortcuts (App info, Uninstall, Delete)
+     * on launchers in under a millisecond, using pure in-memory string matching without synchronous Binder IPC.
+     */
+    private fun guardLauncherInstant(ev: AccessibilityEvent, pkg: String): Boolean {
+        val eventType = ev.eventType
+        if (eventType != AccessibilityEvent.TYPE_VIEW_LONG_CLICKED &&
+            eventType != AccessibilityEvent.TYPE_VIEW_CLICKED &&
+            eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            return false
+        }
+
+        if (!isLauncherPkg(pkg) && pkg !in launcherPackages() && pkg != "com.android.systemui" && pkg != "android") {
+            return false
+        }
+
+        if (!shieldEngaged()) return false
+
+        val nowUp = SystemClock.uptimeMillis()
+        val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
+        val nameLower = name.lowercase()
+
+        fun matchesBlockerFast(cs: CharSequence?): Boolean {
+            if (cs.isNullOrBlank()) return false
+            val s = cs.toString().trim()
+            if (s.contains(".apk", ignoreCase = true)) return false
+            val lower = s.lowercase()
+            if (lower == nameLower || lower == "blocker") return true
+            if (lower.startsWith(nameLower) || lower.startsWith("blocker")) {
+                val prefixLen = if (lower.startsWith(nameLower)) nameLower.length else 7
+                if (lower.length == prefixLen) return true
+                val sep = lower[prefixLen]
+                if (sep in listOf(' ', ',', ':', '-', '·', '•', '\n', '\r', '(', '.')) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        // Case A: Long-press on Launcher icon (TYPE_VIEW_LONG_CLICKED) -> Dismiss immediately in 0ms!
+        if (eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
+            var hit = false
+            for (t in ev.text) {
+                if (matchesBlockerFast(t)) { hit = true; break }
+            }
+            if (!hit && matchesBlockerFast(ev.contentDescription)) {
+                hit = true
+            }
+            if (!hit) {
+                val src = runCatching { ev.source }.getOrNull()
+                if (src != null) {
+                    try {
+                        hit = matchesBlockerFast(src.text) || matchesBlockerFast(src.contentDescription)
+                    } finally {
+                        runCatching { src.recycle() }
+                    }
+                }
+            }
+
+            if (hit) {
+                lastBlockerLongPressUp = nowUp
+                appInfoWatchUntil = nowUp + 15_000L
+                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+
+                // 0ms DISMISS: Execute back & home actions immediately
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                main.postDelayed({ runCatching { performGlobalAction(GLOBAL_ACTION_BACK) } }, 25L)
+                main.postDelayed({ runCatching { performGlobalAction(GLOBAL_ACTION_HOME) } }, 50L)
+
+                val nowWall = System.currentTimeMillis()
+                if (nowWall - lastHideKick > 1000L) {
+                    lastHideKick = nowWall
+                    BlockerStore.incr(this, "tamper")
+                    main.post {
+                        showOverlay(
+                            if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                            formatLauncherPressHoldBody(),
+                            5000,
+                            getProtectionActiveSubheading(),
+                            getUnderstoodButton()
+                        )
+                    }
+                }
+                return true
+            }
+        }
+
+        // Case B: Destructive shortcut clicked on launcher (App info, Uninstall, Delete, Remove)
+        if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 8000L)
+            fun isDestructiveWord(cs: CharSequence?): Boolean {
+                if (cs.isNullOrBlank()) return false
+                val lower = cs.toString().lowercase()
+                return lower.contains("app info") || lower.contains("app details") ||
+                    lower.contains("application info") || lower.contains("application details") ||
+                    lower.contains("uninstall") || lower.contains("delete") ||
+                    lower.contains("remove") || lower.contains("disable") ||
+                    lower.contains("freeze") || lower.contains("hide")
+            }
+
+            var isDestructiveShortcut = false
+            for (t in ev.text) {
+                if (isDestructiveWord(t)) { isDestructiveShortcut = true; break }
+            }
+            if (!isDestructiveShortcut && isDestructiveWord(ev.contentDescription)) {
+                isDestructiveShortcut = true
+            }
+
+            if (isDestructiveShortcut) {
+                var isTarget = recentlyLongPressed
+                if (!isTarget) {
+                    val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
+                    if (root != null) {
+                        try {
+                            val sb = StringBuilder()
+                            collectText(root, sb, 0, intArrayOf(20))
+                            val winText = sb.toString().lowercase()
+                            if (winText.contains("blocker") || winText.contains(nameLower)) {
+                                isTarget = true
+                            }
+                        } finally {
+                            runCatching { root.recycle() }
+                        }
+                    }
+                }
+
+                if (isTarget) {
+                    lastBlockerLongPressUp = nowUp
+                    appInfoWatchUntil = nowUp + 15_000L
+                    viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    main.postDelayed({ runCatching { performGlobalAction(GLOBAL_ACTION_BACK) } }, 25L)
+
+                    val nowWall = System.currentTimeMillis()
+                    if (nowWall - lastHideKick > 1000L) {
+                        lastHideKick = nowWall
+                        BlockerStore.incr(this, "tamper")
+                        main.post {
+                            showOverlay(
+                                if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                                if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো ও আনইনস্টল শর্টকাট লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info and uninstallation shortcuts are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                                5000,
+                                getProtectionActiveSubheading(),
+                                getUnderstoodButton()
+                            )
+                        }
+                    }
+                    return true
+                }
+            }
+        }
+
+        // Case C: Launcher popup window state changed after long press
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
+            if (recentlyLongPressed) {
+                val cls = ev.className?.toString()?.lowercase().orEmpty()
+                if (cls.contains("popup") || cls.contains("shortcut") || cls.contains("action") || cls.contains("menu")) {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    /**
+     * Intercepts clicking destructive buttons (Uninstall, Force stop, Disable, Clear storage, Deactivate)
+     * inside Settings App Info in 0ms!
+     */
+    private fun guardDestructiveAppInfoClick(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (!shieldEngaged()) return false
+        val clickText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
+        val isDestructive = clickText.contains("uninstall") || clickText.contains("force stop") ||
+            clickText.contains("disable") || clickText.contains("clear storage") ||
+            clickText.contains("clear data") || clickText.contains("manage space") ||
+            clickText.contains("deactivate")
+        if (!isDestructive) return false
+
+        val now = System.currentTimeMillis()
+        val recentlyActive = now < viewingBlockerSettingsUntil
+        var isOurApp = recentlyActive || (appInfoCandidatePkg == pkg && appInfoHotUntil > SystemClock.uptimeMillis())
+        if (!isOurApp) {
+            val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
+            if (root != null) {
+                try {
+                    val sb = StringBuilder()
+                    collectText(root, sb, 0, intArrayOf(30))
+                    val txt = sb.toString().lowercase()
+                    if (txt.contains("blocker") || txt.contains(packageName.lowercase())) {
+                        isOurApp = true
+                    }
+                } finally {
+                    runCatching { root.recycle() }
+                }
+            }
+        }
+
+        if (isOurApp) {
+            viewingBlockerSettingsUntil = now + 30_000L
+            runCatching { autoCancelDialog(rootInActiveWindow) }
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            main.post {
+                showOverlay(
+                    getTamperHeading(),
+                    if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকার আনইনস্টল বা পরিবর্তন করা যাবে না।" else "Blocker cannot be uninstalled or modified while Protection Mode is active.",
+                    5000,
+                    getProtectionActiveSubheading(),
+                    getUnderstoodButton()
+                )
+            }
+            return true
+        }
+        return false
+    }
+
     private fun guardAppHidingAndFreezer(ev: AccessibilityEvent, pkg: String): Boolean {
         if (!shieldEngaged() && !BlockerStore.active(this)) return false
 
@@ -2828,19 +3184,28 @@ class BlockerAccessibilityService : AccessibilityService() {
         val evCls = ev.className?.toString().orEmpty().lowercase()
 
         // 1. Desktop / Drawer long-press intercept on Blocker icon:
-        // Prevents opening launcher context menu (Hide / Freeze / Uninstall / Drag) on Blocker
+        // Blocks press-and-hold ONLY on Blocker, preventing the launcher context menu (App info / Uninstall / Drag) from appearing
         if (ev.eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED && isLauncher) {
-            if (isTargetBlocker(ev, name)) {
-                if (now - lastHideKick > 500L) {
+            if (shieldEngaged() && isTargetBlocker(ev, name)) {
+                val nowUp = SystemClock.uptimeMillis()
+                lastBlockerLongPressUp = nowUp
+                appInfoWatchUntil = nowUp + 15_000L
+                viewingBlockerSettingsUntil = now + 30_000L
+
+                // Unconditionally dismiss long press and any popup immediately
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                main.postDelayed({ runCatching { performGlobalAction(GLOBAL_ACTION_BACK) } }, 60L)
+                kickToHome()
+
+                if (now - lastHideKick > 1000L) {
                     lastHideKick = now
-                    kickToHome()
                     BlockerStore.incr(this, "tamper")
                     showOverlay(
-                        "🔐 Tamper Protection",
-                        "Blocker cannot be modified, hidden, or frozen while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                        if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                        formatLauncherPressHoldBody(),
                         5000,
-                        "Fear Allah and remain steadfast",
-                        "Understood"
+                        getProtectionActiveSubheading(),
+                        getUnderstoodButton()
                     )
                 }
                 return true
@@ -2858,30 +3223,35 @@ class BlockerAccessibilityService : AccessibilityService() {
                 clickText == "freezer" || clickText == "freeze apps" ||
                 clickText == "hide apps on home and apps screens")
             if (isHideMenuItem && (isLauncher || isSettingsPkg(pkg))) {
-                if (now - lastHideKick > 500L) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                if (now - lastHideKick > 1000L) {
                     lastHideKick = now
-                    performGlobalAction(GLOBAL_ACTION_BACK)
                     BlockerStore.incr(this, "tamper")
                     showOverlay(
-                        "🔐 Tamper Protection",
-                        "App hiding is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                        getTamperHeading(),
+                        formatAppHidingBody(),
                         5000,
-                        "Fear Allah and remain steadfast",
-                        "Understood"
+                        getProtectionActiveSubheading(),
+                        getUnderstoodButton()
                     )
                 }
                 return true
             }
 
-            // 2B. Destructive popup actions (Hide / Freeze / Uninstall / Disable / Remove) on Blocker:
-            val isDestructiveAction = clickText.contains("hide") || clickText.contains("freeze") ||
-                clickText.contains("freezer") || clickText.contains("uninstall") ||
-                clickText.contains("remove") || clickText.contains("disable")
+            // 2B. Destructive popup actions (App info / Uninstall / Delete / Remove / Hide / Freeze / Disable) on Blocker:
+            val isDestructiveAction = clickText.contains("app info") || clickText.contains("app details") ||
+                clickText.contains("application info") || clickText.contains("application details") ||
+                clickText.contains("uninstall") || clickText.contains("delete") ||
+                clickText.contains("remove") || clickText.contains("disable") ||
+                clickText.contains("hide") || clickText.contains("freeze") ||
+                clickText.contains("freezer")
 
-            if (isDestructiveAction && isLauncher) {
+            if (isDestructiveAction && isLauncher && shieldEngaged()) {
+                val nowUp = SystemClock.uptimeMillis()
+                val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 6000L)
                 val isTarget = isTargetBlocker(ev, name)
                 var popupIsBlocker = false
-                if (!isTarget) {
+                if (!isTarget && !recentlyLongPressed) {
                     val root = rootInActiveWindow ?: ev.source
                     if (root != null) {
                         val sb = StringBuilder()
@@ -2892,17 +3262,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                         }
                     }
                 }
-                if (isTarget || popupIsBlocker) {
-                    if (now - lastHideKick > 500L) {
+                if (isTarget || recentlyLongPressed || popupIsBlocker) {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    kickToHome()
+                    if (now - lastHideKick > 1000L) {
                         lastHideKick = now
-                        kickToHome()
                         BlockerStore.incr(this, "tamper")
                         showOverlay(
-                            "🔐 Tamper Protection",
-                            "Blocker cannot be hidden, frozen, or uninstalled while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                            if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                            if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো ও আনইনস্টল শর্টকাট লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info and uninstallation shortcuts are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
                             5000,
-                            "Fear Allah and remain steadfast",
-                            "Understood"
+                            getProtectionActiveSubheading(),
+                            getUnderstoodButton()
                         )
                     }
                     return true
@@ -2926,11 +3297,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                     main.postDelayed({ performGlobalAction(GLOBAL_ACTION_HOME) }, 120L)
                     BlockerStore.incr(this, "tamper")
                     showOverlay(
-                        "🔐 Tamper Protection",
-                        "App hiding and freezing is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                        getTamperHeading(),
+                        if (isBangla()) "ব্লকার নিষ্ক্রিয় করা রোধ করতে অ্যাপ হাইড ও ফ্রিজিং সেটিংস লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "App hiding and freezing is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
                         5000,
-                        "Fear Allah and remain steadfast",
-                        "Understood"
+                        getTamperSubheading(),
+                        getUnderstoodButton()
                     )
                 }
                 return true
@@ -3111,13 +3482,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (firstLine.equals(name, ignoreCase = true)) return true
         if (t.length > name.length && t.startsWith(name, ignoreCase = true)) {
             val sep = t[name.length]
-            if (sep == '\n' || sep == '\r' || sep == '·' || sep == '•' || sep == '-' || sep == '(' || sep == ':') {
+            if (sep == '\n' || sep == '\r' || sep == '·' || sep == '•' || sep == '-' || sep == '(' || sep == ':' || sep == ',' || sep == '.') {
                 return true
             }
             if (sep == ' ') {
                 val rem = t.substring(name.length).trim()
                 if (rem.isEmpty() || containsVersion(rem, ver) ||
-                    rem.matches(Regex("""^(v?\d+(\.\d+)*|[0-9.]+\s*(kb|mb|gb|b)|installed|app|package).*""", RegexOption.IGNORE_CASE))) {
+                    rem.matches(Regex("""^(v?\d+(\.\d+)*|[0-9.]+\s*(kb|mb|gb|b)|installed|app|package|double).*""", RegexOption.IGNORE_CASE))) {
                     return true
                 }
             }
@@ -3127,11 +3498,13 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun kickFromAppInfo() {
         val now = System.currentTimeMillis()
+        viewingBlockerSettingsUntil = now + 30_000L             // arms the existing uninstall / clear-data dialog catchers
+        runCatching { autoCancelDialog(rootInActiveWindow) }
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        kickToHome()
+
         if (now - lastAppInfoKick < 400L) return
         lastAppInfoKick = now
-        viewingBlockerSettingsUntil = now + 30_000L             // arms the existing uninstall / clear-data dialog catchers
-
-        runCatching { autoCancelDialog(rootInActiveWindow) }
 
         // Pause continuous polling & scanner thread during the kick transition to prevent flicker loop
         settingsPollActive = false
@@ -3169,11 +3542,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         Log.i("BlockerGuard", "App Info screen blocked (pkg=$appInfoCandidatePkg)")
         BlockerStore.incr(this, "tamper")
         showOverlay(
-            "\uD83D\uDD10 Tamper Protection",
-            "Blocker's app info page is locked while Protection Mode is active.\n\n\u201cAnd fulfill your covenants. Indeed, covenants will be questioned.\u201d \u2014 Surah Al-Isra (17:34)",
+            getTamperHeading(),
+            if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো পেজ লক করা থাকে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info page is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
             5000,
-            "Fear Allah and remain steadfast",
-            "Understood"
+            getTamperSubheading(),
+            getUnderstoodButton()
         )
     }
 
@@ -3231,7 +3604,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (notify && now - lastAdbNotice > 2_000L) {
             lastAdbNotice = now
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay(getTamperHeading(), formatTamperCovenantBody("USB & Wireless debugging are locked while Protection Mode is active."), 5000, getTamperSubheading(), getUnderstoodButton())
         }
     }
 
@@ -3268,7 +3641,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
         if (!adbIsOn()) {
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "USB & Wireless debugging were switched off. They stay locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay(getTamperHeading(), formatTamperCovenantBody("USB & Wireless debugging were switched off. They stay locked while Protection Mode is active."), 5000, getTamperSubheading(), getUnderstoodButton())
         }
     }
 
@@ -3407,7 +3780,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             runCatching { autoCancelDialog(root) }
             kickToHome()
             BlockerStore.incr(this, "tamper")
-            showOverlay("🔐 Tamper Protection", "$message\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)", 5000, "Fear Allah and remain steadfast", "Understood")
+            showOverlay(getTamperHeading(), formatTamperCovenantBody(message), 5000, getTamperSubheading(), getUnderstoodButton())
         } finally {
             runCatching { root?.recycle() }
         }
@@ -3620,7 +3993,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     @Suppress("DEPRECATION")
     private fun collectText(n: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, budget: IntArray) {
-        if (n == null || depth > 30 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
+        if (n == null || depth > 10 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
         if (!n.isPassword) {
             n.text?.let { sb.append(it).append(' ') }
             n.contentDescription?.let { sb.append(it).append(' ') }
@@ -3630,11 +4003,165 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (budget[0] <= 0 || sb.length >= MAX_SCAN_CHARS) break
             val c = n.getChild(i) ?: continue
             collectText(c, sb, depth + 1, budget)
-            c.recycle()
+            recycleNode(c)
         }
     }
 
-    private fun hit(kind: String, heading: String, msg: String, subheading: String? = null, targetPkg: String? = null) {
+    // ---------- Bilingual Popup Messaging (English / বাংলা) ----------
+
+    private fun isBangla(): Boolean = BlockerStore.popupLanguage(this) == "bn"
+
+    private fun getFearAllahHeading(): String =
+        if (isBangla()) "আল্লাহকে ভয় করুন" else "Fear Allah"
+
+    private fun getFearAllahSubheading(): String =
+        if (isBangla()) "আপনার আখিরাত ধ্বংস করবেন না" else "Do not destroy your Akhirah"
+
+    private fun getTamperHeading(): String =
+        if (isBangla()) "🔐 নিরাপত্তা সুরক্ষা" else "🔐 Tamper Protection"
+
+    private fun getTamperSubheading(): String =
+        if (isBangla()) "আল্লাহকে ভয় করুন এবং অবিচল থাকুন" else "Fear Allah and remain steadfast"
+
+    private fun getProtectionActiveSubheading(): String =
+        if (isBangla()) "সুরক্ষা সক্রিয় রয়েছে" else "Protection Active"
+
+    private fun getUnderstoodButton(): String =
+        if (isBangla()) "বুঝেছি" else "Understood"
+
+    private fun getAstaghfirullahButton(): String =
+        if (isBangla()) "আস্তাগফিরুল্লাহ" else "Astaghfirullah"
+
+    private fun formatBlockedAppBody(pkg: String): String {
+        val app = labelOf(pkg)
+        return if (isBangla()) {
+            "$app আপনার ব্লক তালিকায় রয়েছে। নিজের সময় ও দ্বীনকে রক্ষা করুন।\n\n“নিশ্চয়ই কান, চোখ এবং অন্তর — এদের প্রত্যেকটি সম্পর্কেই তোমাদেরকে জবাবদিহি করতে হবে।”\n— সূরা আল-ইসরা (১৭:৩৬)"
+        } else {
+            "$app is on your block list. Guard your time and deen.\n\n“Indeed, the hearing, the sight and the heart — about all of these you will be questioned.”\n— Surah Al-Isra (17:36)"
+        }
+    }
+
+    private fun formatBlockedUrlBody(rule: String): String {
+        return if (isBangla()) {
+            "আপনার লজ্জা ও পবিত্রতা রক্ষার জন্য “$rule” ব্লক করা হয়েছে।\n\n“সে কি জানে না যে, নিশ্চয়ই আল্লাহ সবকিছু দেখেন?”\n— সূরা আল-আলাক (৯৬:১৪)"
+        } else {
+            "“$rule” was blocked to safeguard your modesty and purity.\n\n“Does he not know that Allah sees?”\n— Surah Al-Alaq (96:14)"
+        }
+    }
+
+    private fun formatScreenHitBrowserBody(): String {
+        return if (isBangla()) {
+            "অনুপযুক্ত কনটেন্ট শনাক্ত হওয়ায় এটি বন্ধ করা হয়েছে।\n\n“মুমিন পুরুষদের বলুন, তারা যেন তাদের দৃষ্টি সংযত রাখে এবং নিজেদের লজ্জাস্থানের হেফাজত করে। এটি তাদের জন্য অধিকতর পবিত্র। নিশ্চয়ই তারা যা করে আল্লাহ সে বিষয়ে সম্যক অবগত।”\n— সূরা আন-নূর (২৪:৩০)"
+        } else {
+            "Inappropriate content was detected and closed.\n\n“Tell the believing men to lower their gaze and guard their modesty. That is purer for them. Indeed, Allah is aware of what they do.”\n— Surah An-Nur (24:30)"
+        }
+    }
+
+    private fun formatScreenHitOtherAppBody(pkg: String): String {
+        val app = labelOf(pkg)
+        return if (isBangla()) {
+            "$app অ্যাপে অনুপযুক্ত কনটেন্ট প্রদর্শিত হওয়ায় এটি বন্ধ করা হয়েছে।\n\n“নিশ্চয়ই আল্লাহ তোমাদের ওপর সর্বদা সতর্ক দৃষ্টি রাখেন।”\n— সূরা আন-নিসা (৪:১)"
+        } else {
+            "Inappropriate content appeared in $app, so it was closed.\n\n“Indeed, Allah is ever, over you, an Observer.”\n— Surah An-Nisa (4:1)"
+        }
+    }
+
+    private fun formatTamperCovenantBody(baseMsg: String): String {
+        val bnMsg = if (baseMsg.contains("Device Admin", ignoreCase = true)) {
+            "ব্লকারের ডিভাইস অ্যাডমিন ও অ্যাপ সেটিংস সুরক্ষা মোড সক্রিয় থাকা অবস্থায় লক করা থাকে।"
+        } else if (baseMsg.contains("USB", ignoreCase = true)) {
+            "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ইউএসবি ও ওয়্যারলেস ডিবাগিং লক করা থাকে।"
+        } else {
+            baseMsg
+        }
+        return if (isBangla()) {
+            "$bnMsg\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
+        } else {
+            "$baseMsg\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
+        }
+    }
+
+    private fun formatDateTimeLockedBody(): String {
+        return if (isBangla()) {
+            "ঘড়ির সময় পরিবর্তন করে সুরক্ষা ফাঁকি দেওয়া রোধ করতে তারিখ ও সময় সেটিংস লক করা রয়েছে।"
+        } else {
+            "Date & Time settings are locked while protection is active to prevent clock tampering."
+        }
+    }
+
+    private fun formatScheduledPowerLockedBody(): String {
+        return if (isBangla()) {
+            "সুরক্ষা সক্রিয় থাকা অবস্থায় স্বয়ংক্রিয় পাওয়ার অফ (নির্ধারিত বন্ধ) বন্ধ রাখা হয়েছে।"
+        } else {
+            "Scheduled power off is locked while protection is active."
+        }
+    }
+
+    private fun formatAdbLockedBody(): String {
+        return if (isBangla()) {
+            "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ডিবাগিং অনুমোদন লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
+        } else {
+            "Debugging authorization is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
+        }
+    }
+
+    private fun formatLauncherPressHoldBody(): String {
+        return if (isBangla()) {
+            "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় আনইনস্টল রোধ করতে ব্লকারের উপর চেপে ধরা (প্রেস অ্যান্ড হোল্ড) নিষ্ক্রিয় করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
+        } else {
+            "Press & hold is disabled for Blocker to prevent unauthorized uninstallation while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
+        }
+    }
+
+    private fun formatAppHidingBody(): String {
+        return if (isBangla()) {
+            "ব্লকার নিষ্ক্রিয় করা রোধ করতে অ্যাপ হাইড ও ফ্রিজার সেটিংস লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
+        } else {
+            "App hiding is locked while Protection Mode is active to prevent disabling Blocker.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
+        }
+    }
+
+    private fun formatPowerOffLockedBody(): String {
+        return if (isBangla()) {
+            "আপনার সুরক্ষার জন্য পাওয়ার অফ এবং রিস্টার্ট লক করা রয়েছে।\n\nএকটু ভাবুন এবং অবিচল থাকুন।"
+        } else {
+            "Powering off and restarting are locked for your protection.\n\nTake a breather and remain steadfast."
+        }
+    }
+
+    private fun formatStudyModeBody(phase: String, remainingText: String): String {
+        return if (isBangla()) {
+            "আপনার পোমোডোরো স্টাডি সেশনের জন্য ফোন লকডাউন সক্রিয় রয়েছে ($phase • $remainingText)।\n\nসেশন শেষ না হওয়া পর্যন্ত অন্য সব অ্যাপ, সেটিংস এবং নোটিফিকেশন বন্ধ থাকবে।\n\n“এমন দুটি নিয়ামত রয়েছে, যে দুটিতে অধিকাংশ মানুষ ক্ষতিগ্রস্ত: সুস্থতা এবং অবসর সময়।”\n— সহীহ আল-বুখারী (৬৪১২)"
+        } else {
+            "Full phone lockdown is active for your Pomodoro study session ($phase • $remainingText).\n\nAll other apps, settings, quick toggles, and notifications are blocked until you finish.\n\n“The two blessings which many people lose are: health and free time for doing good.”\n— Sahih al-Bukhari"
+        }
+    }
+
+    private fun formatAppUsageLimitBody(pkg: String, limitStr: String): String {
+        val app = labelOf(pkg)
+        return if (isBangla()) {
+            "$app আপনার দৈনিক ব্যবহারের সীমা $limitStr এ পৌঁছেছে। নিজের সময় ও দ্বীনকে রক্ষা করুন।\n\n“পাঁচটি বিষয়ের পূর্বে পাঁচটি বিষয়ের সদ্ব্যবহার করো: বার্ধক্যের পূর্বে যৌবনের, অসুস্থতার পূর্বে সুস্থতার, দারিদ্র্যের পূর্বে সচ্ছলতার, ব্যস্ততার পূর্বে অবসর সময়ের এবং মৃত্যুর পূর্বে জীবনের।”\n— সহীহ হাদিস (আল-হাকিম)"
+        } else {
+            "$app has reached your daily usage limit of $limitStr. Guard your time and deen.\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith"
+        }
+    }
+
+    private fun formatFocusModeBody(remainingText: String): String {
+        return if (isBangla()) {
+            "শুধুমাত্র প্রয়োজনীয় অ্যাপ ব্যবহারের সুযোগ রয়েছে (বাকি সময় $remainingText)।\n\n“পাঁচটি বিষয়ের পূর্বে পাঁচটি বিষয়ের সদ্ব্যবহার করো: বার্ধক্যের পূর্বে যৌবনের, অসুস্থতার পূর্বে সুস্থতার, দারিদ্র্যের পূর্বে সচ্ছলতার, ব্যস্ততার পূর্বে অবসর সময়ের এবং মৃত্যুর পূর্বে জীবনের।”\n— সহীহ হাদিস (আল-হাকিম)"
+        } else {
+            "Only your essential apps are available ($remainingText remaining).\n\n“Take advantage of five before five: your youth before your old age, your health before your sickness, your wealth before your poverty, your free time before your busyness, and your life before your death.”\n— Hadith"
+        }
+    }
+
+    private fun hit(
+        kind: String,
+        heading: String = getFearAllahHeading(),
+        msg: String = "",
+        subheading: String? = getFearAllahSubheading(),
+        targetPkg: String? = null,
+        btnText: String? = null
+    ) {
         val now = System.currentTimeMillis()
 
         // 1. Unconditionally kick out of the blocked app (NEVER skip or debounce the kick!)
@@ -3655,7 +4182,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (now - lastHit >= 700L) {
             lastHit = now
             BlockerStore.incr(this, kind)
-            showOverlay(heading, msg, 5000, subheading, "Astaghfirullah")
+            val btn = btnText ?: getAstaghfirullahButton()
+            showOverlay(heading, msg, 5000, subheading, btn)
         }
     }
 
@@ -3663,8 +4191,163 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private var scrim: View? = null
-    private var rootOverlayView: View? = null
+    @Suppress("DEPRECATION")
+    private fun recycleNode(node: AccessibilityNodeInfo?) {
+        if (node == null) return
+        if (Build.VERSION.SDK_INT < 33) {
+            runCatching { node.recycle() }
+        }
+    }
+
+    private var preInflatedOverlay: FrameLayout? = null
+    private var preInflatedOverlayLp: WindowManager.LayoutParams? = null
+    private var preInflatedBadgeText: TextView? = null
+    private var preInflatedBadgeLayout: LinearLayout? = null
+    private var preInflatedHeading: TextView? = null
+    private var preInflatedSubheading: TextView? = null
+    private var preInflatedBody: TextView? = null
+    private var preInflatedButton: Button? = null
+    private var preInflatedProgressFill: View? = null
+    private var preInflatedCard: LinearLayout? = null
+    private var isOverlayAttached = false
+    private var isOverlayVisible = false
+
+    private fun initPreInflatedOverlay() {
+        if (preInflatedOverlay != null) return
+        val svc = this
+        val accent = 0xFFA78BFA.toInt()
+        val accentDeep = 0xFF7C3AED.toInt()
+
+        val container = FrameLayout(svc).apply {
+            setBackgroundColor(0xFF070512.toInt())
+            setOnClickListener { removeOverlay() }
+        }
+
+        val badge = LinearLayout(svc).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(0x33DC2626.toInt())
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1), 0x88EF4444.toInt())
+            }
+        }
+        val badgeTv = TextView(svc).apply {
+            text = "🛡️"
+            textSize = 20f
+            gravity = Gravity.CENTER
+        }
+        badge.addView(badgeTv)
+
+        val headingTv = TextView(svc).apply {
+            text = "Fear Allah"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.02f
+        }
+
+        val headingRow = LinearLayout(svc).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headingRow.addView(badge, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
+        headingRow.addView(headingTv)
+
+        val subheadingTv = TextView(svc).apply {
+            text = ""
+            setTextColor(0xFFE9D5FF.toInt())
+            textSize = 15.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setPadding(0, dp(10), 0, dp(2))
+            visibility = View.GONE
+        }
+
+        val bodyTv = TextView(svc).apply {
+            text = ""
+            setTextColor(0xFFD1C8EC.toInt())
+            textSize = 14.5f
+            setPadding(0, dp(12), 0, dp(18))
+            setLineSpacing(dp(3).toFloat(), 1.05f)
+        }
+
+        val progressTrack = View(svc).apply { setBackgroundColor(0x26FFFFFF) }
+        val progressFill = View(svc).apply {
+            setBackgroundColor(accent)
+            pivotX = 0f
+        }
+        val trackWrap = FrameLayout(svc)
+        trackWrap.addView(progressTrack, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
+        trackWrap.addView(progressFill, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
+
+        val btn = Button(svc).apply {
+            text = "Astaghfirullah"
+            setAllCaps(false)
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(accentDeep, accent)
+            ).apply { cornerRadius = dp(15).toFloat() }
+            stateListAnimator = null
+            setOnClickListener { removeOverlay() }
+        }
+
+        val card = LinearLayout(svc).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(22), dp(22), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF221A3D.toInt(), 0xFF140D26.toInt())
+            ).apply {
+                cornerRadius = dp(26).toFloat()
+                setStroke(dp(2), 0x99C084FC.toInt())
+            }
+            elevation = dp(18).toFloat()
+            isClickable = true
+        }
+
+        card.addView(headingRow)
+        card.addView(subheadingTv)
+        card.addView(bodyTv)
+        card.addView(trackWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
+            bottomMargin = dp(16)
+        })
+        card.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+
+        val cardLp = FrameLayout.LayoutParams(
+            (resources.displayMetrics.widthPixels * 0.88f).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
+        )
+        container.addView(card, cardLp)
+
+        val rootLp = WindowManager.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+
+        container.visibility = View.GONE
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).addView(container, rootLp)
+            isOverlayAttached = true
+        }
+
+        preInflatedOverlay = container
+        preInflatedOverlayLp = rootLp
+        preInflatedBadgeText = badgeTv
+        preInflatedBadgeLayout = badge
+        preInflatedHeading = headingTv
+        preInflatedSubheading = subheadingTv
+        preInflatedBody = bodyTv
+        preInflatedButton = btn
+        preInflatedProgressFill = progressFill
+        preInflatedCard = card
+    }
 
     private fun showOverlay(
         heading: String,
@@ -3675,124 +4358,65 @@ class BlockerAccessibilityService : AccessibilityService() {
     ) {
         val displayMs = ms.coerceAtLeast(5000L)
         val action = Runnable {
-            removeOverlay()
-            val svc = this@BlockerAccessibilityService
-            val accent = 0xFFA78BFA.toInt()
-            val accentDeep = 0xFF7C3AED.toInt()
-            val isFearAllah = heading == "Fear Allah"
+            val container = preInflatedOverlay ?: run {
+                initPreInflatedOverlay()
+                preInflatedOverlay ?: return@Runnable
+            }
+            val lp = preInflatedOverlayLp ?: return@Runnable
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            val isFearAllah = heading == "Fear Allah" || heading == "আল্লাহকে ভয় করুন"
 
-            // Full screen dim backdrop that dismisses the popup on click
-            val container = android.widget.FrameLayout(svc).apply {
-                setBackgroundColor(0xB3070512.toInt())
-                setOnClickListener { removeOverlay() }
+            preInflatedBadgeText?.text = if (isFearAllah) "🛡️" else "🔒"
+            preInflatedBadgeLayout?.background = GradientDrawable().apply {
+                setColor(if (isFearAllah) 0x33DC2626.toInt() else 0x33A78BFA)
+                cornerRadius = dp(22).toFloat()
+                if (isFearAllah) setStroke(dp(1), 0x88EF4444.toInt())
             }
 
-            val badge = LinearLayout(svc).apply {
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply {
-                    setColor(if (isFearAllah) 0x33DC2626.toInt() else 0x33A78BFA)
-                    cornerRadius = dp(22).toFloat()
-                    if (isFearAllah) setStroke(dp(1), 0x88EF4444.toInt())
-                }
-            }
-            badge.addView(TextView(svc).apply {
-                text = if (isFearAllah) "\uD83D\uDEE1\uFE0F" else "\uD83D\uDD12"
-                textSize = 20f
-                gravity = Gravity.CENTER
-            })
-
-            val headingRow = LinearLayout(svc).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            headingRow.addView(badge, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
-            headingRow.addView(TextView(svc).apply {
+            preInflatedHeading?.apply {
                 text = heading
                 setTextColor(if (isFearAllah) 0xFFFFFFFF.toInt() else 0xFFF6F3FF.toInt())
-                textSize = if (isFearAllah) 22f else 19f
-                typeface = Typeface.DEFAULT_BOLD
-                letterSpacing = 0.02f
-            })
-
-            val card = LinearLayout(svc).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(22), dp(22), dp(22), dp(20))
-                background = GradientDrawable(
-                    GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(0xFF221A3D.toInt(), 0xFF140D26.toInt())
-                ).apply {
-                    cornerRadius = dp(26).toFloat()
-                    setStroke(dp(2), if (isFearAllah) 0x99C084FC.toInt() else 0x66C7AFFF.toInt())
-                }
-                elevation = dp(18).toFloat()
-                isClickable = true
+                textSize = if (isFearAllah) 21f else 18.5f
             }
-            card.addView(headingRow)
 
             if (!subheading.isNullOrBlank()) {
-                card.addView(TextView(svc).apply {
+                preInflatedSubheading?.apply {
                     text = subheading
-                    setTextColor(0xFFE9D5FF.toInt()) // Vibrant soft purple highlight
-                    textSize = 15.5f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    setPadding(0, dp(10), 0, dp(2))
-                })
+                    visibility = View.VISIBLE
+                }
+            } else {
+                preInflatedSubheading?.visibility = View.GONE
             }
 
-            card.addView(TextView(svc).apply {
-                text = body
-                setTextColor(0xFFD1C8EC.toInt())
-                textSize = 14.5f
-                setPadding(0, if (!subheading.isNullOrBlank()) dp(6) else dp(12), 0, dp(18))
-                setLineSpacing(dp(3).toFloat(), 1.05f)
-            })
-
-            val progressTrack = View(svc).apply { setBackgroundColor(0x26FFFFFF) }
-            val progressFill = View(svc).apply {
-                setBackgroundColor(accent)
-                pivotX = 0f
+            preInflatedBody?.text = body
+            val resolvedButtonText = when {
+                isBangla() && (buttonText == "Astaghfirullah" || buttonText == "আস্তাগফিরুল্লাহ") -> "আস্তাগফিরুল্লাহ"
+                isBangla() && (buttonText == "Understood" || buttonText == "বুঝেছি") -> "বুঝেছি"
+                isBangla() && (buttonText == "Back to Study" || buttonText == "পড়াশোনায় ফিরুন") -> "পড়াশোনায় ফিরুন"
+                else -> buttonText
             }
-            val trackWrap = android.widget.FrameLayout(svc)
-            trackWrap.addView(progressTrack, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
-            trackWrap.addView(progressFill, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
-            card.addView(trackWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
-                bottomMargin = dp(16)
-            })
+            preInflatedButton?.text = resolvedButtonText
 
-            card.addView(Button(svc).apply {
-                text = buttonText
-                setAllCaps(false)
-                setTextColor(Color.WHITE)
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                background = GradientDrawable(
-                    GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(accentDeep, accent)
-                ).apply { cornerRadius = dp(15).toFloat() }
-                stateListAnimator = null
-                setOnClickListener { removeOverlay() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
-
-            val cardLp = android.widget.FrameLayout.LayoutParams(
-                (resources.displayMetrics.widthPixels * 0.88f).toInt(),
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
-            )
-            container.addView(card, cardLp)
-
-            val rootLp = WindowManager.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            )
-
-            runCatching {
-                (getSystemService(WINDOW_SERVICE) as WindowManager).addView(container, rootLp)
-                rootOverlayView = container
-                overlay = card
-                progressFill.animate().scaleX(0f).setDuration(displayMs).setInterpolator(LinearInterpolator()).start()
+            preInflatedCard?.background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF221A3D.toInt(), 0xFF140D26.toInt())
+            ).apply {
+                cornerRadius = dp(26).toFloat()
+                setStroke(dp(2), if (isFearAllah) 0x99C084FC.toInt() else 0x66C7AFFF.toInt())
             }
+
+            lp.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            runCatching { wm.updateViewLayout(container, lp) }
+
+            container.visibility = View.VISIBLE
+            isOverlayVisible = true
+
+            preInflatedProgressFill?.apply {
+                scaleX = 1f
+                animate().scaleX(0f).setDuration(displayMs).setInterpolator(LinearInterpolator()).start()
+            }
+
             main.removeCallbacks(hideRunnable)
             main.postDelayed(hideRunnable, displayMs)
         }
@@ -3806,11 +4430,18 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun removeOverlay() {
         main.removeCallbacks(hideRunnable)
-        rootOverlayView?.let { v ->
-            runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
+        val container = preInflatedOverlay ?: return
+        val lp = preInflatedOverlayLp ?: return
+        if (!isOverlayVisible && container.visibility == View.GONE) return
+
+        container.visibility = View.GONE
+        isOverlayVisible = false
+
+        lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(container, lp)
         }
-        rootOverlayView = null
-        overlay = null
-        scrim = null
     }
 }
