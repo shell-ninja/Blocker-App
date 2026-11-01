@@ -4,7 +4,58 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.5 (Current Release)
+## v1.0.6.6 (Current Release)
+
+**Release Date:** November 2026  
+**Version:** 1.0.6.6  
+
+### Major Fixes:
+- **Facebook Newsfeed Video & Reels Multi-Stage Interception:**
+  - Resolved issue where Facebook videos opened from the newsfeed and scrollable video feeds bypassed Reels blocking.
+  - Comprehensive click-time interception for Reels navigation tabs, composer shortcuts, video thumbnails, and Reels shelves across standard Facebook (`com.facebook.katana`) and Facebook Lite (`com.facebook.lite`).
+  - Implemented multi-stage ejection pipeline: immediate `GLOBAL_ACTION_BACK`, automated Home tab navigation at 80ms, stage-1 retry at 150ms, and complete kick-to-home at 350ms if playback persists.
+  - Context-aware newsfeed detection preserves normal browsing of text posts, images, comments, and reactions without false positives.
+- **Reddit Mature Content Lockdown (Material 3 & Jetpack Compose Support):**
+  - Resolved bypass where Reddit's "Show mature content (I'm over 18)" toggle could be enabled. Modern Reddit uses Jetpack Compose and Material 3 switches that report state via `stateDescription` (`"On"` / `"Off"`) with merged row semantics.
+  - Robust multi-signal state inspection evaluates `stateDescription` (via reflection), `isChecked`, `isSelected`, `contentDescription`, `text`, and child node trees.
+  - Automatically intercepts and dismisses 18+ confirmation dialogs ("Are you over 18?"), trapping clicks on positive buttons ("I'm over 18", "Continue") and reverting the toggle to OFF.
+  - Added aggressive safety fallback: ejects the user from Reddit Settings if the toggle fails to revert within 2 attempts, preventing leaving the screen with mature content enabled.
+- **SecureTime Monotonic Clock Drift & Runaway Tamper Loop Fix:**
+  - Diagnosed and fixed a critical bug where normal network NTP/cellular clock adjustments caused `SecureTime` to lock into an unthrottled discrepancy branch, incrementing the tamper counter on every call and generating thousands of false bypass attempts.
+  - Anchors are now refreshed smoothly within a 5-minute tolerance window, keeping hardware monotonic time and device wall-clock time continuously synchronized.
+  - Rate-limited tamper increments to at most once per 60 seconds.
+  - Added automatic stat sanitization on module startup to clear runaway tamper counts.
+- **Delay Timer & Protection Mode Synchronization:**
+  - Fixed issue where re-enabling Protection Mode left obsolete pending removal queues active, causing phantom confirmation cards. Re-enabling protection now cancels obsolete removal queues immediately.
+  - Gated UI `LockBar` confirmation controls strictly on Kotlin's authoritative `ready` state, preventing premature "Timer complete" displays and "Timer still running" rejections.
+- **Crash Immunity & Sleep Mode Prevention:**
+  - Resolved native C++ race conditions in `libblocker_engine.so` by wrapping memory-mapped blocklist operations with recursive mutexes.
+  - Fixed buffer underflow / negative index read in Aho-Corasick whole-word boundary verification that previously caused SIGSEGV crashes on certain text patterns.
+  - Hardened background watchdogs (`appLimitWatchdog`, `appBlockWatchdog`) with structured exception handlers so uncaught runtime exceptions never kill the main thread.
+  - Added global `UncaughtExceptionHandler` and auto-revival logic in `BlockerForegroundService` to prevent Android from flagging the app as crashy or putting it into deep sleep.
+- **Power Off Prevention Cycle Toggle Fix:**
+  - Fixed a critical false-positive bug where toggling off "Prevent Power off & Restart" still prevented the user from turning off or rebooting their phone.
+  - Power menu and shutdown dialogs now properly honor the disabled state and 2-hour delay unlock window without being misidentified as scheduled power events.
+
+### Features Added:
+- **Reddit NSFW Content Interception (Default ON):**
+  - Intercepts Reddit's 18+ interstitial warning screens and prompts ("This community is 18+", "NSFW content").
+  - Detects NSFW badges, tags, and posts, automatically executing a back navigation action and displaying the protection overlay.
+- **Blocking Latency Reduction & Accuracy Enhancement:**
+  - In-memory caching for launcher packages completely eliminates expensive synchronous `packageManager.queryIntentActivities` Binder IPC calls on every touch/click event.
+  - Moved granular social media shields (Facebook, Instagram, YouTube, Reddit) to top-priority execution ahead of window content throttles.
+  - Reduced content scanning interval (`SCAN_GAP_MS`) from 1000ms to 250ms for responsive content blocking without perceptible lag.
+  - Resolved C++ ASCII whole-word boundary verification bug that treated uppercase ASCII characters as word boundaries (fixing compound word false positives such as "PORNSTAR").
+  - Implemented whitelist shielding integration with the native engine to protect educational and technical terms (e.g., "sex education", "action cam", "camera", "essex").
+- **UI Modernization & Low-End Device Responsiveness:**
+  - Modernized React Native dashboard with refined typography, sleek 2x2 metric grid, and real-time protection health indicators.
+  - Added dedicated Distraction Shields management for Facebook Reels & Videos and Reddit Mature Content Lockdown with persistent enforcement badges.
+  - Implemented SectionList virtualization (`initialNumToRender`, `maxToRenderPerBatch`, `windowSize`, `removeClippedSubviews`) in App Blocker to eliminate scroll stutter and frame drops on budget devices (e.g., Infinix Hot 30i).
+  - Preserved strict focus and study mode lockdown in the React Native UI.
+
+---
+
+## v1.0.6.5
 
 **Release Date:** October 2026  
 **Version:** 1.0.6.5  

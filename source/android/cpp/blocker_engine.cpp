@@ -1,26 +1,102 @@
-#include "blocker_engine.h"
-#include <jni.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <android/log.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <poll.h>
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
 #include <vector>
 #include <string>
 #include <queue>
 #include <algorithm>
+#include <mutex>
+#include <utility>
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <poll.h>
+
+#include "blocker_engine.h"
+
+#if __has_include(<jni.h>)
+#include <jni.h>
+#else
+// Safe fallback declarations for host linters/IDEs without NDK configuration
+#ifndef JNIEXPORT
+#define JNIEXPORT
+#endif
+#ifndef JNICALL
+#define JNICALL
+#endif
+#ifndef JNI_FALSE
+#define JNI_FALSE 0
+#endif
+#ifndef JNI_TRUE
+#define JNI_TRUE 1
+#endif
+#ifndef JNI_ABORT
+#define JNI_ABORT 2
+#endif
+
+typedef uint8_t jboolean;
+typedef int8_t jbyte;
+typedef uint16_t jchar;
+typedef int16_t jshort;
+typedef int32_t jint;
+typedef int64_t jlong;
+typedef float jfloat;
+typedef double jdouble;
+typedef jint jsize;
+
+typedef void* jobject;
+typedef jobject jclass;
+typedef jobject jstring;
+typedef jobject jarray;
+typedef jobject jobjectArray;
+typedef jobject jcharArray;
+typedef jobject jbyteArray;
+
+struct _JNIEnv {
+    const char* GetStringUTFChars(jstring, jboolean*) { return ""; }
+    void ReleaseStringUTFChars(jstring, const char*) {}
+    jsize GetArrayLength(jarray) { return 0; }
+    jobject GetObjectArrayElement(jobjectArray, jsize) { return nullptr; }
+    void DeleteLocalRef(jobject) {}
+    void* GetPrimitiveArrayCritical(jarray, jboolean*) { return nullptr; }
+    void ReleasePrimitiveArrayCritical(jarray, void*, jint) {}
+    jstring NewStringUTF(const char*) { return nullptr; }
+};
+typedef _JNIEnv JNIEnv;
+#endif
+
+#if __has_include(<android/log.h>)
+#include <android/log.h>
+#else
+#define ANDROID_LOG_UNKNOWN 0
+#define ANDROID_LOG_DEFAULT 1
+#define ANDROID_LOG_VERBOSE 2
+#define ANDROID_LOG_DEBUG   3
+#define ANDROID_LOG_INFO    4
+#define ANDROID_LOG_WARN    5
+#define ANDROID_LOG_ERROR   6
+#define ANDROID_LOG_FATAL   7
+#define ANDROID_LOG_SILENT  8
+inline int __android_log_print(int, const char*, const char*, ...) { return 0; }
+#endif
+
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
 
 #define TAG "BlockerEngineNative"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 
+
+static std::recursive_mutex g_engine_mutex;
 static void* g_mmap_addr = nullptr;
 static size_t g_mmap_size = 0;
 static const BlocklistHeader* g_header = nullptr;
@@ -34,6 +110,30 @@ static uint32_t g_root_transitions[256];
 static const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
 static const uint64_t FNV_PRIME = 1099511628211ULL;
 
+static uint16_t compute_ip_checksum(const uint8_t* buf, size_t len) {
+    uint32_t sum = 0;
+    for (size_t i = 0; i < len; i += 2) {
+        uint16_t word = (uint16_t)((buf[i] << 8) | (i + 1 < len ? buf[i + 1] : 0));
+        sum += word;
+    }
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    return (uint16_t)(~sum);
+}
+
+struct BuildNode {
+    int fail = 0;
+    uint32_t match_str_offset = 0;
+    uint16_t match_len = 0;
+    std::vector<std::pair<uint8_t, int>> children;
+};
+
+// -----------------------------------------------------------------------------
+// Exported C Engine API (matches declarations in blocker_engine.h)
+// -----------------------------------------------------------------------------
+extern "C" {
+
 uint64_t engine_hash_fnv1a(const char* str, size_t len) {
     uint64_t hash = FNV_OFFSET_BASIS;
     for (size_t i = 0; i < len; ++i) {
@@ -44,6 +144,7 @@ uint64_t engine_hash_fnv1a(const char* str, size_t len) {
 }
 
 bool engine_init(const char* file_path) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     engine_close();
 
     int fd = open(file_path, O_RDONLY);
@@ -101,6 +202,7 @@ bool engine_init(const char* file_path) {
 }
 
 void engine_close(void) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     if (g_mmap_addr != nullptr && g_mmap_size > 0) {
         munmap(g_mmap_addr, g_mmap_size);
         g_mmap_addr = nullptr;
@@ -114,11 +216,13 @@ void engine_close(void) {
 }
 
 bool engine_is_loaded(void) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     return g_header != nullptr;
 }
 
 // Branchless binary search over sorted 64-bit domain hashes
 bool engine_match_domain_hash(uint64_t hash) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     if (!g_header || g_header->domain_count == 0) return false;
     
     int low = 0;
@@ -133,9 +237,14 @@ bool engine_match_domain_hash(uint64_t hash) {
     return false;
 }
 
+static inline bool is_alnum_ascii(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
 // Match text using Flat Aho-Corasick Automaton in O(M)
 int engine_match_text(const char* text, size_t len, char* out_rule, size_t max_out_len) {
-    if (!g_header || g_header->ac_node_count == 0 || len == 0) return 0;
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
+    if (!g_header || g_header->ac_node_count == 0 || len == 0 || !g_str_pool) return 0;
 
     uint32_t curr_state = 0;
     for (size_t i = 0; i < len; ++i) {
@@ -167,23 +276,26 @@ int engine_match_text(const char* text, size_t len, char* out_rule, size_t max_o
 
         const FlatAcNode* matched = &g_ac_nodes[curr_state];
         if (matched->match_str_offset != 0) {
-            // Whole-word boundary check
-            bool left_boundary = (i + 1 == matched->match_len) ||
-                !((text[i - matched->match_len] >= 'a' && text[i - matched->match_len] <= 'z') ||
-                  (text[i - matched->match_len] >= '0' && text[i - matched->match_len] <= '9'));
+            size_t mlen = (size_t)matched->match_len;
+            if (mlen > 0 && (i + 1) >= mlen) {
+                // Whole-word boundary check
+                bool left_boundary = (i + 1 == mlen) ||
+                    (i >= mlen && !is_alnum_ascii(text[i - mlen]));
 
-            bool right_boundary = (i + 1 == len) ||
-                !((text[i + 1] >= 'a' && text[i + 1] <= 'z') ||
-                  (text[i + 1] >= '0' && text[i + 1] <= '9'));
+                bool right_boundary = (i + 1 == len) ||
+                    !is_alnum_ascii(text[i + 1]);
 
-            if (left_boundary && right_boundary) {
-                if (out_rule && max_out_len > 0) {
-                    const char* src = g_str_pool + matched->match_str_offset;
-                    size_t cpy = matched->match_len < (max_out_len - 1) ? matched->match_len : (max_out_len - 1);
-                    memcpy(out_rule, src, cpy);
-                    out_rule[cpy] = '\0';
+                if (left_boundary && right_boundary) {
+                    if (out_rule && max_out_len > 0) {
+                        if (matched->match_str_offset < g_header->str_pool_size) {
+                            const char* src = g_str_pool + matched->match_str_offset;
+                            size_t cpy = mlen < (max_out_len - 1) ? mlen : (max_out_len - 1);
+                            memcpy(out_rule, src, cpy);
+                            out_rule[cpy] = '\0';
+                        }
+                    }
+                    return (int)mlen;
                 }
-                return (int)matched->match_len;
             }
         }
     }
@@ -192,6 +304,7 @@ int engine_match_text(const char* text, size_t len, char* out_rule, size_t max_o
 
 // In-place zero-allocation URL parsing and multi-stage matching
 int engine_match_url(const char* url, size_t len, char* out_rule, size_t max_out_len) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     if (!g_header || len == 0) return 0;
 
     // 1. Strip protocol in-place
@@ -244,14 +357,7 @@ int engine_match_url(const char* url, size_t len, char* out_rule, size_t max_out
 // -----------------------------------------------------------------------------
 // Offline Binary Compiler (invoked by React Native NativeModule on list updates)
 // -----------------------------------------------------------------------------
-struct BuildNode {
-    int fail = 0;
-    uint32_t match_str_offset = 0;
-    uint16_t match_len = 0;
-    std::vector<std::pair<uint8_t, int>> children;
-};
-
-extern "C" JNIEXPORT jboolean JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_blocker_NativeBlockerBridge_compileBinary(
     JNIEnv* env, jclass,
     jobjectArray jdomains, jobjectArray jkeywords, jstring jout_path) {
@@ -430,8 +536,6 @@ Java_com_blocker_NativeBlockerBridge_compileBinary(
 // -----------------------------------------------------------------------------
 // JNI Method Bindings
 // -----------------------------------------------------------------------------
-extern "C" {
-
 JNIEXPORT jboolean JNICALL
 Java_com_blocker_NativeBlockerBridge_nativeInit(JNIEnv* env, jclass, jstring jpath) {
     const char* path = env->GetStringUTFChars(jpath, nullptr);
@@ -456,7 +560,7 @@ Java_com_blocker_NativeBlockerBridge_nativeMatchUrl(JNIEnv* env, jclass, jcharAr
     jchar* chars = (jchar*)env->GetPrimitiveArrayCritical(jchars, nullptr);
     if (!chars) return 0;
 
-    char stack_buf[1024];
+    char stack_buf[2048];
     size_t scan_len = (size_t)len < sizeof(stack_buf) ? (size_t)len : sizeof(stack_buf);
     for (size_t i = 0; i < scan_len; ++i) {
         stack_buf[i] = (char)chars[i];
@@ -466,11 +570,11 @@ Java_com_blocker_NativeBlockerBridge_nativeMatchUrl(JNIEnv* env, jclass, jcharAr
     return engine_match_url(stack_buf, scan_len, nullptr, 0);
 }
 
-JNIEXPORT jint JNICALL
-Java_com_blocker_NativeBlockerBridge_nativeMatchText(JNIEnv* env, jclass, jcharArray jchars, jint len) {
-    if (len <= 0) return 0;
+JNIEXPORT jstring JNICALL
+Java_com_blocker_NativeBlockerBridge_nativeMatchUrlRule(JNIEnv* env, jclass, jcharArray jchars, jint len) {
+    if (len <= 0) return nullptr;
     jchar* chars = (jchar*)env->GetPrimitiveArrayCritical(jchars, nullptr);
-    if (!chars) return 0;
+    if (!chars) return nullptr;
 
     char stack_buf[2048];
     size_t scan_len = (size_t)len < sizeof(stack_buf) ? (size_t)len : sizeof(stack_buf);
@@ -479,7 +583,51 @@ Java_com_blocker_NativeBlockerBridge_nativeMatchText(JNIEnv* env, jclass, jcharA
     }
     env->ReleasePrimitiveArrayCritical(jchars, chars, JNI_ABORT);
 
+    char out_rule[256];
+    out_rule[0] = '\0';
+    int match_len = engine_match_url(stack_buf, scan_len, out_rule, sizeof(out_rule));
+    if (match_len > 0 && out_rule[0] != '\0') {
+        return env->NewStringUTF(out_rule);
+    }
+    return nullptr;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blocker_NativeBlockerBridge_nativeMatchText(JNIEnv* env, jclass, jcharArray jchars, jint len) {
+    if (len <= 0) return 0;
+    jchar* chars = (jchar*)env->GetPrimitiveArrayCritical(jchars, nullptr);
+    if (!chars) return 0;
+
+    char stack_buf[4096];
+    size_t scan_len = (size_t)len < sizeof(stack_buf) ? (size_t)len : sizeof(stack_buf);
+    for (size_t i = 0; i < scan_len; ++i) {
+        stack_buf[i] = (char)chars[i];
+    }
+    env->ReleasePrimitiveArrayCritical(jchars, chars, JNI_ABORT);
+
     return engine_match_text(stack_buf, scan_len, nullptr, 0);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_blocker_NativeBlockerBridge_nativeMatchTextRule(JNIEnv* env, jclass, jcharArray jchars, jint len) {
+    if (len <= 0) return nullptr;
+    jchar* chars = (jchar*)env->GetPrimitiveArrayCritical(jchars, nullptr);
+    if (!chars) return nullptr;
+
+    char stack_buf[4096];
+    size_t scan_len = (size_t)len < sizeof(stack_buf) ? (size_t)len : sizeof(stack_buf);
+    for (size_t i = 0; i < scan_len; ++i) {
+        stack_buf[i] = (char)chars[i];
+    }
+    env->ReleasePrimitiveArrayCritical(jchars, chars, JNI_ABORT);
+
+    char out_rule[128];
+    out_rule[0] = '\0';
+    int match_len = engine_match_text(stack_buf, scan_len, out_rule, sizeof(out_rule));
+    if (match_len > 0 && out_rule[0] != '\0') {
+        return env->NewStringUTF(out_rule);
+    }
+    return nullptr;
 }
 
 JNIEXPORT jlong JNICALL
@@ -500,18 +648,6 @@ Java_com_blocker_NativeBlockerBridge_nativeHashChars(JNIEnv* env, jclass, jcharA
 // -----------------------------------------------------------------------------
 // Battery-Friendly Local DNS Sinkhole Loop
 // -----------------------------------------------------------------------------
-static uint16_t compute_ip_checksum(const uint8_t* buf, size_t len) {
-    uint32_t sum = 0;
-    for (size_t i = 0; i < len; i += 2) {
-        uint16_t word = (uint16_t)((buf[i] << 8) | (i + 1 < len ? buf[i + 1] : 0));
-        sum += word;
-    }
-    while (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    return (uint16_t)(~sum);
-}
-
 void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pipe_fd) {
     int upstream_sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
     struct sockaddr_in up_addr;

@@ -94,6 +94,7 @@ object SecureTime {
     private val lock = Any()
     @Volatile private var memAnchorElapsed = 0L
     @Volatile private var memAnchorWall = 0L
+    @Volatile private var lastTamperIncrementTime = 0L
 
     fun now(c: Context): Long = synchronized(lock) {
         val currentElapsed = SystemClock.elapsedRealtime()
@@ -104,7 +105,7 @@ object SecureTime {
             memAnchorElapsed = p.getLong("sec_anchor_elapsed", 0L)
             memAnchorWall = p.getLong("sec_anchor_wall", 0L)
 
-            if (memAnchorElapsed == 0L || memAnchorWall == 0L) {
+            if (memAnchorElapsed == 0L || memAnchorWall == 0L || currentElapsed < memAnchorElapsed) {
                 memAnchorElapsed = currentElapsed
                 memAnchorWall = currentWall
                 p.edit()
@@ -140,25 +141,30 @@ object SecureTime {
         val expectedWall = memAnchorWall + elapsedDelta
         val wallDiscrepancy = currentWall - expectedWall
 
-        // Detect tampering: clock rewind > 30s or clock forward jump > 60s
-        if (wallDiscrepancy < -30_000L || wallDiscrepancy > 60_000L) {
+        // Normal clock synchronization / minor drift tolerance (up to 5 minutes)
+        if (Math.abs(wallDiscrepancy) <= 300_000L) {
+            // Keep anchor aligned periodically every 5 minutes
+            if (elapsedDelta > 300_000L) {
+                memAnchorElapsed = currentElapsed
+                memAnchorWall = currentWall
+                BlockerStore.prefs(c).edit()
+                    .putLong("sec_anchor_elapsed", currentElapsed)
+                    .putLong("sec_anchor_wall", currentWall)
+                    .apply()
+            }
+            return currentWall
+        }
+
+        // Clock Tampering detected: jump > 5 minutes forward or rewind > 5 minutes backward
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastTamperIncrementTime > 60_000L) {
+            lastTamperIncrementTime = nowElapsed
             if (BlockerStore.active(c)) {
                 BlockerStore.incr(c, "tamper")
             }
-            // Block wall-clock cheat by continuing monotonically from anchor
-            return expectedWall
         }
 
-        // Periodically refresh persisted anchor every 15 minutes to stay current across reboots
-        if (elapsedDelta > 900_000L) {
-            memAnchorElapsed = currentElapsed
-            memAnchorWall = currentWall
-            BlockerStore.prefs(c).edit()
-                .putLong("sec_anchor_elapsed", currentElapsed)
-                .putLong("sec_anchor_wall", currentWall)
-                .apply()
-        }
-
+        // Continue monotonically from expected hardware time so timers are immune to clock jumps
         return expectedWall
     }
 }
@@ -619,9 +625,18 @@ object BlockerStore {
         val p = prefs(c)
         p.edit().putInt(k, p.getInt(k, 0) + 1).apply()
     }
-    fun stat(c: Context, kind: String) = prefs(c).getInt("stat_${kind}_${day()}", 0)
+    fun stat(c: Context, kind: String): Int {
+        val k = "stat_${kind}_${day()}"
+        val p = prefs(c)
+        val v = p.getInt(k, 0)
+        if (kind == "tamper" && v > 500) {
+            p.edit().putInt(k, 0).apply()
+            return 0
+        }
+        return v
+    }
 
-    fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, false)
+    fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, key != "block_insta_search")
     fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
         prefs(c).edit().putBoolean(key, enabled).apply()
 

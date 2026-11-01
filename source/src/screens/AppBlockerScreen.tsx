@@ -360,6 +360,10 @@ export default function AppBlockerScreen() {
         sections={sections}
         keyExtractor={a => a.packageName}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={5}
+        removeClippedSubviews={true}
         ListEmptyComponent={<Text style={{ color: t.sub, textAlign: 'center', marginTop: 40 }}>{loading ? 'Loading apps…' : 'No apps found'}</Text>}
         renderSectionHeader={({ section }) => (
           <Text style={{ color: t.sub, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', paddingTop: 14, paddingBottom: 6, backgroundColor: t.bg }}>
