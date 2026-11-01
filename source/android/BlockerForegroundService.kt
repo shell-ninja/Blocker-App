@@ -79,6 +79,16 @@ class BlockerForegroundService : Service {
         handler.removeCallbacks(updateCheckRunnable)
         runCatching { updateExecutor.shutdownNow() }
         super.onDestroy()
+        if (BlockerStore.active(this)) {
+            start(this)
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (BlockerStore.active(this)) {
+            start(this)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

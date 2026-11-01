@@ -40,6 +40,7 @@ import android.widget.TextView
 class BlockerAccessibilityService : AccessibilityService() {
 
     companion object {
+        const val TAG = "BlockerA11y"
         // package -> URL bar view IDs (add a line to support another browser)
         val BROWSER_URL_IDS: Map<String, List<String>> = mapOf(
             "com.android.chrome" to listOf("com.android.chrome:id/url_bar"),
@@ -280,7 +281,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "date & time", "date and time", "date & time settings",
             "automatic date & time", "automatic date and time", "change date", "change time"
         )
-        private const val SCAN_GAP_MS = 1000L
+        private const val SCAN_GAP_MS = 250L
         private const val MAX_SCAN_CHARS = 20_000
         private const val REDIRECT_URL = "https://www.google.com"
 
@@ -777,32 +778,42 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private val appLimitWatchdog = object : Runnable {
         override fun run() {
-            val pkg = currentFgPkg
-            if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
-                checkAppUsageLimit(pkg)
+            try {
+                val pkg = currentFgPkg
+                if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                    checkAppUsageLimit(pkg)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error in appLimitWatchdog", t)
+            } finally {
+                main.postDelayed(this, 5000L)
             }
-            main.postDelayed(this, 5000L)
         }
     }
 
     private val appBlockWatchdog = object : Runnable {
         override fun run() {
-            if (BlockerStore.active(this@BlockerAccessibilityService)) {
-                val root = runCatching { rootInActiveWindow }.getOrNull()
-                val rootPkg = root?.packageName?.toString()
-                val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else currentFgPkg
-                if (activePkg != null && activePkg in apps) {
-                    hit(
-                        "apps",
-                        getFearAllahHeading(),
-                        formatBlockedAppBody(activePkg),
-                        getFearAllahSubheading(),
-                        activePkg,
-                        getAstaghfirullahButton()
-                    )
+            try {
+                if (BlockerStore.active(this@BlockerAccessibilityService)) {
+                    val root = runCatching { rootInActiveWindow }.getOrNull()
+                    val rootPkg = root?.packageName?.toString()
+                    val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else currentFgPkg
+                    if (activePkg != null && activePkg in apps) {
+                        hit(
+                            "apps",
+                            getFearAllahHeading(),
+                            formatBlockedAppBody(activePkg),
+                            getFearAllahSubheading(),
+                            activePkg,
+                            getAstaghfirullahButton()
+                        )
+                    }
                 }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error in appBlockWatchdog", t)
+            } finally {
+                main.postDelayed(this, 350L)
             }
-            main.postDelayed(this, 350L)
         }
     }
 
@@ -811,6 +822,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var blockInstaSearch = false
     @Volatile private var blockYtShorts = false
     private val lastGranularHit = HashMap<String, Long>()
+    private val lastGranularEventTime = HashMap<String, Long>()
+    private var lastRedditEventTime = 0L
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         if (key != null && key in RELOAD_KEYS) reloadKey(key)
@@ -853,10 +866,17 @@ class BlockerAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        runCatching {
+            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                Log.e(TAG, "Uncaught exception on thread ${thread.name}", throwable)
+                runCatching { BlockerForegroundService.start(this) }
+            }
+        }
         BlockerForegroundService.start(this)
         DeviceOwnerHelper.enforceDisallowSafeBoot(this)
         loadAppIdentity()
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
+        refreshLauncherPackages()
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
         runCatching {
@@ -925,12 +945,23 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
-    private fun launcherPackages(): Set<String> = runCatching {
-        packageManager
-            .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
-            .map { it.activityInfo.packageName }
-            .toSet()
-    }.getOrDefault(emptySet())
+    @Volatile private var cachedLauncherPackages: Set<String> = emptySet()
+
+    private fun refreshLauncherPackages(): Set<String> {
+        val pkgs = runCatching {
+            packageManager
+                .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+                .mapNotNull { it.activityInfo?.packageName }
+                .toSet()
+        }.getOrDefault(emptySet())
+        cachedLauncherPackages = pkgs
+        return pkgs
+    }
+
+    private fun launcherPackages(): Set<String> {
+        val cached = cachedLauncherPackages
+        return if (cached.isNotEmpty()) cached else refreshLauncherPackages()
+    }
 
     private fun isLauncherPkg(pkg: String): Boolean {
         if (pkg.isEmpty()) return false
@@ -1324,11 +1355,28 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (checkBrowserFast(pkg, ev)) return
             }
 
+            val isClickOrState = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+                ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+                ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+
+            // --- TOP-PRIORITY DEFENSE: Intercept Reddit & Granular Targets directly ---
+            if (pkg == "com.reddit.frontpage") {
+                if (checkRedditInterception(ev)) return
+            }
+            if (pkg in GRANULAR_TARGET_PKGS) {
+                if (checkGranularInterception(pkg, ev)) return
+            }
+
             val now = System.currentTimeMillis()
             // Throttle rapid WINDOW_CONTENT_CHANGED events outside settings to eliminate scroll/animation lag
             if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
                 val lastEv = lastEventTime[pkg] ?: 0L
-                if (now - lastEv < 75L) return
+                val throttleMs = when (pkg) {
+                    "com.reddit.frontpage" -> 150L
+                    in GRANULAR_TARGET_PKGS -> 120L
+                    else -> 75L
+                }
+                if (now - lastEv < throttleMs) return
             }
             lastEventTime[pkg] = now
 
@@ -1550,6 +1598,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             pkg in GRANULAR_TARGET_PKGS -> {
                 if (checkGranularInterception(pkg, ev)) return
             }
+            pkg == "com.reddit.frontpage" -> {
+                if (checkRedditInterception(ev)) return
+            }
         }
         if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || now - (lastUsageCheck[pkg] ?: 0L) > 5000L) {
             lastUsageCheck[pkg] = now
@@ -1689,7 +1740,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     // ---------- URL bar ----------
 
     private var lastCheckedUrlHash = 0L
-    private val reusableCharBuffer = CharArray(2048)
+    private val reusableCharBuffer = CharArray(4096)
 
     private fun checkBrowserFast(pkg: String, ev: AccessibilityEvent): Boolean {
         if (System.currentTimeMillis() < (quietUntil[pkg] ?: 0L)) return true
@@ -1843,9 +1894,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 for (i in 0 until len) {
                     reusableCharBuffer[i] = sb[i]
                 }
-                if (NativeBlockerBridge.matchTextFast(reusableCharBuffer, len)) {
-                    screenHit(pkg, "Harmful Content")
-                    return
+                val matchedRule = NativeBlockerBridge.matchTextRule(reusableCharBuffer, len)
+                if (matchedRule != null) {
+                    val fullText = sb.toString().lowercase()
+                    if (!isMatchShieldedByWhitelist(fullText, matchedRule)) {
+                        screenHit(pkg, matchedRule)
+                        return
+                    }
                 }
             }
 
@@ -1855,6 +1910,49 @@ class BlockerAccessibilityService : AccessibilityService() {
             recycleNode(root)
         }
     }
+
+    /**
+     * Checks whether a matched rule is shielded by an approved phrase in the whitelist.
+     * Prevents false positives (e.g. "sex education", "ai cam", "dash cam", "essex").
+     */
+    private fun isMatchShieldedByWhitelist(fullText: String, matchedRule: String): Boolean {
+        if (whitelist.isEmpty()) return false
+        val safe = ArrayList<IntRange>()
+        for (w in whitelist) {
+            if (w.isEmpty() || !fullText.contains(w)) continue
+            var from = 0
+            while (true) {
+                val i = fullText.indexOf(w, from)
+                if (i < 0) break
+                safe.add(i until (i + w.length))
+                from = i + 1
+            }
+        }
+        if (safe.isEmpty()) return false
+
+        var from = 0
+        var hasUnshieldedHit = false
+        val ruleLen = matchedRule.length
+        while (from < fullText.length) {
+            val idx = fullText.indexOf(matchedRule, from)
+            if (idx < 0) break
+            val endIdx = idx + ruleLen
+            val startBoundary = (idx == 0 || !isAlnumChar(fullText[idx - 1]))
+            val endBoundary = (endIdx == fullText.length || !isAlnumChar(fullText[endIdx]))
+            if (startBoundary && endBoundary) {
+                val isShielded = safe.any { s -> !(endIdx <= s.first || idx >= s.last + 1) }
+                if (!isShielded) {
+                    hasUnshieldedHit = true
+                    break
+                }
+            }
+            from = idx + 1
+        }
+        return !hasUnshieldedHit
+    }
+
+    private fun isAlnumChar(c: Char): Boolean =
+        (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9')
 
     /**
      * Whole-word keyword match: "camera" never matches "cam", "essex" never matches "sex".
@@ -2065,10 +2163,11 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var lastScheduledPowerHit = 0L
 
     private fun shouldBlockScheduledPower(): Boolean {
-        if (BlockerStore.preventPowerOff(this)) return true
-        if (BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")) return true
-        if (BlockerStore.active(this)) return true
-        return false
+        // If power off protection is toggled OFF, or the 2-hour delay unlock window is open, NEVER block power actions!
+        if (!BlockerStore.preventPowerOff(this) || BlockerStore.guardOpen(this, "power_menu")) {
+            return false
+        }
+        return true
     }
 
     private fun clickCancelOrDismiss(root: AccessibilityNodeInfo?): Boolean {
@@ -2156,7 +2255,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         // A. Countdown / Scheduled Shutdown Dialog: when a scheduled shutdown alarm actually fires!
         val isShutdownAlert = (isMtkSch || isSettingsPkg(pkgLower) || pkgLower == "android" || pkgLower == "com.android.systemui") &&
             (evCls.contains("shutdown") || evCls.contains("alert") || evCls.contains("dialog")) &&
-            ("shut down" in text || "shutdown" in text || "power off" in text || "scheduled power" in text || "will shut down" in text || "will power off" in text)
+            ("scheduled power" in text || "auto power off" in text || "schedule power" in text || "schedule shutdown" in text ||
+             (isMtkSch && ("shut down" in text || "shutdown" in text || "power off" in text)))
 
         if (isShutdownAlert || (isMtkSch && (evCls.contains("shutdown") || "cancel" in text))) {
             val now = System.currentTimeMillis()
@@ -2958,7 +3058,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             return false
         }
 
-        if (!isLauncherPkg(pkg) && pkg !in launcherPackages() && pkg != "com.android.systemui" && pkg != "android") {
+        if (!isLauncherPkg(pkg) && pkg != "com.android.systemui" && pkg != "android") {
             return false
         }
 
@@ -3789,19 +3889,29 @@ class BlockerAccessibilityService : AccessibilityService() {
     // ---------- Granular focus interception (Reels / Shorts / Search) ----------
 
     private fun checkGranularInterception(pkg: String, ev: AccessibilityEvent): Boolean {
-        if (!BlockerStore.active(this) && !BlockerStore.focusActive(this)) return false
+        val isClickOrState = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+            ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         val now = System.currentTimeMillis()
+
         if (now - (lastGranularHit[pkg] ?: 0L) < 700L) return true
 
-        val root = rootInActiveWindow ?: return false
-        if (root.packageName?.toString() != pkg && !root.packageName?.toString().orEmpty().contains("facebook")) return false
+        if (!isClickOrState && now - (lastGranularEventTime[pkg] ?: 0L) < 100L) {
+            return false
+        }
+        lastGranularEventTime[pkg] = now
+
+        val root = rootInActiveWindow ?: ev.source ?: return false
+        if (root.packageName?.toString() != pkg && !root.packageName?.toString().orEmpty().contains("facebook")) {
+            if (!pkg.contains("facebook")) return false
+        }
 
         val evCls = ev.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
 
         when (pkg) {
             "com.google.android.youtube" -> {
-                if (!blockYtShorts) return false
+                if (!blockYtShorts && !BlockerStore.granularToggle(this, "block_yt_shorts")) return false
                 val isShortsTab = isTabSelectedById(root, "com.google.android.youtube:id/pivot_shorts") ||
                     scanSelectedTab(root, listOf("shorts"))
                 val isShortsPlayer = hasAnyNodeId(root, YT_SHORTS_PLAYER_IDS) ||
@@ -3812,7 +3922,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
             }
             "com.instagram.android" -> {
-                if (blockInstaReels) {
+                if (blockInstaReels || BlockerStore.granularToggle(this, "block_insta_reels")) {
                     val isReelsTab = isTabSelectedById(root, "com.instagram.android:id/clips_tab") ||
                         scanSelectedTab(root, listOf("reels"))
                     val isReelsPlayer = hasAnyNodeId(root, INSTA_REELS_PLAYER_IDS) ||
@@ -3822,8 +3932,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         return true
                     }
                 }
-                if (blockInstaSearch) {
-                    // Instagram search tab button exists in the bottom bar on all screens; ONLY intercept if actually selected!
+                if (blockInstaSearch || BlockerStore.granularToggle(this, "block_insta_search")) {
                     val isSearchTab = isTabSelectedById(root, "com.instagram.android:id/search_tab") ||
                         scanSelectedTab(root, listOf("search and explore", "search & explore", "explore tab"))
                     val isSearchInput = isSearchInputFocused(root, INSTA_SEARCH_INPUT_IDS)
@@ -3834,10 +3943,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
             }
             "com.facebook.katana", "com.facebook.lite" -> {
-                if (!blockFbReels) return false
-                if (isFacebookVideoOrReels(root, ev)) {
-                    exitSubFeature(pkg, "Facebook Reels")
-                    return true
+                if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels")) {
+                    if (isFacebookVideoOrReels(root, ev)) {
+                        exitSubFeature(pkg, "Facebook Reels & Video")
+                        return true
+                    }
                 }
             }
         }
@@ -3873,8 +3983,26 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun exitSubFeature(pkg: String, featureName: String) {
         val now = System.currentTimeMillis()
         lastGranularHit[pkg] = now
-        quietUntil[pkg] = now + 1500L
+        // 1. Immediately send Back action
         performGlobalAction(GLOBAL_ACTION_BACK)
+
+        // 2. If in Facebook, also attempt to click the "Home" tab to return safely to feed
+        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+            main.postDelayed({
+                val r = runCatching { rootInActiveWindow }.getOrNull()
+                if (r != null) {
+                    try {
+                        val homeTab = findHomeTabNode(r)
+                        homeTab?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        homeTab?.recycle()
+                    } finally {
+                        runCatching { r.recycle() }
+                    }
+                }
+            }, 80L)
+        }
+
+        // 3. Stage 1 retry at 150ms: if still in sub-feature, press Back again
         main.postDelayed({
             if (currentFgPkg == pkg) {
                 val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
@@ -3894,11 +4022,62 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             }
+        }, 150L)
+
+        // 4. Stage 2 retry at 350ms: if STILL in Reels/Video, kick to Home
+        main.postDelayed({
+            if (currentFgPkg == pkg) {
+                val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
+                if (r != null) {
+                    try {
+                        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+                            if (isFacebookVideoOrReels(r, null)) {
+                                kickToHome()
+                            }
+                        }
+                    } finally {
+                        runCatching { r.recycle() }
+                    }
+                }
+            }
         }, 350L)
+
+        showOverlay(
+            getFearAllahHeading(),
+            if (isBangla()) "ফেসবুক রিলস ও ভিডিও আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "$featureName is blocked for your protection.",
+            3500,
+            getFearAllahSubheading(),
+            getAstaghfirullahButton()
+        )
+    }
+
+    private fun findHomeTabNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val ids = listOf(
+            "com.facebook.katana:id/home_tab",
+            "com.facebook.katana:id/tab_home",
+            "com.facebook.katana:id/feed_tab",
+            "com.facebook.lite:id/home_tab"
+        )
+        for (id in ids) {
+            val list = root.findAccessibilityNodeInfosByViewId(id)
+            if (!list.isNullOrEmpty()) {
+                val node = list[0]
+                for (i in 1 until list.size) list[i].recycle()
+                return node
+            }
+        }
+        return findNodeMatchingText(root, listOf("home, tab", "home tab", "news feed"))
     }
 
     private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
-        // 1. Check dedicated Reels or Video tab in navigation bar (only when actually selected)
+        // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards
+        if (ev != null && (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED)) {
+            if (isFacebookVideoOrReelClick(ev)) {
+                return true
+            }
+        }
+
+        // 1. Navigation bar tabs (Katana and Lite)
         val isReelsOrVideoTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
             isTabSelectedById(root, "com.facebook.katana:id/tab_reels") ||
             isTabSelectedById(root, "com.facebook.katana:id/fb_shorts_tab") ||
@@ -3908,15 +4087,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             isTabSelectedById(root, "com.facebook.katana:id/tab_watch") ||
             isTabSelectedById(root, "com.facebook.katana:id/video_home_tab") ||
             scanSelectedTab(root, listOf(
-                "reels, tab", "reels tab", "facebook reels, tab", "facebook reels tab",
-                "watch, tab", "watch tab", "video, tab", "video tab", "videos, tab"
+                "reels", "reel", "facebook reels", "watch", "video", "videos",
+                "shorts", "fb shorts", "রিলস", "রিল", "ভিডিও", "ওয়াচ"
             ))
         if (isReelsOrVideoTab) return true
 
-        // 2. Check full-screen / immersive Video or Reels player IDs
-        val isDedicatedVideoViewer = hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)
+        // 2. Full-screen Video or Reels player IDs
+        if (hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)) return true
 
-        // 3. Check Window / Event / View class names
+        // 3. Activity / Window class names
         val evCls = ev?.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
         val isVideoClass = evCls.contains("channelfeed") || rootCls.contains("channelfeed") ||
@@ -3925,37 +4104,658 @@ class BlockerAccessibilityService : AccessibilityService() {
             evCls.contains("fbshorts") || rootCls.contains("fbshorts") ||
             evCls.contains("reelsviewer") || rootCls.contains("reelsviewer") ||
             evCls.contains("reelwatch") || rootCls.contains("reelwatch") ||
-            evCls.contains("unifiedvideoviewer") || rootCls.contains("unifiedvideoviewer")
+            evCls.contains("unifiedvideoviewer") || rootCls.contains("unifiedvideoviewer") ||
+            evCls.contains("videoplayer") || rootCls.contains("videoplayer") ||
+            evCls.contains("richvideoplayer") || rootCls.contains("richvideoplayer") ||
+            evCls.contains("watchandgo") || rootCls.contains("watchandgo") ||
+            evCls.contains("fbshortsvieweractivity") || rootCls.contains("fbshortsvieweractivity")
+        if (isVideoClass) return true
 
-        // 4. Content / Text inspection of active window
+        // 4. Content and screen inspection (budget 2500)
         val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(250))
+        collectText(root, sb, 0, intArrayOf(2500))
         val t = sb.toString().lowercase()
 
-        // Distinguish active newsfeed header vs video player:
-        val hasNewsfeedHeader = ("what's on your mind" in t || "what’s on your mind" in t) ||
-            ("stories" in t && ("create story" in t || "add to story" in t || "your story" in t)) ||
-            ("search on facebook" in t || "search facebook" in t)
+        // Check if Home News Feed is active (preserves text & image post browsing)
+        val isHomeTabSelected = isTabSelectedById(root, "com.facebook.katana:id/home_tab") ||
+            isTabSelectedById(root, "com.facebook.katana:id/tab_home") ||
+            scanSelectedTab(root, listOf("home, tab", "home tab", "news feed, tab", "news feed tab"))
+        val hasHomeFeedComposer = "what's on your mind" in t || "what’s on your mind" in t || "কী ভাবছেন" in t
+        val isHomeFeedActive = (isHomeTabSelected || hasHomeFeedComposer) && !hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)
 
-        // If the user is visibly on the main newsfeed header/composer and NOT in a dedicated video viewer,
-        // NEVER exit! Let the user browse their feed normally without interrupting.
-        if (hasNewsfeedHeader && !isDedicatedVideoViewer && !isVideoClass) {
-            return false
+        // Dedicated Reels or Watch explore hub / viewer
+        val isReelsViewer = ("reels" in t || "reel" in t || "রিলস" in t) &&
+            ("original audio" in t || "original sound" in t || "use template" in t || "use audio" in t ||
+             "remix" in t || "remix reel" in t || "reels audio" in t || "send in messenger" in t ||
+             "create reel" in t || "watch more reels" in t || "swipe up" in t ||
+             ("like" in t && "comment" in t && "share" in t && !isHomeFeedActive))
+
+        val isWatchHub = ("watch" in t || "video" in t || "ওয়াচ" in t || "ভিডিও" in t) &&
+            ("for you" in t || "following" in t || "live" in t || "suggested videos" in t || "up next" in t)
+
+        val hasVideoPlaybackControls = ("pause video" in t || "play video" in t || "double tap to pause" in t ||
+            "double-tap to pause" in t || "video seek" in t || "video scrubber" in t || "seek bar" in t ||
+            "video playback" in t || "rich video player" in t || "elapsed time" in t || "video duration" in t ||
+            "enter full screen" in t || "fullscreen video" in t)
+
+        val hasVideoView = hasVideoPlaybackNode(root, 0, intArrayOf(500))
+
+        if (!isHomeFeedActive) {
+            // When not in home feed: ANY Reels viewer, Watch hub, or video player must be blocked
+            if (isReelsViewer || isWatchHub || hasVideoPlaybackControls || hasVideoView ||
+                "reels and short videos" in t || "fb shorts" in t ||
+                (t.startsWith("reels") || t.startsWith("reel"))) {
+                return true
+            }
+        } else {
+            // When inside Home Feed: block only if an active video post or Reels shelf is playing
+            if (hasVideoPlaybackControls && ("seek" in t || "elapsed time" in t || "pause video" in t || "double tap to pause" in t || "video scrubber" in t)) {
+                return true
+            }
         }
 
-        if (isDedicatedVideoViewer || isVideoClass) return true
+        return false
+    }
 
-        // 5. Fallback UI inspection for full-screen video / reels viewer (Litho / custom TalkBack nodes):
-        // Matches the immersive video player shown in full-screen video & reels
-        val hasVideoViewerUI = ("add a comment" in t && (
-            "replay 5" in t || "rewind 5" in t || "5 seconds" in t || "seek" in t ||
-            "follow for more" in t || " · origi" in t || "original audio" in t || "original sound" in t ||
-            "play video" in t || "pause video" in t || "share" in t
-        )) ||
-        ("swipe up for next" in t || "swipe up for more" in t || "watch more videos" in t || "watch more reels" in t) ||
-        ("remix this reel" in t || "remix reel" in t || "reels audio" in t || "share this reel" in t)
+    private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
+        val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
+        val evText = ev.text.joinToString(" ").lowercase()
+        val evCls = ev.className?.toString().orEmpty().lowercase()
+        val src = ev.source
+        val srcCd = src?.contentDescription?.toString().orEmpty().lowercase()
+        val srcText = src?.text?.toString().orEmpty().lowercase()
+        val srcCls = src?.className?.toString().orEmpty().lowercase()
 
-        return hasVideoViewerUI
+        fun isVideoStr(s: String): Boolean {
+            if (s.isEmpty()) return false
+            if (s.contains("photo") || s.contains("image") || s.contains("gallery") || s.contains("profile picture")) return false
+            return s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") ||
+                s.contains("shorts") || s.contains("fb shorts") || s.contains("রিলস") || s.contains("রিল") ||
+                s.contains("ভিডিও") || s.contains("ওয়াচ")
+        }
+
+        if (isVideoStr(evCd) || isVideoStr(evText) || isVideoStr(srcCd) || isVideoStr(srcText)) {
+            return true
+        }
+
+        if (evCls.contains("video") || evCls.contains("player") || srcCls.contains("video") || srcCls.contains("player")) {
+            return true
+        }
+
+        return hasVideoInNodeHierarchy(src)
+    }
+
+    private fun hasVideoInNodeHierarchy(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val t = node.text?.toString()?.lowercase().orEmpty()
+        val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
+        val cls = node.className?.toString().orEmpty()
+        fun isVideo(s: String) = s.isNotEmpty() && !s.contains("photo") && !s.contains("image") &&
+            (s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") || s.contains("shorts") || s.contains("রিলস") || s.contains("ভিডিও"))
+        if (isVideo(t) || isVideo(cd) || cls.contains("Video") || cls.contains("Player")) return true
+
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            val ct = c.text?.toString()?.lowercase().orEmpty()
+            val ccd = c.contentDescription?.toString()?.lowercase().orEmpty()
+            val ccls = c.className?.toString().orEmpty()
+            val hit = isVideo(ct) || isVideo(ccd) || ccls.contains("Video") || ccls.contains("Player")
+            c.recycle()
+            if (hit) return true
+        }
+
+        var p = node.parent
+        var depth = 0
+        while (p != null && depth < 3) {
+            val pt = p.text?.toString()?.lowercase().orEmpty()
+            val pcd = p.contentDescription?.toString()?.lowercase().orEmpty()
+            val pcls = p.className?.toString().orEmpty()
+            val hit = isVideo(pt) || isVideo(pcd) || pcls.contains("Video") || pcls.contains("Player")
+            val nextP = p.parent
+            p.recycle()
+            if (hit) {
+                nextP?.recycle()
+                return true
+            }
+            p = nextP
+            depth++
+        }
+        p?.recycle()
+        return false
+    }
+
+    private fun hasVideoPlaybackNode(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): Boolean {
+        if (n == null || depth > 15 || budget[0]-- <= 0) return false
+        val cls = n.className?.toString().orEmpty()
+        val id = n.viewIdResourceName?.toString().orEmpty()
+        if (cls.contains("TextureView") || cls.contains("SurfaceView") || cls.contains("VideoView") ||
+            cls.contains("RichVideoPlayer") || id.contains("video_player") || id.contains("reels_player")) {
+            return true
+        }
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val found = hasVideoPlaybackNode(c, depth + 1, budget)
+            c.recycle()
+            if (found) return true
+        }
+        return false
+    }
+
+    // -------------------------------------------------------------------------
+    // Reddit Defense Engine (Forcefully turn off Mature Content & Block NSFW)
+    // -------------------------------------------------------------------------
+
+    @Volatile private var redditMatureVerifiedOff: Boolean = false
+    private var lastRedditMatureHit = 0L
+    private var lastRedditNsfwHit = 0L
+    private var lastRedditToggleTime = 0L
+    private var redditToggleRetryCount = 0
+
+    private fun checkRedditInterception(ev: AccessibilityEvent): Boolean {
+        val isClickOrState = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+            ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        val now = System.currentTimeMillis()
+
+        if (!isClickOrState && now - lastRedditEventTime < 100L) {
+            return false
+        }
+        lastRedditEventTime = now
+
+        val root = rootInActiveWindow ?: ev.source ?: return false
+
+        // 1. Enforce "Show mature content" OFF in Reddit Settings
+        if (enforceRedditMatureContentOff(root, ev, now)) {
+            return true
+        }
+
+        // 2. Block all NSFW Content on Reddit (Warning screens, NSFW subreddits, NSFW tagged posts)
+        if (guardRedditNsfwContent(root, ev, now)) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun enforceRedditMatureContentOff(root: AccessibilityNodeInfo, ev: AccessibilityEvent, now: Long): Boolean {
+        val isClickEvent = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
+
+        // 1. Intercept attempts to click confirmation buttons on 18+ dialogs
+        if (isClickEvent) {
+            val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
+            val evText = ev.text.joinToString(" ").lowercase()
+            val srcCd = ev.source?.contentDescription?.toString().orEmpty().lowercase()
+            val srcText = ev.source?.text?.toString().orEmpty().lowercase()
+            val isConfirmClick = isConfirmMatureDialogClick(evCd) || isConfirmMatureDialogClick(evText) ||
+                isConfirmMatureDialogClick(srcCd) || isConfirmMatureDialogClick(srcText)
+            if (isConfirmClick) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                showRedditMatureLockedOverlay()
+                return true
+            }
+        }
+
+        // 2. Auto-dismiss any visible 18+ confirmation dialog
+        dismissRedditMatureConfirmDialog(root)
+
+        // 3. Find "Show mature content (I'm over 18)" row in Reddit Settings
+        val matureNode = findMatureSettingNode(root)
+        if (matureNode != null) {
+            val clickableTarget = findClickableRowOrToggle(matureNode) ?: matureNode
+            val isRowTurnedOn = isMatureNodeTurnedOn(matureNode) || isMatureNodeTurnedOn(clickableTarget)
+
+            if (isRowTurnedOn) {
+                // Setting is ON! Force it OFF immediately!
+                if (now - lastRedditToggleTime > 300L) {
+                    lastRedditToggleTime = now
+                    redditToggleRetryCount++
+                    val clicked = clickableTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (!clicked) {
+                        matureNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                    dismissRedditMatureConfirmDialog(root)
+                }
+
+                if (redditToggleRetryCount >= 2) {
+                    // Stubbornly ON — exit settings screen to prevent leaving it enabled
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    redditToggleRetryCount = 0
+                }
+
+                if (now - lastRedditMatureHit >= 1000L) {
+                    lastRedditMatureHit = now
+                    showRedditMatureLockedOverlay()
+                }
+                if (clickableTarget !== matureNode) clickableTarget.recycle()
+                matureNode.recycle()
+                return true
+            } else {
+                // Setting is verified OFF
+                redditMatureVerifiedOff = true
+                redditToggleRetryCount = 0
+
+                // If user just tapped the mature setting row/switch, intercept attempt to turn it ON
+                if (isClickEvent && isMatureEventClick(ev)) {
+                    main.postDelayed({
+                        val r = runCatching { rootInActiveWindow }.getOrNull()
+                        if (r != null) {
+                            try {
+                                dismissRedditMatureConfirmDialog(r)
+                                val mNode = findMatureSettingNode(r)
+                                if (mNode != null) {
+                                    val target = findClickableRowOrToggle(mNode) ?: mNode
+                                    if (isMatureNodeTurnedOn(mNode) || isMatureNodeTurnedOn(target)) {
+                                        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                        dismissRedditMatureConfirmDialog(r)
+                                    }
+                                    if (target !== mNode) target.recycle()
+                                    mNode.recycle()
+                                }
+                            } finally {
+                                runCatching { r.recycle() }
+                            }
+                        }
+                    }, 50L)
+
+                    main.postDelayed({
+                        val r = runCatching { rootInActiveWindow }.getOrNull()
+                        if (r != null) {
+                            try {
+                                dismissRedditMatureConfirmDialog(r)
+                                val mNode = findMatureSettingNode(r)
+                                if (mNode != null) {
+                                    val target = findClickableRowOrToggle(mNode) ?: mNode
+                                    if (isMatureNodeTurnedOn(mNode) || isMatureNodeTurnedOn(target)) {
+                                        performGlobalAction(GLOBAL_ACTION_BACK)
+                                    }
+                                    if (target !== mNode) target.recycle()
+                                    mNode.recycle()
+                                }
+                            } finally {
+                                runCatching { r.recycle() }
+                            }
+                        }
+                    }, 250L)
+
+                    if (now - lastRedditMatureHit >= 1000L) {
+                        lastRedditMatureHit = now
+                        showRedditMatureLockedOverlay()
+                    }
+                    if (clickableTarget !== matureNode) clickableTarget.recycle()
+                    matureNode.recycle()
+                    return true
+                }
+            }
+
+            if (clickableTarget !== matureNode) clickableTarget.recycle()
+            matureNode.recycle()
+        }
+
+        return false
+    }
+
+    private fun findMatureSettingNode(root: AccessibilityNodeInfo, depth: Int = 0, budget: IntArray = intArrayOf(250)): AccessibilityNodeInfo? {
+        if (depth > 25 || budget[0]-- <= 0) return null
+        val text = root.text?.toString().orEmpty().lowercase()
+        val cd = root.contentDescription?.toString().orEmpty().lowercase()
+        val isMature = (text.contains("show mature content") || cd.contains("show mature content") ||
+            text.contains("show mature") || cd.contains("show mature") ||
+            text.contains("mature content (i'm over 18)") || cd.contains("mature content (i'm over 18)") ||
+            (text.contains("mature content") && (text.contains("18+") || text.contains("over 18")))) &&
+            !text.contains("blur") && !cd.contains("blur")
+
+        if (isMature) {
+            return root
+        }
+
+        for (i in 0 until root.childCount) {
+            val c = root.getChild(i) ?: continue
+            val found = findMatureSettingNode(c, depth + 1, budget)
+            if (found != null) {
+                if (found !== c) c.recycle()
+                return found
+            }
+            c.recycle()
+        }
+        return null
+    }
+
+    private fun isMatureNodeTurnedOn(node: AccessibilityNodeInfo): Boolean {
+        if (node.isChecked || node.isSelected) return true
+
+        val stateDesc = runCatching {
+            val method = AccessibilityNodeInfo::class.java.getMethod("getStateDescription")
+            (method.invoke(node) as? CharSequence)?.toString()?.lowercase()
+        }.getOrNull().orEmpty()
+        if (("on" in stateDesc && "off" !in stateDesc) || ("checked" in stateDesc && "not checked" !in stateDesc) || stateDesc == "true") {
+            return true
+        }
+
+        val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
+        if (("on" in cd && "off" !in cd) || ("checked" in cd && "not checked" !in cd) || cd.endsWith(", on") || cd.endsWith(" on")) {
+            return true
+        }
+
+        val t = node.text?.toString()?.lowercase().orEmpty()
+        if (t == "on" || t == "checked") return true
+
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            val on = isMatureNodeTurnedOn(c)
+            c.recycle()
+            if (on) return true
+        }
+
+        return false
+    }
+
+    private fun findClickableRowOrToggle(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (node.isClickable) return node
+
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            if (c.isClickable) return c
+            val sub = findClickableSubNode(c, 0)
+            if (sub != null) {
+                if (sub !== c) c.recycle()
+                return sub
+            }
+            c.recycle()
+        }
+
+        var p = node.parent
+        var depth = 0
+        while (p != null && depth < 5) {
+            if (p.isClickable) return p
+            for (i in 0 until p.childCount) {
+                val sib = p.getChild(i) ?: continue
+                if (sib !== node && (sib.isClickable || sib.isCheckable)) {
+                    p.recycle()
+                    return sib
+                }
+                sib.recycle()
+            }
+            val nextP = p.parent
+            p.recycle()
+            p = nextP
+            depth++
+        }
+        p?.recycle()
+        return null
+    }
+
+    private fun findClickableSubNode(root: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
+        if (depth > 4) return null
+        if (root.isClickable || root.isCheckable) return root
+        for (i in 0 until root.childCount) {
+            val c = root.getChild(i) ?: continue
+            val found = findClickableSubNode(c, depth + 1)
+            if (found != null) {
+                if (found !== c) c.recycle()
+                return found
+            }
+            c.recycle()
+        }
+        return null
+    }
+
+    private fun dismissRedditMatureConfirmDialog(root: AccessibilityNodeInfo): Boolean {
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(1500))
+        val t = sb.toString().lowercase()
+
+        val isConfirmDialog = ("are you over 18" in t || "mature content" in t || "view 18+ content" in t || "nsfw content" in t || "18+ content" in t) &&
+            ("cancel" in t || "i am over 18" in t || "i'm over 18" in t || "continue" in t || "enable" in t || "not now" in t || "go back" in t)
+        if (!isConfirmDialog) return false
+
+        val cancelBtn = findNodeMatchingText(root, listOf("cancel", "go back", "no", "dismiss", "not now", "close"))
+        if (cancelBtn != null) {
+            val clickTarget = if (cancelBtn.isClickable) cancelBtn else findClickableRowOrToggle(cancelBtn) ?: cancelBtn
+            clickTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (clickTarget !== cancelBtn) clickTarget.recycle()
+            cancelBtn.recycle()
+            return true
+        }
+
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        return true
+    }
+
+    private fun isConfirmMatureDialogClick(s: String): Boolean {
+        if (s.isEmpty()) return false
+        val low = s.lowercase()
+        return low == "i'm over 18" || low == "i am over 18" || low == "continue" ||
+            low.contains("over 18") || low.contains("enable mature") || low == "turn on"
+    }
+
+    private fun isMatureSettingText(s: String): Boolean {
+        if (s.isEmpty()) return false
+        val low = s.lowercase()
+        if (low.contains("blur")) return false
+        return low.contains("mature content") || low.contains("show mature") ||
+            low.contains("show nsfw") || low.contains("see nsfw") ||
+            low.contains("over 18") || low.contains("adult content")
+    }
+
+    private fun isMatureEventClick(ev: AccessibilityEvent): Boolean {
+        val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
+        val evText = ev.text.joinToString(" ").lowercase()
+        val src = ev.source
+        val srcCd = src?.contentDescription?.toString().orEmpty().lowercase()
+        val srcText = src?.text?.toString().orEmpty().lowercase()
+        return isMatureSettingText(evCd) || isMatureSettingText(evText) ||
+            isMatureSettingText(srcCd) || isMatureSettingText(srcText) ||
+            hasMatureTextInHierarchy(src)
+    }
+
+    private fun hasMatureTextInHierarchy(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val t = node.text?.toString().orEmpty()
+        val cd = node.contentDescription?.toString().orEmpty()
+        if (isMatureSettingText(t) || isMatureSettingText(cd)) return true
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            val ct = c.text?.toString().orEmpty()
+            val ccd = c.contentDescription?.toString().orEmpty()
+            val hit = isMatureSettingText(ct) || isMatureSettingText(ccd)
+            c.recycle()
+            if (hit) return true
+        }
+        var p = node.parent
+        var depth = 0
+        while (p != null && depth < 4) {
+            val pt = p.text?.toString().orEmpty()
+            val pcd = p.contentDescription?.toString().orEmpty()
+            if (isMatureSettingText(pt) || isMatureSettingText(pcd)) {
+                p.recycle()
+                return true
+            }
+            for (i in 0 until p.childCount) {
+                val c = p.getChild(i) ?: continue
+                val ct = c.text?.toString().orEmpty()
+                val ccd = c.contentDescription?.toString().orEmpty()
+                val hit = isMatureSettingText(ct) || isMatureSettingText(ccd)
+                c.recycle()
+                if (hit) {
+                    p.recycle()
+                    return true
+                }
+            }
+            val nextP = p.parent
+            p.recycle()
+            p = nextP
+            depth++
+        }
+        p?.recycle()
+        return false
+    }
+
+    private fun findNodeMatchingText(root: AccessibilityNodeInfo, phrases: List<String>, depth: Int = 0): AccessibilityNodeInfo? {
+        if (depth > 25) return null
+        val text = root.text?.toString().orEmpty().lowercase()
+        val cd = root.contentDescription?.toString().orEmpty().lowercase()
+        for (p in phrases) {
+            if (text.contains(p) || cd.contains(p)) {
+                return root
+            }
+        }
+        for (i in 0 until root.childCount) {
+            val c = root.getChild(i) ?: continue
+            val found = findNodeMatchingText(c, phrases, depth + 1)
+            if (found != null) {
+                if (found !== c) c.recycle()
+                return found
+            }
+            c.recycle()
+        }
+        return null
+    }
+
+    private fun showRedditMatureLockedOverlay() {
+        showOverlay(
+            getTamperHeading(),
+            if (isBangla()) "রেডিটে 'Show mature content' সেটিংটি বন্ধ রাখা আবশ্যক।" else "'Show mature content' in Reddit is locked OFF for your protection.",
+            4500,
+            getTamperSubheading(),
+            getUnderstoodButton()
+        )
+    }
+
+    private fun guardRedditNsfwContent(root: AccessibilityNodeInfo, ev: AccessibilityEvent, now: Long): Boolean {
+        // A. Full-screen NSFW Warning / 18+ Interstitial Screens (budget 2500)
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(2500))
+        val t = sb.toString().lowercase()
+
+        val isNsfwWarningScreen = ("this community is 18+" in t || "this community contains nsfw" in t ||
+            "mature content warning" in t || "you must be 18+" in t || "you must be at least 18" in t ||
+            "nsfw community" in t || "nsfw content" in t || "are you over 18" in t ||
+            "view 18+ content" in t || "nsfw warning" in t || "show nsfw content" in t ||
+            "unblur nsfw" in t || "18+ content" in t || "this subreddit is marked nsfw" in t ||
+            "contains adult content" in t || "nsfw subreddit" in t ||
+            ("mature (18+)" in t && ("continue" in t || "go back" in t)))
+
+        if (isNsfwWarningScreen) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            if (now - lastRedditNsfwHit >= 800L) {
+                lastRedditNsfwHit = now
+                BlockerStore.incr(this, "reddit_nsfw")
+                showOverlay(
+                    getFearAllahHeading(),
+                    if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও NSFW কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "NSFW and adult content on Reddit is blocked for your protection.",
+                    4000,
+                    getFearAllahSubheading(),
+                    getAstaghfirullahButton()
+                )
+            }
+            return true
+        }
+
+        // B. Clicked on an NSFW post, image, tag, or unblur button
+        if (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
+            val evText = ev.text.joinToString(" ").lowercase()
+            val srcCd = ev.source?.contentDescription?.toString().orEmpty().lowercase()
+            val srcText = ev.source?.text?.toString().orEmpty().lowercase()
+
+            val isNsfwClick = isNsfwTagString(evCd) || isNsfwTagString(evText) ||
+                isNsfwTagString(srcCd) || isNsfwTagString(srcText) ||
+                hasNsfwInNodeHierarchy(ev.source)
+
+            if (isNsfwClick) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                if (now - lastRedditNsfwHit >= 800L) {
+                    lastRedditNsfwHit = now
+                    BlockerStore.incr(this, "reddit_nsfw")
+                    showOverlay(
+                        getFearAllahHeading(),
+                        if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও NSFW কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "NSFW and adult content on Reddit is blocked for your protection.",
+                        4000,
+                        getFearAllahSubheading(),
+                        getAstaghfirullahButton()
+                    )
+                }
+                return true
+            }
+        }
+
+        // C. Opened NSFW Post / Detail View inspection
+        val hasNsfwTag = hasNsfwBadgeOrTag(root, 0, intArrayOf(150))
+        val isPostDetailScreen = ("upvote" in t || "downvote" in t) && ("add a comment" in t || "comments" in t || "share" in t)
+        val isSubredditHeader = t.startsWith("r/") || "join community" in t || "joined" in t
+
+        if (hasNsfwTag && (isPostDetailScreen || isSubredditHeader)) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            if (now - lastRedditNsfwHit >= 800L) {
+                lastRedditNsfwHit = now
+                BlockerStore.incr(this, "reddit_nsfw")
+                showOverlay(
+                    getFearAllahHeading(),
+                    if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও NSFW কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "NSFW and adult content on Reddit is blocked for your protection.",
+                    4000,
+                    getFearAllahSubheading(),
+                    getAstaghfirullahButton()
+                )
+            }
+            return true
+        }
+
+        return false
+    }
+
+    private fun isNsfwTagString(s: String): Boolean {
+        if (s.isEmpty()) return false
+        val trimmed = s.trim().lowercase()
+        return trimmed == "nsfw" || trimmed == "18+" || trimmed == "mature" ||
+            trimmed == "adult" || trimmed.contains("nsfw") || trimmed.contains("18+") ||
+            trimmed.contains("mature content") || trimmed.contains("over 18") ||
+            trimmed.contains("adult content") || trimmed.contains("unblur")
+    }
+
+    private fun hasNsfwInNodeHierarchy(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val t = node.text?.toString().orEmpty()
+        val cd = node.contentDescription?.toString().orEmpty()
+        if (isNsfwTagString(t) || isNsfwTagString(cd)) return true
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            val ct = c.text?.toString().orEmpty()
+            val ccd = c.contentDescription?.toString().orEmpty()
+            val hit = isNsfwTagString(ct) || isNsfwTagString(ccd)
+            c.recycle()
+            if (hit) return true
+        }
+        var p = node.parent
+        var depth = 0
+        while (p != null && depth < 2) {
+            val pt = p.text?.toString().orEmpty()
+            val pcd = p.contentDescription?.toString().orEmpty()
+            val hit = isNsfwTagString(pt) || isNsfwTagString(pcd)
+            val nextP = p.parent
+            p.recycle()
+            if (hit) {
+                nextP?.recycle()
+                return true
+            }
+            p = nextP
+            depth++
+        }
+        p?.recycle()
+        return false
+    }
+
+    private fun hasNsfwBadgeOrTag(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): Boolean {
+        if (n == null || depth > 12 || budget[0]-- <= 0) return false
+        val text = n.text?.toString()?.trim().orEmpty().lowercase()
+        val cd = n.contentDescription?.toString()?.trim().orEmpty().lowercase()
+        if (isNsfwTagString(text) || isNsfwTagString(cd)) return true
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val found = hasNsfwBadgeOrTag(c, depth + 1, budget)
+            c.recycle()
+            if (found) return true
+        }
+        return false
     }
 
     private fun hasAnyNodeId(root: AccessibilityNodeInfo, ids: List<String>): Boolean {
@@ -3993,7 +4793,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     @Suppress("DEPRECATION")
     private fun collectText(n: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, budget: IntArray) {
-        if (n == null || depth > 10 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
+        if (n == null || depth > 25 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
         if (!n.isPassword) {
             n.text?.let { sb.append(it).append(' ') }
             n.contentDescription?.let { sb.append(it).append(' ') }

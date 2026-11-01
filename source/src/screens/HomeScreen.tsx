@@ -144,27 +144,28 @@ export default function HomeScreen() {
         </Card>
       )}
 
-      <Card>
+      <Card style={{ borderColor: p.active ? t.ok : t.cardBorder, borderWidth: 1.5 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Title size={21} icon={p.active ? Icons.shieldOn : Icons.shieldOff} tone={p.active ? 'ok' : 'accent'}>
               {p.active ? 'Protection Active' : 'Protection Paused'}
             </Title>
-            <Sub>{p.active ? 'Blocklists and daily limits enforced' : 'Protection is turned off'}</Sub>
+            <Sub>{p.active ? 'Domain blocklists, keywords & limits enforced' : 'Distraction protection is paused'}</Sub>
           </View>
-          <Switch value={p.active} onValueChange={onToggle} trackColor={{ true: t.ok }} />
+          <Switch value={p.active} onValueChange={onToggle} trackColor={{ true: t.ok, false: t.border }} />
         </View>
         <LockBar lockKey="protection" />
       </Card>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         {stats.map(([label, n]) => (
           <View key={label} style={{
-            flexGrow: 1, flexBasis: '30%', backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1,
-            borderRadius: 18, padding: 14
+            flexGrow: 1, flexBasis: '47%', backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1,
+            borderRadius: 18, padding: 16,
+            shadowColor: t.accent, shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2
           }}>
             <Text style={{ color: t.accent, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 }}>{n}</Text>
-            <Text style={{ color: t.sub, fontSize: 11, marginTop: 3 }}>{label}</Text>
+            <Text style={{ color: t.sub, fontSize: 12, marginTop: 4, fontWeight: '500' }}>{label}</Text>
           </View>
         ))}
       </View>

@@ -85,8 +85,8 @@ export default function App() {
   }
   if (!p.ready || !p.perms) return <View style={shell} />;
 
-  // while focus or study mode runs, the only screen is the focus/study screen (Blocker's own settings are locked too)
-  if (p.focus.active || p.study.active) {
+  // While focus or study mode runs, lock Blocker's settings to the active session screen
+  if (p.focus.active || p.study?.active) {
     return (
       <View style={shell}>
         <StatusBar barStyle="light-content" backgroundColor={t.bg} />
@@ -97,6 +97,7 @@ export default function App() {
       </View>
     );
   }
+
 
   const pm = p.perms;
   const permsOk = pm.accessibility && pm.deviceAdmin && pm.usageAccess && pm.overlay;

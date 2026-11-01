@@ -329,8 +329,8 @@ export function LockBar({ lockKey }: { lockKey: LockKey }) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   }, [visible, lock?.ready]);
   if (!visible) return null;
-  const remaining = lock.pending ? Math.max(0, lock.unlockAt - now) : 0;
-  const ready = remaining === 0;
+  const remaining = lock.pending ? Math.max(0, lock.remainingMs !== undefined ? lock.remainingMs : Math.max(0, lock.unlockAt - now)) : 0;
+  const ready = (lock.ready ?? false) || (lock.open ?? false) || (lock.pending && remaining === 0 && (lock.remainingMs ?? 0) === 0);
   const color = ready ? t.ok : t.warn;
   const run = (fn: () => Promise<void>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
   return (
@@ -356,15 +356,16 @@ export function LockBar({ lockKey }: { lockKey: LockKey }) {
 }
 
 export function AnimatedToggleRow({
-  label, sub, value, onValueChange, icon: Icon, disabled
+  label, sub, value, onValueChange, icon: Icon, disabled, badge
 }: {
-  label: string; sub?: string; value: boolean; onValueChange: (v: boolean) => void; icon?: LucideIcon; disabled?: boolean;
+  label: string; sub?: string; value: boolean; onValueChange?: (v: boolean) => void; icon?: LucideIcon; disabled?: boolean; badge?: string;
 }) {
   const t = useTheme();
   const animAlpha = useRef(new Animated.Value(1)).current;
   const animY = useRef(new Animated.Value(0)).current;
 
   const handleToggle = (nextVal: boolean) => {
+    if (!onValueChange) return;
     animAlpha.setValue(0.75);
     animY.setValue(nextVal ? -2 : 2);
     Animated.parallel([
@@ -392,16 +393,20 @@ export function AnimatedToggleRow({
           <Icon size={16} color={value ? '#FFFFFF' : t.sub} strokeWidth={value ? 2.6 : 2.25} />
         </View>
       )}
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: t.text, fontWeight: '600' }} numberOfLines={1}>{label}</Text>
-        {sub && <Text style={{ color: t.sub, fontSize: 12, marginTop: 1 }} numberOfLines={1}>{sub}</Text>}
+      <View style={{ flex: 1, paddingRight: 6 }}>
+        <Text style={{ color: t.text, fontWeight: '600', fontSize: 13.5 }} numberOfLines={1}>{label}</Text>
+        {sub && <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 1.5 }} numberOfLines={1}>{sub}</Text>}
       </View>
-      <Switch
-        disabled={disabled}
-        value={value}
-        onValueChange={handleToggle}
-        trackColor={{ true: t.accent, false: t.border }}
-      />
+      {badge ? (
+        <Badge label={badge} tone={value ? 'ok' : 'idle'} />
+      ) : (
+        <Switch
+          disabled={disabled}
+          value={value}
+          onValueChange={handleToggle}
+          trackColor={{ true: t.accent, false: t.border }}
+        />
+      )}
     </Animated.View>
   );
 }

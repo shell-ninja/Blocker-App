@@ -44,12 +44,30 @@ object NativeBlockerBridge {
         }
     }
 
+    fun matchUrlRule(charArray: CharArray, length: Int): String? {
+        if (!isLoaded || length <= 0) return null
+        return try {
+            nativeMatchUrlRule(charArray, length)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun matchTextFast(charArray: CharArray, length: Int): Boolean {
         if (!isLoaded || length <= 0) return false
         return try {
             nativeMatchText(charArray, length) > 0
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    fun matchTextRule(charArray: CharArray, length: Int): String? {
+        if (!isLoaded || length <= 0) return null
+        return try {
+            nativeMatchTextRule(charArray, length)
+        } catch (_: Throwable) {
+            null
         }
     }
 
@@ -76,7 +94,13 @@ object NativeBlockerBridge {
     private external fun nativeMatchUrl(chars: CharArray, len: Int): Int
 
     @JvmStatic
+    private external fun nativeMatchUrlRule(chars: CharArray, len: Int): String?
+
+    @JvmStatic
     private external fun nativeMatchText(chars: CharArray, len: Int): Int
+
+    @JvmStatic
+    private external fun nativeMatchTextRule(chars: CharArray, len: Int): String?
 
     @JvmStatic
     private external fun nativeHashChars(chars: CharArray, len: Int): Long

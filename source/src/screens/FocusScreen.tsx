@@ -396,10 +396,10 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
 function GranularFocusCard() {
   const p = useProtection();
   const gf = p.granularFocus || {
-    block_fb_reels: false,
-    block_insta_reels: false,
+    block_fb_reels: true,
+    block_insta_reels: true,
     block_insta_search: false,
-    block_yt_shorts: false
+    block_yt_shorts: true
   };
 
   const onToggle = async (key: 'block_fb_reels' | 'block_insta_reels' | 'block_insta_search' | 'block_yt_shorts', on: boolean) => {
@@ -418,7 +418,7 @@ function GranularFocusCard() {
   return (
     <Card>
       <Title icon={Icons.shieldOn}>Distraction Shields</Title>
-      <Sub>Exit short-form video feeds while keeping parent apps usable.</Sub>
+      <Sub>Exit short-form video feeds & adult content while keeping parent apps usable.</Sub>
       <View style={{ marginTop: 10 }}>
         <AnimatedToggleRow
           icon={Icons.play}
@@ -443,10 +443,17 @@ function GranularFocusCard() {
         />
         <AnimatedToggleRow
           icon={Icons.apps}
-          label="Block Facebook Reels"
-          sub="Exit Reels & video feeds"
+          label="Block Facebook Reels & Videos"
+          sub="Exit Reels, Watch & newsfeed video playback"
           value={gf.block_fb_reels}
           onValueChange={v => onToggle('block_fb_reels', v)}
+        />
+        <AnimatedToggleRow
+          icon={Icons.shield}
+          label="Reddit Mature Content Lockdown"
+          sub="Permanently enforces 'Show mature content' OFF"
+          value={true}
+          badge="Enforced"
         />
         <LockBar lockKey="granular_focus" />
       </View>

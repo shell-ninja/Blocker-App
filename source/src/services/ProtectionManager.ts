@@ -63,10 +63,10 @@ export interface StudyState {
   breakMinutes: number;
 }
 export const DEFAULT_GRANULAR: GranularFocusToggles = {
-  block_fb_reels: false,
-  block_insta_reels: false,
+  block_fb_reels: true,
+  block_insta_reels: true,
   block_insta_search: false,
-  block_yt_shorts: false
+  block_yt_shorts: true
 };
 
 export interface Snapshot {
@@ -353,6 +353,10 @@ export async function cancel(key: LockKey) {
 export async function setProtection(on: boolean): Promise<Outcome> {
   if (on) {
     await sync();
+    await Native.cancelSettingChange('protection').catch(() => {});
+    const queue = { ...snap.state.queue };
+    delete queue['protection'];
+    persist({ ...snap.state, queue });
     await Native.setProtectionActive(true);
     await refresh();
     return 'applied';
