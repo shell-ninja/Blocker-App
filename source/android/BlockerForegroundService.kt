@@ -5,8 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -19,6 +23,8 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Persistent foreground service to ensure the Blocker app process remains alive with
@@ -34,6 +40,15 @@ class BlockerForegroundService : Service {
         const val UPDATE_CHANNEL_ID = "blocker_updates"
         const val NOTIFICATION_ID = 1001
         const val UPDATE_NOTIFICATION_ID = 1002
+        const val TAMPER_NOTIFICATION_ID = 1003
+
+        val BANKING_PACKAGES = setOf(
+            "com.bKash.customerapp",
+            "com.konasl.nagad",
+            "bd.com.upay.customer",
+            "com.dbbl.mbs.apps.holder",
+            "com.ibbl.cellfin"
+        )
 
         const val REGULAR_UPDATE_COOLDOWN_MS = 2L * 60 * 60 * 1000L  // 2 hours
         const val PENDING_UPDATE_COOLDOWN_MS = 24L * 60 * 60 * 1000L // 24 hours
@@ -59,6 +74,25 @@ class BlockerForegroundService : Service {
     }
 
     private val updateExecutor = Executors.newSingleThreadScheduledExecutor()
+    private val watchdogExecutor = Executors.newSingleThreadScheduledExecutor()
+    private var watchdogFuture: ScheduledFuture<*>? = null
+    @Volatile private var isScreenInteractive = true
+    private var screenReceiverRegistered = false
+    private var lastTamperAlertTs = 0L
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                    isScreenInteractive = true
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    isScreenInteractive = false
+                }
+            }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private val updateCheckRunnable = object : Runnable {
         override fun run() {
@@ -73,14 +107,162 @@ class BlockerForegroundService : Service {
         super.onCreate()
         createNotificationChannel()
         handler.postDelayed(updateCheckRunnable, 30_000L) // initial check 30s after service launch
+        registerScreenReceiver()
+        startWatchdog()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(updateCheckRunnable)
+        stopWatchdog()
+        unregisterScreenReceiver()
         runCatching { updateExecutor.shutdownNow() }
+        runCatching { watchdogExecutor.shutdownNow() }
         super.onDestroy()
         if (BlockerStore.active(this)) {
             start(this)
+        }
+    }
+
+    private fun registerScreenReceiver() {
+        if (!screenReceiverRegistered) {
+            runCatching {
+                val filter = IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_USER_PRESENT)
+                }
+                registerReceiver(screenReceiver, filter)
+                screenReceiverRegistered = true
+            }
+        }
+    }
+
+    private fun unregisterScreenReceiver() {
+        if (screenReceiverRegistered) {
+            runCatching {
+                unregisterReceiver(screenReceiver)
+                screenReceiverRegistered = false
+            }
+        }
+    }
+
+    private fun startWatchdog() {
+        stopWatchdog()
+        watchdogFuture = watchdogExecutor.scheduleWithFixedDelay({
+            if (!isScreenInteractive) return@scheduleWithFixedDelay
+            runCatching { inspectForegroundState() }
+        }, 1000L, 250L, TimeUnit.MILLISECONDS)
+    }
+
+    private fun stopWatchdog() {
+        watchdogFuture?.cancel(false)
+        watchdogFuture = null
+    }
+
+    private fun inspectForegroundState() {
+        val active = BlockerStore.active(this)
+        val shield = BlockerStore.shield(this)
+        val guardOpen = BlockerStore.guardOpen(this, "shield")
+
+        if (!active || !shield || guardOpen) return
+
+        val topPkg = getTopPackage() ?: return
+        if (topPkg == packageName || topPkg in BANKING_PACKAGES) return
+
+        val isBn = BlockerStore.popupLanguage(this) == "bn"
+
+        // 1. Settings & Package Installer lockdown
+        if (isSettingsOrInstaller(topPkg)) {
+            kickToHome()
+            BlockerStore.incr(this, "tamper")
+            showTamperAlert(
+                title = if (isBn) "🛡️ সেটিংস সুরক্ষিত" else "🛡️ Settings Protected",
+                message = if (isBn) "সুরক্ষা মোড চালু থাকা অবস্থায় সেটিংস এবং আনইনস্টল বন্ধ রাখা হয়েছে।"
+                          else "Settings and uninstallation are strictly locked while Blocker is active."
+            )
+            return
+        }
+
+        // 2. Blocked app enforcement fallback (even if accessibility is off/interrupted)
+        val blockedApps = BlockerStore.set(this, "apps")
+        if (topPkg in blockedApps) {
+            kickToHome()
+            showTamperAlert(
+                title = if (isBn) "🔒 অ্যাপটি বন্ধ রাখা হয়েছে" else "🔒 App Blocked",
+                message = if (isBn) "মনোযোগ ধরে রাখতে এই অ্যাপটি বন্ধ করা হয়েছে।"
+                          else "This app is restricted to help maintain focus."
+            )
+        }
+    }
+
+    private fun getTopPackage(): String? {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
+        val now = System.currentTimeMillis()
+        val events = usm.queryEvents(now - 3000, now) ?: return null
+        var lastPkg: String? = null
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                lastPkg = event.packageName
+            }
+        }
+        return lastPkg
+    }
+
+    private fun isSettingsOrInstaller(pkg: String): Boolean {
+        if (pkg.isEmpty() || pkg in BANKING_PACKAGES || pkg == packageName) return false
+        val lower = pkg.lowercase()
+        // Allow file pickers
+        if (lower.contains("file") || lower.contains("explorer") || lower.contains("document") ||
+            lower.contains("download") || lower.contains("archive") || lower.contains("zarchiver")) {
+            return false
+        }
+        return lower.contains("settings") ||
+            lower.contains("packageinstaller") ||
+            lower.contains("packagemanager") ||
+            lower.contains("safecenter") ||
+            lower.contains("securitycenter") ||
+            lower.contains("phonemanager") ||
+            lower.contains("phonemaster") ||
+            lower.contains("appmanager") ||
+            lower.contains("permissioncontroller") ||
+            lower.contains("permissionmanager") ||
+            lower.contains("managedprovisioning")
+    }
+
+    private fun kickToHome() {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+        }
+        runCatching { startActivity(homeIntent) }
+    }
+
+    private fun showTamperAlert(title: String, message: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastTamperAlertTs < 2000L) return
+        lastTamperAlertTs = now
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = if (launchIntent != null) PendingIntent.getActivity(this, 0, launchIntent, flags) else null
+            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+            if (pendingIntent != null) builder.setContentIntent(pendingIntent)
+            nm.notify(TAMPER_NOTIFICATION_ID, builder.build())
         }
     }
 

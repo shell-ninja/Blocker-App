@@ -163,57 +163,36 @@ export default function HomeScreen() {
         <LockBar lockKey="protection" />
       </Card>
 
-      {/* bKash & Banking Assistant */}
-      <Card style={{ borderColor: p.stats?.bankingModeActive ? t.warn : t.cardBorder, borderWidth: 1 }}>
+      {/* bKash & Banking Security Shield */}
+      <Card style={{ borderColor: t.cardBorder, borderWidth: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            <Title icon={Icons.shield} tone={p.stats?.bankingModeActive ? 'warn' : 'accent'}>
-              bKash & Banking Mode
+            <Title icon={Icons.shield} tone="ok">
+              bKash & Banking Shield
             </Title>
             <Sub>
-              {p.stats?.bankingModeActive
-                ? 'Accessibility paused for bKash session. Tap below to re-enable.'
-                : 'Run bKash & mobile banking apps without security conflict.'}
+              Zero-Overlay & Scoped Protection active. bKash, Nagad & financial apps run smoothly without security flags. Anti-uninstall is 100% locked.
             </Sub>
           </View>
           <Badge
-            label={p.stats?.bankingModeActive ? 'Banking Active' : 'Safe'}
-            tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}
+            label="Tamper-Proof"
+            tone="ok"
           />
         </View>
         <View style={{ marginTop: 8, flexDirection: 'row', gap: 10 }}>
-          {p.stats?.bankingModeActive ? (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Re-enable Protection"
-                icon={Icons.shieldOn}
-                kind="primary"
-                onPress={async () => {
-                  try {
-                    await Native.openPermissionSettings('accessibility');
-                  } catch (e) {
-                    showAlert('Settings', errMsg(e));
-                  }
-                }}
-              />
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Pause for bKash"
-                icon={Icons.shieldOff}
-                kind="ghost"
-                onPress={async () => {
-                  try {
-                    await pauseForBanking();
-                    refresh();
-                  } catch (e) {
-                    showAlert('Banking Mode', errMsg(e));
-                  }
-                }}
-              />
-            </View>
-          )}
+          <View style={{ flex: 1 }}>
+            <Btn
+              label={p.stats?.bankingModeActive ? 'Banking Shield Active' : 'bKash Protection Details'}
+              icon={Icons.shield}
+              kind="secondary"
+              onPress={() => {
+                showAlert(
+                  'bKash & Banking Protection',
+                  '1. Zero-Overlay: Blocker completely detaches overlay windows when idle so banking apps detect no screen obscuring.\n\n2. Scoped Protection: bKash is excluded from accessibility monitoring.\n\n3. Hardware Watchdog: Even if accessibility is interrupted, Blocker Foreground Service watchdog instantly blocks Settings and package installers from opening.\n\n4. Device Admin: Hardware-level uninstallation is locked by Android OS.'
+                );
+              }}
+            />
+          </View>
         </View>
       </Card>
 

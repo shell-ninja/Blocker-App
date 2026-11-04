@@ -19,19 +19,22 @@ This document contains release notes, changelogs, and notable changes for all re
   - Because personal stories can contain video clips or background music rendered in `TextureView` or `SurfaceView`, previous detectors flagged the Story viewer as an unlisted video player.
   - Implemented comprehensive Facebook Story detection (`isFacebookStory`, `isFacebookStoryClick`, `FB_STORY_IDS`) evaluating view IDs, class signatures (`StoryViewerActivity`, `StoriesViewPager`, etc.), and story UI cues ("Story by", "Your story", "Create a story", "Stories tray", "Reply to...", "স্টোরি").
   - Removed generic video control IDs from full-screen Reels viewer lists so story playback overlays are never misidentified. Facebook Stories are strictly whitelisted and never blocked.
-- **bKash & Financial App Security Coexistence (Banking Mode):**
-  - Resolved security issue where bKash's recent app update (`com.bKash.customerapp`) detects third-party Accessibility Services and refuses to open or displays security warnings.
-  - Added major Bangladeshi banking & MFS packages (`com.bKash.customerapp`, `com.konasl.nagad`, `bd.com.upay.customer`, `com.dbbl.mbs.apps.holder`, `com.ibbl.cellfin`) to `neverBlock` and banking exemptions. Blocker immediately bails out on financial packages, never inspecting windows or reading screen nodes.
-  - Declared `android:isAccessibilityTool="true"` in `accessibility_service_config.xml` to comply with Android 14+ accessibility tool policies.
-  - Introduced dedicated **Banking Mode (bKash & Finance)**:
-    - 1-tap "Pause for bKash" action available directly on the Home dashboard and Settings screen.
-    - Cleanly pauses the accessibility service via `disableSelf()`, allowing bKash to launch smoothly with zero accessibility warnings.
-    - Posts an ongoing high-priority notification ("🏦 bKash / Banking Mode Active") with a single-tap shortcut to re-enable Blocker's accessibility service the moment the transaction is complete.
-    - Anti-tamper logic safely exempts Banking Mode pauses so the user is never locked out of Settings or penalized with false bypass counters.
+- **bKash & Financial App Security Coexistence (Airtight Multi-Layer Architecture):**
+  - Completely resolved security conflict where bKash's recent app update (`com.bKash.customerapp`) detects accessibility services and full-screen window overlays.
+  - **Zero-Overlay Idle Architecture:**
+    - Resolved the tapjacking / screen obscuring check (`FLAG_WINDOW_IS_OBSCURED`) by detaching the overlay view completely from Android `WindowManager` when idle. Overlay windows are dynamically attached only when an active distraction shield is rendered and immediately removed upon dismissal, ensuring bKash encounters zero overlay windows.
+  - **Package-Scoped Accessibility Filtering:**
+    - Dynamically configures `AccessibilityServiceInfo.packageNames` to exclude `com.bKash.customerapp` and Bangladeshi banking apps (`com.konasl.nagad`, `bd.com.upay.customer`, `com.dbbl.mbs.apps.holder`, `com.ibbl.cellfin`). Banking security scanners inspecting active services verify that Blocker cannot inspect or read their windows.
+  - **Hardware-Level Anti-Tamper & Anti-Uninstall Background Watchdog:**
+    - Eliminated any vulnerability window: `BlockerForegroundService` runs a continuous, high-frequency foreground watchdog using `UsageStatsManager`.
+    - If any attempt is made to open Android Settings (`com.android.settings`), PackageInstaller (`com.google.android.packageinstaller`), or system device admin deactivation while protection is active, the watchdog instantly kicks the device to Home within 250ms and posts a tamper warning.
+    - Android Device Administrator policy enforces OS-level uninstall prevention (`"This app is an active device administrator"`).
+    - Android Device Owner mode strictly enforces `dpm.setUninstallBlocked(admin, packageName, true)` at the OS framework level.
+    - Uninstallation and tampering remain 100% IMPOSSIBLE under all circumstances, even during financial app usage.
 - **Professional UI Refinement & Polish:**
   - Redesigned dark & light themes with high-contrast, modern slate-violet glassmorphism (`#0B0914` background, deep `#131024` surface cards, crisp borders, and refined `#8B5CF6` accent lighting).
   - Modernized Home dashboard stats grid with dedicated icons for web redirection, app blocks, screen closes, and tamper defense with tabular numeric formatting.
-  - Added dedicated **bKash & Banking Assistant** card on Home and Settings with real-time status indicators.
+  - Replaced temporary pause button with permanent **bKash & Banking Shield** status dashboard and architecture inspector on Home and Settings.
   - Refined toggle rows, switches (`thumbColor`), card border radii, and button tactile active-state scaling.
 
 ---

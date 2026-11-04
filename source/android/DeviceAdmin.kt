@@ -53,6 +53,9 @@ object DeviceOwnerHelper {
                     try {
                         dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
                     } catch (_: Exception) {}
+                    try {
+                        dpm.setUninstallBlocked(admin, context.packageName, true)
+                    } catch (_: Exception) {}
                     // Freeze / hide scheduled power-off packages so RTC hardware alarms cannot trigger
                     val scheduledPowerPackages = listOf(
                         "com.mediatek.schpwronoff",

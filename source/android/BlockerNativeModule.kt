@@ -782,23 +782,24 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
                         NotificationChannel("blocker_alerts", "Protection alerts", NotificationManager.IMPORTANCE_HIGH)
                     )
                 }
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                val launchIntent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
-                val pi = PendingIntent.getActivity(
-                    ctx, 0, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-                )
+                val pi = if (launchIntent != null) {
+                    PendingIntent.getActivity(
+                        ctx, 0, launchIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+                    )
+                } else null
                 val isBn = BlockerStore.popupLanguage(ctx) == "bn"
                 val n = NotificationCompat.Builder(ctx, "blocker_alerts")
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle(if (isBn) "🏦 বিকাশ / ব্যাংকিং মোড চালু" else "🏦 bKash / Banking Mode Active")
-                    .setContentText(if (isBn) "বিকাশ ব্যবহারের জন্য সার্ভিস সাময়িক স্থগিত। শেষ হলে ট্যাপ করে পুনরায় চালু করুন।" else "Accessibility paused for banking security. Tap here to re-enable Blocker.")
+                    .setSmallIcon(android.R.drawable.ic_lock_lock)
+                    .setContentTitle(if (isBn) "🏦 বিকাশ ও ব্যাংকিং শিল্ড সক্রিয়" else "🏦 bKash & Banking Shield Active")
+                    .setContentText(if (isBn) "জিরো-ওভারলে ও অ্যান্টি-ট্যাম্পার চালু রয়েছে। সেটিংস এবং আনইনস্টল সুরক্ষিত।" else "Zero-Overlay & anti-tamper active. Settings and uninstallation are strictly locked.")
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setOngoing(true)
-                    .setContentIntent(pi)
-                    .build()
-                nm.notify(NOTIFICATION_ID_BANKING_MODE, n)
+                if (pi != null) n.setContentIntent(pi)
+                nm.notify(NOTIFICATION_ID_BANKING_MODE, n.build())
             }
         }
     }
@@ -1611,9 +1612,8 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
         try {
             BlockerStore.setBankingMode(ctx, true)
             showBankingModeNotification(ctx)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                BlockerAccessibilityService.instance?.disableSelf()
-            }
+            BlockerForegroundService.start(ctx)
+            BlockerAccessibilityService.instance?.updateMonitoredPackages()
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("BANKING_ERROR", e.message, e)

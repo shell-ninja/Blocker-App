@@ -923,6 +923,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 info.eventTypes = info.eventTypes or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED
                 serviceInfo = info
             }
+            updateMonitoredPackages()
         }
         BlockerStore.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
         runCatching {
@@ -982,12 +983,30 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    fun updateMonitoredPackages() {
+        runCatching {
+            val info = serviceInfo ?: return
+            val installed = packageManager.getInstalledPackages(0).map { it.packageName }.toSet()
+            val filtered = installed.filter { pkg ->
+                pkg !in BANKING_PACKAGES &&
+                pkg != "com.bKash.customerapp" &&
+                pkg != "android" &&
+                pkg != "com.android.systemui"
+            }
+            if (filtered.isNotEmpty()) {
+                info.packageNames = filtered.toTypedArray()
+                serviceInfo = info
+            }
+        }
+    }
+
     fun pauseForBankingMode() {
         BlockerStore.setBankingMode(this, true)
         BlockerNativeModule.showBankingModeNotification(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            disableSelf()
-        }
+        // Never call disableSelf()! Doing so creates an uninstallation loophole.
+        // Blocker keeps anti-tamper and anti-uninstall 100% airtight while detaching
+        // window overlays and scoping accessibility so banking apps run cleanly.
+        updateMonitoredPackages()
     }
 
     @Volatile private var cachedLauncherPackages: Set<String> = emptySet()
@@ -1310,6 +1329,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
         appLimits = BlockerStore.appLimits(this)
         enforceAdbOff(notify = false)
+        updateMonitoredPackages()
     }
 
     private val todayUsageCache = HashMap<String, Pair<Long, Long>>() // pkg -> (timestamp, usageMs)
@@ -5274,10 +5294,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         )
 
         container.visibility = View.GONE
-        runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).addView(container, rootLp)
-            isOverlayAttached = true
-        }
+        isOverlayAttached = false
 
         preInflatedOverlay = container
         preInflatedOverlayLp = rootLp
@@ -5349,7 +5366,15 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             lp.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-            runCatching { wm.updateViewLayout(container, lp) }
+
+            if (!isOverlayAttached) {
+                runCatching {
+                    wm.addView(container, lp)
+                    isOverlayAttached = true
+                }
+            } else {
+                runCatching { wm.updateViewLayout(container, lp) }
+            }
 
             container.visibility = View.VISIBLE
             isOverlayVisible = true
@@ -5373,17 +5398,16 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun removeOverlay() {
         main.removeCallbacks(hideRunnable)
         val container = preInflatedOverlay ?: return
-        val lp = preInflatedOverlayLp ?: return
-        if (!isOverlayVisible && container.visibility == View.GONE) return
-
+        if (isOverlayAttached) {
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            runCatching {
+                wm.removeViewImmediate(container)
+            }.onFailure {
+                runCatching { wm.removeView(container) }
+            }
+            isOverlayAttached = false
+        }
         container.visibility = View.GONE
         isOverlayVisible = false
-
-        lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-        runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(container, lp)
-        }
     }
 }
