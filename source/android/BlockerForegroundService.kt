@@ -181,14 +181,14 @@ class BlockerForegroundService : Service {
 
         val isBn = BlockerStore.popupLanguage(this) == "bn"
 
-        // 1. Settings & Package Installer lockdown
-        if (isSettingsOrInstaller(topPkg)) {
+        // 1. Package Installer (uninstallation) lockdown
+        if (isInstaller(topPkg)) {
             kickToHome()
             BlockerStore.incr(this, "tamper")
             showTamperAlert(
-                title = if (isBn) "🛡️ সেটিংস সুরক্ষিত" else "🛡️ Settings Protected",
-                message = if (isBn) "সুরক্ষা মোড চালু থাকা অবস্থায় সেটিংস এবং আনইনস্টল বন্ধ রাখা হয়েছে।"
-                          else "Settings and uninstallation are strictly locked while Blocker is active."
+                title = if (isBn) "🛡️ আনইনস্টল বন্ধ" else "🛡️ Uninstall Blocked",
+                message = if (isBn) "সুরক্ষা মোড চালু থাকা অবস্থায় অ্যাপ আনইনস্টল বন্ধ রাখা হয়েছে।"
+                          else "Uninstallation is strictly locked while Blocker is active."
             )
             return
         }
@@ -220,25 +220,12 @@ class BlockerForegroundService : Service {
         return lastPkg
     }
 
-    private fun isSettingsOrInstaller(pkg: String): Boolean {
+    private fun isInstaller(pkg: String): Boolean {
         if (pkg.isEmpty() || pkg in BANKING_PACKAGES || pkg == packageName) return false
         val lower = pkg.lowercase()
-        // Allow file pickers
-        if (lower.contains("file") || lower.contains("explorer") || lower.contains("document") ||
-            lower.contains("download") || lower.contains("archive") || lower.contains("zarchiver")) {
-            return false
-        }
-        return lower.contains("settings") ||
-            lower.contains("packageinstaller") ||
+        return lower.contains("packageinstaller") ||
             lower.contains("packagemanager") ||
-            lower.contains("safecenter") ||
-            lower.contains("securitycenter") ||
-            lower.contains("phonemanager") ||
-            lower.contains("phonemaster") ||
-            lower.contains("appmanager") ||
-            lower.contains("permissioncontroller") ||
-            lower.contains("permissionmanager") ||
-            lower.contains("managedprovisioning")
+            (lower.contains("installer") && !lower.contains("permission"))
     }
 
     private fun kickToHome() {

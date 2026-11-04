@@ -908,6 +908,9 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
      */
     @ReactMethod
     fun openPermissionSettings(kind: String, promise: Promise) {
+        BlockerStore.setBankingMode(ctx, false)
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        nm?.cancel(NOTIFICATION_ID_BANKING_MODE)
         val tries: List<Intent> = when (kind) {
             "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "overlay" -> listOf(
