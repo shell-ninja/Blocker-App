@@ -53,6 +53,7 @@ write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encod
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
+    android:isAccessibilityTool="true"
     android:notificationTimeout="0"
     android:description="@string/a11y_desc"/>
 """)

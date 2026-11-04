@@ -4,7 +4,7 @@ import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-re
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
-import { deactivateDeviceOwner, getPopupLanguage, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
+import { deactivateDeviceOwner, getPopupLanguage, pauseForBanking, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
@@ -231,6 +231,57 @@ export default function SettingsScreen() {
           />
         </View>
         <LockBar lockKey="power_menu" />
+      </Card>
+
+      <Card>
+        <Title icon={Icons.shield}>bKash & Banking Coexistence</Title>
+        <Sub>
+          Banking apps like bKash detect Android Accessibility Services. Blocker lets you safely pause accessibility during banking sessions and restore full protection with one tap, without triggering anti-tamper.
+        </Sub>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ color: t.text, fontWeight: '700' }}>bKash Status</Text>
+            <Sub>{p.stats?.bankingModeActive ? 'Accessibility is paused for banking' : 'Accessibility active (protected)'}</Sub>
+          </View>
+          <Badge
+            label={p.stats?.bankingModeActive ? 'Banking Active' : 'Protected'}
+            tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}
+          />
+        </View>
+        <View style={{ marginTop: 12, flexDirection: 'row', gap: 10 }}>
+          {p.stats?.bankingModeActive ? (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Re-enable Protection"
+                icon={Icons.shieldOn}
+                kind="primary"
+                onPress={async () => {
+                  try {
+                    await Native.openPermissionSettings('accessibility');
+                  } catch (e) {
+                    showAlert('Settings', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Pause for bKash"
+                icon={Icons.shieldOff}
+                kind="ghost"
+                onPress={async () => {
+                  try {
+                    await pauseForBanking();
+                    showAlert('Banking Mode', 'Blocker accessibility paused. You can now open bKash without security warnings. When finished, tap the notification to re-enable Blocker.');
+                  } catch (e) {
+                    showAlert('Banking Mode', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          )}
+        </View>
       </Card>
 
       <Card>

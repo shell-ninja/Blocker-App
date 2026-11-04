@@ -11,16 +11,16 @@ import { BG_PATTERN_DATA_URI } from './data/bgPattern';
 
 // Purple-on-dark, glassmorphism-inspired with increased card opacity and vibrant accents
 const DARK = {
-  bg: '#0C0A16', bgAlt: '#120E22', card: 'rgba(139,92,246,0.14)', cardBorder: 'rgba(199,175,255,0.22)',
-  glass: 'rgba(255,255,255,0.06)', text: '#F3F0FF', sub: '#9C93B8', border: 'rgba(199,175,255,0.18)',
-  accent: '#8B5CF6', accentSoft: 'rgba(139,92,246,0.20)', danger: '#F5455C', dangerSoft: 'rgba(245,69,92,0.16)',
-  ok: '#2ED88A', okSoft: 'rgba(46,216,138,0.16)', warn: '#F5A623', warnSoft: 'rgba(245,166,35,0.16)'
+  bg: '#0B0914', bgAlt: '#131024', card: 'rgba(23, 19, 41, 0.88)', cardBorder: 'rgba(157, 126, 245, 0.22)',
+  glass: 'rgba(255, 255, 255, 0.05)', text: '#FAF9FE', sub: '#9E97B1', border: 'rgba(157, 126, 245, 0.18)',
+  accent: '#8B5CF6', accentSoft: 'rgba(139, 92, 246, 0.18)', danger: '#EF4444', dangerSoft: 'rgba(239, 68, 68, 0.16)',
+  ok: '#10B981', okSoft: 'rgba(16, 185, 129, 0.16)', warn: '#F59E0B', warnSoft: 'rgba(245, 158, 11, 0.16)'
 };
 const LIGHT: typeof DARK = {
-  bg: '#F5F3FC', bgAlt: '#EDE9FB', card: 'rgba(139,92,246,0.12)', cardBorder: 'rgba(124,58,237,0.20)',
-  glass: 'rgba(255,255,255,0.5)', text: '#181321', sub: '#655E78', border: 'rgba(124,58,237,0.16)',
-  accent: '#7C3AED', accentSoft: 'rgba(124,58,237,0.14)', danger: '#DC2A42', dangerSoft: 'rgba(220,42,66,0.1)',
-  ok: '#149A63', okSoft: 'rgba(20,154,99,0.12)', warn: '#C77700', warnSoft: 'rgba(199,119,0,0.12)'
+  bg: '#F6F5FD', bgAlt: '#EDE9FB', card: '#FFFFFF', cardBorder: 'rgba(124, 58, 237, 0.18)',
+  glass: 'rgba(0, 0, 0, 0.04)', text: '#171324', sub: '#645E77', border: 'rgba(124, 58, 237, 0.14)',
+  accent: '#7C3AED', accentSoft: 'rgba(124, 58, 237, 0.12)', danger: '#DC2626', dangerSoft: 'rgba(220, 38, 38, 0.10)',
+  ok: '#059669', okSoft: 'rgba(5, 150, 105, 0.12)', warn: '#D97706', warnSoft: 'rgba(217, 119, 6, 0.12)'
 };
 export type Theme = typeof DARK;
 export const useTheme = (): Theme => (useColorScheme() === 'light' ? LIGHT : DARK);
@@ -174,9 +174,9 @@ export function Card({ children, style }: { children: React.ReactNode; style?: S
     <View
       style={[
         {
-          backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 20, padding: 16,
-          marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
-          overflow: 'hidden'
+          backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 18, padding: 16,
+          marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+          elevation: 2, overflow: 'hidden'
         },
         style
       ]}>
@@ -223,23 +223,23 @@ export function Btn({
       style={({ pressed }) => [
         {
           backgroundColor: bg,
-          opacity: disabled ? 0.4 : pressed ? 0.8 : 1,
+          opacity: disabled ? 0.45 : pressed ? 0.85 : 1,
           borderRadius: 14,
           paddingVertical: 10,
-          paddingHorizontal: 12,
+          paddingHorizontal: 14,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
+          gap: 7,
           borderWidth: kind === 'ghost' ? 1 : 0,
           borderColor: t.border,
-          transform: [{ scale: pressed ? 0.98 : 1 }]
+          transform: [{ scale: pressed ? 0.97 : 1 }]
         },
         style
       ]}>
-      {Icon && <Icon size={15} color={fg} strokeWidth={2.4} />}
+      {Icon && <Icon size={16} color={fg} strokeWidth={2.4} />}
       <Text
-        style={[{ color: fg, fontWeight: '700', fontSize: 13 }, textStyle]}
+        style={[{ color: fg, fontWeight: '700', fontSize: 13.5, letterSpacing: -0.1 }, textStyle]}
         numberOfLines={1}
         ellipsizeMode="tail">
         {label}
@@ -405,6 +405,7 @@ export function AnimatedToggleRow({
           value={value}
           onValueChange={handleToggle}
           trackColor={{ true: t.accent, false: t.border }}
+          thumbColor={value ? '#FFFFFF' : '#8E85A8'}
         />
       )}
     </Animated.View>

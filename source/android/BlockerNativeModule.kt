@@ -248,6 +248,14 @@ object BlockerStore {
         return prefs(c).getBoolean("shield", true)
     }
 
+    fun isBankingMode(c: Context): Boolean = prefs(c).getBoolean("banking_mode_active", false)
+    fun setBankingMode(c: Context, active: Boolean) =
+        prefs(c).edit().putBoolean("banking_mode_active", active).apply()
+
+    fun isAutoPauseBanking(c: Context): Boolean = prefs(c).getBoolean("auto_pause_banking", false)
+    fun setAutoPauseBanking(c: Context, active: Boolean) =
+        prefs(c).edit().putBoolean("auto_pause_banking", active).apply()
+
     fun preventPowerOff(c: Context): Boolean {
         verifyIntegrity(c)
         return prefs(c).getBoolean("prevent_power_off", false)
@@ -636,7 +644,7 @@ object BlockerStore {
         return v
     }
 
-    fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, key != "block_insta_search")
+    fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, false)
     fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
         prefs(c).edit().putBoolean(key, enabled).apply()
 
@@ -762,6 +770,38 @@ object BlockerStore {
 }
 
 class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContextBaseJavaModule(rc) {
+
+    companion object {
+        const val NOTIFICATION_ID_BANKING_MODE = 1005
+
+        fun showBankingModeNotification(ctx: Context) {
+            runCatching {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (Build.VERSION.SDK_INT >= 26) {
+                    nm.createNotificationChannel(
+                        NotificationChannel("blocker_alerts", "Protection alerts", NotificationManager.IMPORTANCE_HIGH)
+                    )
+                }
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val pi = PendingIntent.getActivity(
+                    ctx, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+                )
+                val isBn = BlockerStore.popupLanguage(ctx) == "bn"
+                val n = NotificationCompat.Builder(ctx, "blocker_alerts")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle(if (isBn) "🏦 বিকাশ / ব্যাংকিং মোড চালু" else "🏦 bKash / Banking Mode Active")
+                    .setContentText(if (isBn) "বিকাশ ব্যবহারের জন্য সার্ভিস সাময়িক স্থগিত। শেষ হলে ট্যাপ করে পুনরায় চালু করুন।" else "Accessibility paused for banking security. Tap here to re-enable Blocker.")
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setOngoing(true)
+                    .setContentIntent(pi)
+                    .build()
+                nm.notify(NOTIFICATION_ID_BANKING_MODE, n)
+            }
+        }
+    }
 
     private val io = Executors.newSingleThreadExecutor()
     private val ctx: Context get() = rc.applicationContext
@@ -1561,7 +1601,39 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
             putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
             putBoolean("preventPowerOff", BlockerStore.preventPowerOff(ctx))
             putString("popupLanguage", BlockerStore.popupLanguage(ctx))
+            putBoolean("bankingModeActive", BlockerStore.isBankingMode(ctx))
+            putBoolean("autoPauseBanking", BlockerStore.isAutoPauseBanking(ctx))
         })
+    }
+
+    @ReactMethod
+    fun pauseForBanking(promise: Promise) {
+        try {
+            BlockerStore.setBankingMode(ctx, true)
+            showBankingModeNotification(ctx)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                BlockerAccessibilityService.instance?.disableSelf()
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("BANKING_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun isBankingMode(promise: Promise) {
+        promise.resolve(BlockerStore.isBankingMode(ctx))
+    }
+
+    @ReactMethod
+    fun setAutoPauseBanking(enabled: Boolean, promise: Promise) {
+        BlockerStore.setAutoPauseBanking(ctx, enabled)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun isAutoPauseBanking(promise: Promise) {
+        promise.resolve(BlockerStore.isAutoPauseBanking(ctx))
     }
 
     @ReactMethod

@@ -3,6 +3,7 @@ package com.blocker
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.app.ActivityManager
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -169,6 +170,41 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.instagram.android:id/action_bar_search_edit_text",
             "com.instagram.android:id/search_edit_text"
         )
+        private val FB_STORY_IDS = listOf(
+            "com.facebook.katana:id/stories",
+            "com.facebook.katana:id/story_viewer",
+            "com.facebook.katana:id/stories_viewer",
+            "com.facebook.katana:id/stories_tray",
+            "com.facebook.katana:id/story_tray",
+            "com.facebook.katana:id/stories_view_pager",
+            "com.facebook.katana:id/stories_carousel",
+            "com.facebook.katana:id/story_reply",
+            "com.facebook.katana:id/story_message",
+            "com.facebook.katana:id/story_header",
+            "com.facebook.katana:id/fb_story",
+            "com.facebook.katana:id/tray_story",
+            "com.facebook.katana:id/story_tile",
+            "com.facebook.katana:id/story_bucket",
+            "com.facebook.katana:id/story_progress",
+            "com.facebook.katana:id/stories_progress",
+            "com.facebook.katana:id/story_message_composer",
+            "com.facebook.katana:id/story_reaction",
+            "com.facebook.katana:id/story_options",
+            "com.facebook.katana:id/story_card",
+            "com.facebook.katana:id/stories_card",
+            "com.facebook.katana:id/story_view",
+            "com.facebook.katana:id/stories_tray_container",
+            "com.facebook.lite:id/story",
+            "com.facebook.lite:id/stories",
+            "com.facebook.lite:id/stories_tray"
+        )
+        val BANKING_PACKAGES = setOf(
+            "com.bKash.customerapp",
+            "com.konasl.nagad",
+            "bd.com.upay.customer",
+            "com.dbbl.mbs.apps.holder",
+            "com.ibbl.cellfin"
+        )
         private val FB_VIDEO_REELS_PLAYER_IDS = listOf(
             // Dedicated full-screen Facebook Katana Reels viewers
             "com.facebook.katana:id/fb_shorts_viewer_container",
@@ -190,10 +226,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.katana:id/fullscreen_video_player",
             "com.facebook.katana:id/video_fullscreen_player",
             "com.facebook.katana:id/unified_video_viewer",
-            "com.facebook.katana:id/playback_control_overlay",
-            "com.facebook.katana:id/video_seek_bar",
-            "com.facebook.katana:id/video_time_display",
-            "com.facebook.katana:id/video_controls_container",
             // Dedicated Facebook Lite Reels & Video viewers
             "com.facebook.lite:id/reels_screen",
             "com.facebook.lite:id/reels_player",
@@ -339,7 +371,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     private val hideRunnable = Runnable { removeOverlay() }
 
     // system UI and launchers are never scanned or blocked (blocking the launcher would trap the user)
-    private var neverBlock: Set<String> = setOf("com.android.systemui", "android")
+    private var neverBlock: Set<String> = setOf("com.android.systemui", "android") + BANKING_PACKAGES
     private var discoveredSettingsPkgs: Set<String> = emptySet()
     @Volatile private var viewingBlockerSettingsUntil: Long = 0L
     @Volatile private var lastPollKick = 0L
@@ -873,6 +905,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
         BlockerForegroundService.start(this)
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(BlockerNativeModule.NOTIFICATION_ID_BANKING_MODE)
+            BlockerStore.setBankingMode(this, false)
+        }
         DeviceOwnerHelper.enforceDisallowSafeBoot(this)
         loadAppIdentity()
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
@@ -944,6 +981,14 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    fun pauseForBankingMode() {
+        BlockerStore.setBankingMode(this, true)
+        BlockerNativeModule.showBankingModeNotification(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            disableSelf()
+        }
+    }
 
     @Volatile private var cachedLauncherPackages: Set<String> = emptySet()
 
@@ -1251,7 +1296,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun reload() {
         discoveredSettingsPkgs = settingsPackages()
-        neverBlock = setOf("com.android.systemui", "android") + launcherPackages() + cameraPackages()
+        neverBlock = setOf("com.android.systemui", "android") + BANKING_PACKAGES + launcherPackages() + cameraPackages()
         domains = BlockerStore.set(this, "domains")
         keywords = BlockerStore.set(this, "keywords") - RETIRED_KEYWORDS
         tlds = BlockerStore.set(this, "tlds")
@@ -1331,6 +1376,14 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             if (pm?.isInteractive == false) {
+                return
+            }
+
+            // --- BANKING APPS EXEMPTION (bKash, Nagad, etc.) ---
+            if (pkg in BANKING_PACKAGES) {
+                if (BlockerStore.isAutoPauseBanking(this)) {
+                    pauseForBankingMode()
+                }
                 return
             }
 
@@ -4069,7 +4122,88 @@ class BlockerAccessibilityService : AccessibilityService() {
         return findNodeMatchingText(root, listOf("home, tab", "home tab", "news feed"))
     }
 
+    private fun isFacebookStory(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        val evCls = ev?.className?.toString().orEmpty().lowercase()
+        val rootCls = root.className?.toString().orEmpty().lowercase()
+        if (evCls.contains("story") || evCls.contains("stories") ||
+            rootCls.contains("story") || rootCls.contains("stories")) {
+            return true
+        }
+
+        if (hasAnyNodeId(root, FB_STORY_IDS)) {
+            return true
+        }
+
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(1500))
+        val t = sb.toString().lowercase()
+
+        if ("reply to " in t || "send message to " in t || "your story" in t ||
+            "create a story" in t || "create story" in t || "add to story" in t ||
+            "share to story" in t || "stories tray" in t || "story tray" in t ||
+            "view story" in t || "seen story" in t || "unseen story" in t ||
+            "story by " in t || "'s story" in t || "স্টোরি" in t || "স্টোরিজ" in t) {
+            return true
+        }
+
+        return hasNodeWithStoryId(root, 0, intArrayOf(200))
+    }
+
+    private fun hasNodeWithStoryId(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): Boolean {
+        if (n == null || depth > 10 || budget[0]-- <= 0) return false
+        val id = n.viewIdResourceName?.toString()?.lowercase().orEmpty()
+        if (id.contains("story") || id.contains("stories")) {
+            return true
+        }
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val found = hasNodeWithStoryId(c, depth + 1, budget)
+            c.recycle()
+            if (found) return true
+        }
+        return false
+    }
+
+    private fun isFacebookStoryClick(ev: AccessibilityEvent, src: AccessibilityNodeInfo?): Boolean {
+        val evCd = ev.contentDescription?.toString()?.lowercase().orEmpty()
+        val evText = ev.text.joinToString(" ").lowercase()
+        val evCls = ev.className?.toString()?.lowercase().orEmpty()
+        val srcCd = src?.contentDescription?.toString()?.lowercase().orEmpty()
+        val srcText = src?.text?.toString()?.lowercase().orEmpty()
+        val srcId = src?.viewIdResourceName?.toString()?.lowercase().orEmpty()
+        val srcCls = src?.className?.toString()?.lowercase().orEmpty()
+
+        fun isStoryStr(s: String): Boolean {
+            if (s.isEmpty()) return false
+            return s.contains("story") || s.contains("stories") || s.contains("স্টোরি") ||
+                   s.contains("reply to") || s.contains("send message") || s.contains("your story")
+        }
+
+        if (isStoryStr(evCd) || isStoryStr(evText) || isStoryStr(srcCd) || isStoryStr(srcText) ||
+            isStoryStr(srcId) || evCls.contains("story") || srcCls.contains("story")) {
+            return true
+        }
+
+        if (src != null) {
+            for (i in 0 until src.childCount) {
+                val c = src.getChild(i) ?: continue
+                val ct = c.text?.toString()?.lowercase().orEmpty()
+                val ccd = c.contentDescription?.toString()?.lowercase().orEmpty()
+                val cid = c.viewIdResourceName?.toString()?.lowercase().orEmpty()
+                val isStory = isStoryStr(ct) || isStoryStr(ccd) || isStoryStr(cid)
+                c.recycle()
+                if (isStory) return true
+            }
+        }
+        return false
+    }
+
     private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        // Fast story whitelist: NEVER block Facebook Stories
+        if (isFacebookStory(root, ev)) {
+            return false
+        }
+
         // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards
         if (ev != null && (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED)) {
             if (isFacebookVideoOrReelClick(ev)) {
@@ -4158,17 +4292,21 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
+        val src = ev.source
+        if (isFacebookStoryClick(ev, src)) {
+            runCatching { src?.recycle() }
+            return false
+        }
         val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
         val evText = ev.text.joinToString(" ").lowercase()
         val evCls = ev.className?.toString().orEmpty().lowercase()
-        val src = ev.source
         val srcCd = src?.contentDescription?.toString().orEmpty().lowercase()
         val srcText = src?.text?.toString().orEmpty().lowercase()
         val srcCls = src?.className?.toString().orEmpty().lowercase()
 
         fun isVideoStr(s: String): Boolean {
             if (s.isEmpty()) return false
-            if (s.contains("photo") || s.contains("image") || s.contains("gallery") || s.contains("profile picture")) return false
+            if (s.contains("photo") || s.contains("image") || s.contains("gallery") || s.contains("profile picture") || s.contains("story") || s.contains("stories") || s.contains("স্টোরি")) return false
             return s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") ||
                 s.contains("shorts") || s.contains("fb shorts") || s.contains("রিলস") || s.contains("রিল") ||
                 s.contains("ভিডিও") || s.contains("ওয়াচ")
@@ -4178,7 +4316,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        if (evCls.contains("video") || evCls.contains("player") || srcCls.contains("video") || srcCls.contains("player")) {
+        if ((evCls.contains("video") || evCls.contains("player") || srcCls.contains("video") || srcCls.contains("player")) &&
+            !evCls.contains("story") && !srcCls.contains("story")) {
             return true
         }
 
@@ -4190,7 +4329,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = node.text?.toString()?.lowercase().orEmpty()
         val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
         val cls = node.className?.toString().orEmpty()
-        fun isVideo(s: String) = s.isNotEmpty() && !s.contains("photo") && !s.contains("image") &&
+        val id = node.viewIdResourceName?.toString()?.lowercase().orEmpty()
+        fun isStory(s: String) = s.contains("story") || s.contains("stories") || s.contains("স্টোরি")
+        if (isStory(t) || isStory(cd) || isStory(id) || isStory(cls)) return false
+        fun isVideo(s: String) = s.isNotEmpty() && !s.contains("photo") && !s.contains("image") && !isStory(s) &&
             (s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") || s.contains("shorts") || s.contains("রিলস") || s.contains("ভিডিও"))
         if (isVideo(t) || isVideo(cd) || cls.contains("Video") || cls.contains("Player")) return true
 

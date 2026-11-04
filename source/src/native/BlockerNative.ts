@@ -58,6 +58,8 @@ export interface Stats {
   studyBreakMinutes: number;
   preventPowerOff?: boolean;
   popupLanguage?: 'en' | 'bn';
+  bankingModeActive?: boolean;
+  autoPauseBanking?: boolean;
 }
 export interface GranularFocusToggles {
   block_fb_reels: boolean;
@@ -142,6 +144,10 @@ interface BlockerNativeSpec {
   setPreventPowerOff(enabled: boolean): Promise<boolean>;
   getPopupLanguage(): Promise<'en' | 'bn'>;
   setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean>;
+  pauseForBanking(): Promise<boolean>;
+  isBankingMode(): Promise<boolean>;
+  setAutoPauseBanking(enabled: boolean): Promise<boolean>;
+  isAutoPauseBanking(): Promise<boolean>;
 }
 
 export const isSupported = Platform.OS === 'android' && !!NativeModules.BlockerNative;

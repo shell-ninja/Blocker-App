@@ -63,10 +63,10 @@ export interface StudyState {
   breakMinutes: number;
 }
 export const DEFAULT_GRANULAR: GranularFocusToggles = {
-  block_fb_reels: true,
-  block_insta_reels: true,
+  block_fb_reels: false,
+  block_insta_reels: false,
   block_insta_search: false,
-  block_yt_shorts: true
+  block_yt_shorts: false
 };
 
 export interface Snapshot {
@@ -659,6 +659,44 @@ export async function setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean> {
     const res = await Native.setPopupLanguage(lang);
     await refresh();
     return res;
+  } catch {
+    return false;
+  }
+}
+
+// ---------- Banking Apps / bKash Coexistence ----------
+
+export async function pauseForBanking(): Promise<boolean> {
+  try {
+    const res = await Native.pauseForBanking();
+    await refresh();
+    return res;
+  } catch {
+    return false;
+  }
+}
+
+export async function isBankingMode(): Promise<boolean> {
+  try {
+    return await Native.isBankingMode();
+  } catch {
+    return false;
+  }
+}
+
+export async function setAutoPauseBanking(enabled: boolean): Promise<boolean> {
+  try {
+    const res = await Native.setAutoPauseBanking(enabled);
+    await refresh();
+    return res;
+  } catch {
+    return false;
+  }
+}
+
+export async function isAutoPauseBanking(): Promise<boolean> {
+  try {
+    return await Native.isAutoPauseBanking();
   } catch {
     return false;
   }

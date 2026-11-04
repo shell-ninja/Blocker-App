@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
 import { ScrollView, Switch, Text, View } from 'react-native';
+import { LucideIcon } from 'lucide-react-native';
 import { Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { refresh, setProtection, setShield } from '../services/ProtectionManager';
+import { pauseForBanking, refresh, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import UpdateBanner from './UpdateBanner';
 
@@ -34,11 +35,11 @@ export default function HomeScreen() {
     ['Display over other apps', perms?.overlay]
   ];
   const healthy = health.every(([, ok]) => ok);
-  const stats: [string, number][] = [
-    ['Sites redirected', p.stats?.sitesBlockedToday ?? 0],
-    ['Apps blocked', p.stats?.appsBlockedToday ?? 0],
-    ['Screen closes', p.stats?.screenBlocksToday ?? 0],
-    ['Bypass attempts', p.stats?.tamperAttemptsToday ?? 0]
+  const stats: [string, number, LucideIcon][] = [
+    ['Sites redirected', p.stats?.sitesBlockedToday ?? 0, Icons.web],
+    ['Apps blocked', p.stats?.appsBlockedToday ?? 0, Icons.apps],
+    ['Screen closes', p.stats?.screenBlocksToday ?? 0, Icons.eyeOff],
+    ['Bypass attempts', p.stats?.tamperAttemptsToday ?? 0, Icons.lock]
   ];
 
   const recMasterOn = p.active;
@@ -152,20 +153,84 @@ export default function HomeScreen() {
             </Title>
             <Sub>{p.active ? 'Domain blocklists, keywords & limits enforced' : 'Distraction protection is paused'}</Sub>
           </View>
-          <Switch value={p.active} onValueChange={onToggle} trackColor={{ true: t.ok, false: t.border }} />
+          <Switch
+            value={p.active}
+            onValueChange={onToggle}
+            trackColor={{ true: t.ok, false: t.border }}
+            thumbColor={p.active ? '#FFFFFF' : '#8E85A8'}
+          />
         </View>
         <LockBar lockKey="protection" />
       </Card>
 
+      {/* bKash & Banking Assistant */}
+      <Card style={{ borderColor: p.stats?.bankingModeActive ? t.warn : t.cardBorder, borderWidth: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Title icon={Icons.shield} tone={p.stats?.bankingModeActive ? 'warn' : 'accent'}>
+              bKash & Banking Mode
+            </Title>
+            <Sub>
+              {p.stats?.bankingModeActive
+                ? 'Accessibility paused for bKash session. Tap below to re-enable.'
+                : 'Run bKash & mobile banking apps without security conflict.'}
+            </Sub>
+          </View>
+          <Badge
+            label={p.stats?.bankingModeActive ? 'Banking Active' : 'Safe'}
+            tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}
+          />
+        </View>
+        <View style={{ marginTop: 8, flexDirection: 'row', gap: 10 }}>
+          {p.stats?.bankingModeActive ? (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Re-enable Protection"
+                icon={Icons.shieldOn}
+                kind="primary"
+                onPress={async () => {
+                  try {
+                    await Native.openPermissionSettings('accessibility');
+                  } catch (e) {
+                    showAlert('Settings', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Pause for bKash"
+                icon={Icons.shieldOff}
+                kind="ghost"
+                onPress={async () => {
+                  try {
+                    await pauseForBanking();
+                    refresh();
+                  } catch (e) {
+                    showAlert('Banking Mode', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          )}
+        </View>
+      </Card>
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-        {stats.map(([label, n]) => (
+        {stats.map(([label, n, Ico]) => (
           <View key={label} style={{
             flexGrow: 1, flexBasis: '47%', backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1,
             borderRadius: 18, padding: 16,
-            shadowColor: t.accent, shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2
+            shadowColor: t.accent, shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2
           }}>
-            <Text style={{ color: t.accent, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 }}>{n}</Text>
-            <Text style={{ color: t.sub, fontSize: 12, marginTop: 4, fontWeight: '500' }}>{label}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ color: t.accent, fontSize: 26, fontWeight: '800', letterSpacing: -0.5, fontVariant: ['tabular-nums'] }}>{n}</Text>
+              <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: t.accentSoft, alignItems: 'center', justifyContent: 'center' }}>
+                <Ico size={15} color={t.accent} strokeWidth={2.4} />
+              </View>
+            </View>
+            <Text style={{ color: t.sub, fontSize: 12, marginTop: 6, fontWeight: '600' }}>{label}</Text>
           </View>
         ))}
       </View>

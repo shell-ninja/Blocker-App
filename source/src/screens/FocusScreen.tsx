@@ -396,10 +396,10 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
 function GranularFocusCard() {
   const p = useProtection();
   const gf = p.granularFocus || {
-    block_fb_reels: true,
-    block_insta_reels: true,
+    block_fb_reels: false,
+    block_insta_reels: false,
     block_insta_search: false,
-    block_yt_shorts: true
+    block_yt_shorts: false
   };
 
   const onToggle = async (key: 'block_fb_reels' | 'block_insta_reels' | 'block_insta_search' | 'block_yt_shorts', on: boolean) => {
@@ -444,7 +444,7 @@ function GranularFocusCard() {
         <AnimatedToggleRow
           icon={Icons.apps}
           label="Block Facebook Reels & Videos"
-          sub="Exit Reels, Watch & newsfeed video playback"
+          sub="Exit Reels, Watch & video posts (Stories remain accessible)"
           value={gf.block_fb_reels}
           onValueChange={v => onToggle('block_fb_reels', v)}
         />
