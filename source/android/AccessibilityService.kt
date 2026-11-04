@@ -1000,16 +1000,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun pauseForBankingMode() {
-        BlockerStore.setBankingMode(this, true)
-        BlockerStore.prefs(this).edit().putLong("banking_mode_start_ts", System.currentTimeMillis()).apply()
-        BlockerNativeModule.showBankingModeNotification(this)
-        BlockerForegroundService.start(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            disableSelf()
-        }
-    }
-
     @Volatile private var cachedLauncherPackages: Set<String> = emptySet()
 
     private fun refreshLauncherPackages(): Set<String> {
@@ -1402,9 +1392,6 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             // --- BANKING APPS EXEMPTION (bKash, Nagad, etc.) ---
             if (pkg in BANKING_PACKAGES) {
-                if (BlockerStore.isAutoPauseBanking(this)) {
-                    pauseForBankingMode()
-                }
                 return
             }
 

@@ -664,50 +664,24 @@ export async function setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean> {
   }
 }
 
-// ---------- Banking Apps / bKash Coexistence ----------
+// ---------- Anti-Tamper & Security Utilities ----------
 
 export async function pauseForBanking(): Promise<boolean> {
-  try {
-    const res = await Native.pauseForBanking();
-    await refresh();
-    return res;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export async function resumeFromBanking(): Promise<boolean> {
-  try {
-    const res = await Native.resumeFromBanking();
-    await refresh();
-    return res;
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 export async function isBankingMode(): Promise<boolean> {
-  try {
-    return await Native.isBankingMode();
-  } catch {
-    return false;
-  }
+  return false;
 }
 
-export async function setAutoPauseBanking(enabled: boolean): Promise<boolean> {
-  try {
-    const res = await Native.setAutoPauseBanking(enabled);
-    await refresh();
-    return res;
-  } catch {
-    return false;
-  }
+export async function setAutoPauseBanking(_enabled: boolean): Promise<boolean> {
+  return false;
 }
 
 export async function isAutoPauseBanking(): Promise<boolean> {
-  try {
-    return await Native.isAutoPauseBanking();
-  } catch {
-    return false;
-  }
+  return false;
 }

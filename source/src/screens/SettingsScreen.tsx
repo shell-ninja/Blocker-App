@@ -4,7 +4,7 @@ import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-re
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
-import { deactivateDeviceOwner, getPopupLanguage, pauseForBanking, resumeFromBanking, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
+import { deactivateDeviceOwner, getPopupLanguage, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
@@ -234,14 +234,14 @@ export default function SettingsScreen() {
       </Card>
 
       <Card>
-        <Title icon={Icons.shield}>bKash & Banking Security Architecture</Title>
+        <Title icon={Icons.shield}>Anti-Tamper & Uninstall Fortress</Title>
         <Sub>
-          Blocker operates with a zero-overlay, package-scoped architecture that prevents security warnings in bKash and financial apps while maintaining 100% airtight anti-tamper and anti-uninstall protection.
+          Blocker employs an airtight multi-layer defense preventing uninstallation, deactivation, or circumvention without completing the full delay timer.
         </Sub>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: t.text, fontWeight: '700' }}>Protection & Coexistence Status</Text>
-            <Sub>Zero-Overlay & Hardware Watchdog Active</Sub>
+            <Text style={{ color: t.text, fontWeight: '700' }}>Protection Enforcement</Text>
+            <Sub>Active 24/7 (Hardware-Enforced)</Sub>
           </View>
           <Badge
             label="100% Locked"
@@ -250,58 +250,12 @@ export default function SettingsScreen() {
         </View>
         <View style={{ marginTop: 12, gap: 8 }}>
           <Text style={{ color: t.sub, fontSize: 13, lineHeight: 18 }}>
-            • <Text style={{ color: t.text, fontWeight: '600' }}>Zero-Overlay Window:</Text> Shields are detached when idle, eliminating touch-filtering (FLAG_WINDOW_IS_OBSCURED) flags.{'\n'}
-            • <Text style={{ color: t.text, fontWeight: '600' }}>Package Scoping:</Text> bKash, Nagad, and financial apps are explicitly excluded from accessibility inspection.{'\n'}
-            • <Text style={{ color: t.text, fontWeight: '600' }}>Hardware Watchdog:</Text> Foreground service kicks Settings and PackageInstaller to Home within 250ms if opened.{'\n'}
-            • <Text style={{ color: t.text, fontWeight: '600' }}>Device Admin Policy:</Text> OS-level uninstallation block enforced by Android system.
+            • <Text style={{ color: t.text, fontWeight: '600' }}>Device Administrator:</Text> Android OS blocks immediate uninstallation while protection is engaged.{'\n'}
+            • <Text style={{ color: t.text, fontWeight: '600' }}>Zero-ms Launcher Shield:</Text> Press-and-hold / drag-to-uninstall is intercepted in 0ms across all launchers.{'\n'}
+            • <Text style={{ color: t.text, fontWeight: '600' }}>Settings Ejection:</Text> Any attempt to reach App Info, Clear Data, or Admin Deactivation is kicked to Home.{'\n'}
+            • <Text style={{ color: t.text, fontWeight: '600' }}>Package Installer Watchdog:</Text> Foreground service kicks sideload and uninstaller dialogs within 200ms.{'\n'}
+            • <Text style={{ color: t.text, fontWeight: '600' }}>Delayed Weakening:</Text> Turning off protection requires waiting out the full delay timer.
           </Text>
-        </View>
-        <View style={{ marginTop: 12, flexDirection: 'row', gap: 10 }}>
-          {p.stats?.bankingModeActive ? (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Finish bKash Session & Re-lock"
-                icon={Icons.shieldOn}
-                kind="primary"
-                onPress={async () => {
-                  try {
-                    await resumeFromBanking();
-                    await Native.openPermissionSettings('accessibility');
-                    showAlert('Session Finished', 'Blocker protection is now re-armed.');
-                  } catch (e) {
-                    showAlert('Error', errMsg(e));
-                  }
-                }}
-              />
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Launch Protected bKash (5m)"
-                icon={Icons.shield}
-                kind="secondary"
-                onPress={() => {
-                  showAlert(
-                    'Launch Protected bKash (5 Minutes)',
-                    '• Blocker will pause its accessibility service and launch bKash directly.\n• The hardware watchdog will keep Settings and uninstallation 100% LOCKED.\n• You CANNOT uninstall Blocker or open settings during this time.\n\nNote: If other apps like Alarmy (com.bytesong.missionalarm) are also shown in bKash\'s warning, you must disable them as well.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Launch bKash',
-                        onPress: async () => {
-                          try {
-                            await pauseForBanking();
-                          } catch (e) {
-                            showAlert('bKash Mode', errMsg(e));
-                          }
-                        },
-                      },
-                    ]
-                  );
-                }}
-              />
-            </View>
-          )}
         </View>
       </Card>
 

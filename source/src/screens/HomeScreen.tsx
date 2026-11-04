@@ -3,7 +3,7 @@ import { ScrollView, Switch, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { pauseForBanking, refresh, resumeFromBanking, setProtection, setShield } from '../services/ProtectionManager';
+import { refresh, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import UpdateBanner from './UpdateBanner';
 
@@ -163,71 +163,36 @@ export default function HomeScreen() {
         <LockBar lockKey="protection" />
       </Card>
 
-      {/* bKash & Banking Security Shield */}
-      <Card style={{ borderColor: p.stats?.bankingModeActive ? t.warn : t.cardBorder, borderWidth: 1 }}>
+      {/* Anti-Tamper & Anti-Uninstall Fortress */}
+      <Card style={{ borderColor: t.cardBorder, borderWidth: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            <Title icon={Icons.shield} tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}>
-              bKash & Banking Shield
+            <Title icon={Icons.shield} tone="ok">
+              Anti-Tamper Fortress
             </Title>
             <Sub>
-              {p.stats?.bankingModeActive
-                ? 'bKash session active (5m). Settings & uninstallation are 100% locked by the hardware watchdog.'
-                : 'bKash requires accessibility to be paused during login. Tap below to launch a protected 5m session.'}
+              Device Administrator, launcher shield, and watchdog active. Uninstallation is strictly locked.
             </Sub>
           </View>
           <Badge
-            label={p.stats?.bankingModeActive ? 'bKash Active' : 'Tamper-Proof'}
-            tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}
+            label="Airtight Lock"
+            tone="ok"
           />
         </View>
         <View style={{ marginTop: 8, flexDirection: 'row', gap: 10 }}>
-          {p.stats?.bankingModeActive ? (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Finish & Re-enable Blocker"
-                icon={Icons.shieldOn}
-                kind="primary"
-                onPress={async () => {
-                  try {
-                    await resumeFromBanking();
-                    await Native.openPermissionSettings('accessibility');
-                    refresh();
-                  } catch (e) {
-                    showAlert('Error', errMsg(e));
-                  }
-                }}
-              />
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <Btn
-                label="Launch Protected bKash (5m)"
-                icon={Icons.shield}
-                kind="secondary"
-                onPress={() => {
-                  showAlert(
-                    'Launch Protected bKash (5 Minutes)',
-                    '• Blocker will pause its accessibility service and launch bKash directly.\n• The hardware watchdog will keep Settings and uninstallation 100% LOCKED.\n• You CANNOT uninstall Blocker or open settings during this time.\n\nNote: If other apps like Alarmy (com.bytesong.missionalarm) are also shown in bKash\'s warning, you must disable them as well.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Launch bKash',
-                        onPress: async () => {
-                          try {
-                            await pauseForBanking();
-                            refresh();
-                          } catch (e) {
-                            showAlert('bKash Mode', errMsg(e));
-                          }
-                        },
-                      },
-                    ]
-                  );
-                }}
-              />
-            </View>
-          )}
+          <View style={{ flex: 1 }}>
+            <Btn
+              label="Anti-Uninstall Shield Active"
+              icon={Icons.shield}
+              kind="secondary"
+              onPress={() => {
+                showAlert(
+                  'Anti-Uninstall Fortress Active',
+                  '1. Device Administrator: Android OS blocks immediate uninstallation while protection is active.\n\n2. Launcher Shield: Press-and-hold / drag-to-uninstall is intercepted in 0ms.\n\n3. Settings Ejection: Any attempt to reach App Info or Deactivation in Settings is kicked to Home immediately.\n\n4. Delay Weakening: If protection is ever turned off, the full delay timer must run down first.'
+                );
+              }}
+            />
+          </View>
         </View>
       </Card>
 
