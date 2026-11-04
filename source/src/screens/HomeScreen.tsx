@@ -3,7 +3,7 @@ import { ScrollView, Switch, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { pauseForBanking, refresh, setProtection, setShield } from '../services/ProtectionManager';
+import { pauseForBanking, refresh, resumeFromBanking, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import UpdateBanner from './UpdateBanner';
 
@@ -164,35 +164,70 @@ export default function HomeScreen() {
       </Card>
 
       {/* bKash & Banking Security Shield */}
-      <Card style={{ borderColor: t.cardBorder, borderWidth: 1 }}>
+      <Card style={{ borderColor: p.stats?.bankingModeActive ? t.warn : t.cardBorder, borderWidth: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            <Title icon={Icons.shield} tone="ok">
+            <Title icon={Icons.shield} tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}>
               bKash & Banking Shield
             </Title>
             <Sub>
-              Zero-Overlay & Scoped Protection active. bKash, Nagad & financial apps run smoothly without security flags. Anti-uninstall is 100% locked.
+              {p.stats?.bankingModeActive
+                ? 'bKash session active (5m). Settings & uninstallation are 100% locked by the hardware watchdog.'
+                : 'bKash requires accessibility to be paused during login. Tap below to launch a protected 5m session.'}
             </Sub>
           </View>
           <Badge
-            label="Tamper-Proof"
-            tone="ok"
+            label={p.stats?.bankingModeActive ? 'bKash Active' : 'Tamper-Proof'}
+            tone={p.stats?.bankingModeActive ? 'warn' : 'ok'}
           />
         </View>
         <View style={{ marginTop: 8, flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Btn
-              label={p.stats?.bankingModeActive ? 'Banking Shield Active' : 'bKash Protection Details'}
-              icon={Icons.shield}
-              kind="secondary"
-              onPress={() => {
-                showAlert(
-                  'bKash & Banking Protection',
-                  '1. Zero-Overlay: Blocker completely detaches overlay windows when idle so banking apps detect no screen obscuring.\n\n2. Scoped Protection: bKash is excluded from accessibility monitoring.\n\n3. Hardware Watchdog: Even if accessibility is interrupted, Blocker Foreground Service watchdog instantly blocks Settings and package installers from opening.\n\n4. Device Admin: Hardware-level uninstallation is locked by Android OS.'
-                );
-              }}
-            />
-          </View>
+          {p.stats?.bankingModeActive ? (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Finish & Re-enable Blocker"
+                icon={Icons.shieldOn}
+                kind="primary"
+                onPress={async () => {
+                  try {
+                    await resumeFromBanking();
+                    await Native.openPermissionSettings('accessibility');
+                    refresh();
+                  } catch (e) {
+                    showAlert('Error', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Launch Protected bKash (5m)"
+                icon={Icons.shield}
+                kind="secondary"
+                onPress={() => {
+                  showAlert(
+                    'Launch Protected bKash (5 Minutes)',
+                    '• Blocker will pause its accessibility service and launch bKash directly.\n• The hardware watchdog will keep Settings and uninstallation 100% LOCKED.\n• You CANNOT uninstall Blocker or open settings during this time.\n\nNote: If other apps like Alarmy (com.bytesong.missionalarm) are also shown in bKash\'s warning, you must disable them as well.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Launch bKash',
+                        onPress: async () => {
+                          try {
+                            await pauseForBanking();
+                            refresh();
+                          } catch (e) {
+                            showAlert('bKash Mode', errMsg(e));
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              />
+            </View>
+          )}
         </View>
       </Card>
 

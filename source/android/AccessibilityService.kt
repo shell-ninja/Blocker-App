@@ -1002,11 +1002,12 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     fun pauseForBankingMode() {
         BlockerStore.setBankingMode(this, true)
+        BlockerStore.prefs(this).edit().putLong("banking_mode_start_ts", System.currentTimeMillis()).apply()
         BlockerNativeModule.showBankingModeNotification(this)
-        // Never call disableSelf()! Doing so creates an uninstallation loophole.
-        // Blocker keeps anti-tamper and anti-uninstall 100% airtight while detaching
-        // window overlays and scoping accessibility so banking apps run cleanly.
-        updateMonitoredPackages()
+        BlockerForegroundService.start(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            disableSelf()
+        }
     }
 
     @Volatile private var cachedLauncherPackages: Set<String> = emptySet()

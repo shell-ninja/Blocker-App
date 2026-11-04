@@ -163,8 +163,18 @@ class BlockerForegroundService : Service {
         val active = BlockerStore.active(this)
         val shield = BlockerStore.shield(this)
         val guardOpen = BlockerStore.guardOpen(this, "shield")
+        val isBanking = BlockerStore.isBankingMode(this)
 
-        if (!active || !shield || guardOpen) return
+        if (isBanking) {
+            val startTs = BlockerStore.prefs(this).getLong("banking_mode_start_ts", 0L)
+            if (startTs > 0L && System.currentTimeMillis() - startTs > 5 * 60 * 1000L) {
+                // Auto-expire 5-minute banking pass
+                BlockerStore.setBankingMode(this, false)
+            }
+        }
+
+        // If protection is not engaged and not in banking session, skip
+        if ((!active || !shield || guardOpen) && !isBanking) return
 
         val topPkg = getTopPackage() ?: return
         if (topPkg == packageName || topPkg in BANKING_PACKAGES) return

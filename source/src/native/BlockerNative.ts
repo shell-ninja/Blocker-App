@@ -145,6 +145,7 @@ interface BlockerNativeSpec {
   getPopupLanguage(): Promise<'en' | 'bn'>;
   setPopupLanguage(lang: 'en' | 'bn'): Promise<boolean>;
   pauseForBanking(): Promise<boolean>;
+  resumeFromBanking(): Promise<boolean>;
   isBankingMode(): Promise<boolean>;
   setAutoPauseBanking(enabled: boolean): Promise<boolean>;
   isAutoPauseBanking(): Promise<boolean>;

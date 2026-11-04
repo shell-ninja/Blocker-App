@@ -1611,12 +1611,42 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     fun pauseForBanking(promise: Promise) {
         try {
             BlockerStore.setBankingMode(ctx, true)
+            BlockerStore.prefs(ctx).edit().putLong("banking_mode_start_ts", System.currentTimeMillis()).apply()
             showBankingModeNotification(ctx)
             BlockerForegroundService.start(ctx)
-            BlockerAccessibilityService.instance?.updateMonitoredPackages()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                BlockerAccessibilityService.instance?.disableSelf()
+            }
+            val launchIntent = ctx.packageManager.getLaunchIntentForPackage("com.bKash.customerapp")
+            if (launchIntent != null) {
+                launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                ctx.startActivity(launchIntent)
+            }
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("BANKING_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun resumeFromBanking(promise: Promise) {
+        try {
+            BlockerStore.setBankingMode(ctx, false)
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(NOTIFICATION_ID_BANKING_MODE)
+
+            if (ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED) {
+                val cr = ctx.contentResolver
+                val expected = "${ctx.packageName}/${BlockerAccessibilityService::class.java.name}"
+                val current = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+                val set = current.split(':').filter { it.isNotBlank() }.toMutableSet()
+                set.add(expected)
+                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, set.joinToString(":"))
+                Settings.Secure.putString(cr, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("RESUME_ERROR", e.message, e)
         }
     }
 

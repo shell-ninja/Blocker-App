@@ -676,6 +676,16 @@ export async function pauseForBanking(): Promise<boolean> {
   }
 }
 
+export async function resumeFromBanking(): Promise<boolean> {
+  try {
+    const res = await Native.resumeFromBanking();
+    await refresh();
+    return res;
+  } catch {
+    return false;
+  }
+}
+
 export async function isBankingMode(): Promise<boolean> {
   try {
     return await Native.isBankingMode();

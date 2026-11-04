@@ -4,7 +4,7 @@ import { ArrowDownToLine, Code, ExternalLink, RotateCw, Trash2 } from 'lucide-re
 import { LOCK_KEYS, LockKey, Native } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import { useAppUpdate } from '../hooks/useAppUpdate';
-import { deactivateDeviceOwner, getPopupLanguage, pauseForBanking, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
+import { deactivateDeviceOwner, getPopupLanguage, pauseForBanking, resumeFromBanking, setDelay, setPopupLanguage, setPreventPowerOff, setProtection, setShield } from '../services/ProtectionManager';
 import { Badge, Btn, Card, Icons, LockBar, Row, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
@@ -255,6 +255,53 @@ export default function SettingsScreen() {
             • <Text style={{ color: t.text, fontWeight: '600' }}>Hardware Watchdog:</Text> Foreground service kicks Settings and PackageInstaller to Home within 250ms if opened.{'\n'}
             • <Text style={{ color: t.text, fontWeight: '600' }}>Device Admin Policy:</Text> OS-level uninstallation block enforced by Android system.
           </Text>
+        </View>
+        <View style={{ marginTop: 12, flexDirection: 'row', gap: 10 }}>
+          {p.stats?.bankingModeActive ? (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Finish bKash Session & Re-lock"
+                icon={Icons.shieldOn}
+                kind="primary"
+                onPress={async () => {
+                  try {
+                    await resumeFromBanking();
+                    await Native.openPermissionSettings('accessibility');
+                    showAlert('Session Finished', 'Blocker protection is now re-armed.');
+                  } catch (e) {
+                    showAlert('Error', errMsg(e));
+                  }
+                }}
+              />
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Btn
+                label="Launch Protected bKash (5m)"
+                icon={Icons.shield}
+                kind="secondary"
+                onPress={() => {
+                  showAlert(
+                    'Launch Protected bKash (5 Minutes)',
+                    '• Blocker will pause its accessibility service and launch bKash directly.\n• The hardware watchdog will keep Settings and uninstallation 100% LOCKED.\n• You CANNOT uninstall Blocker or open settings during this time.\n\nNote: If other apps like Alarmy (com.bytesong.missionalarm) are also shown in bKash\'s warning, you must disable them as well.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Launch bKash',
+                        onPress: async () => {
+                          try {
+                            await pauseForBanking();
+                          } catch (e) {
+                            showAlert('bKash Mode', errMsg(e));
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              />
+            </View>
+          )}
         </View>
       </Card>
 
