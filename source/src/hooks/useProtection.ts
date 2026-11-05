@@ -3,7 +3,7 @@ import { getSnapshot, subscribe } from '../services/ProtectionManager';
 
 export const useProtection = () => useSyncExternalStore(subscribe, getSnapshot);
 
-export function useNow(ms = 1000) {
+export function useNow(ms = 500) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (ms <= 0) return;

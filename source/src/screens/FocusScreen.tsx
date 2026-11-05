@@ -1,15 +1,50 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, LayoutAnimation, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import {
+  Animated,
+  LayoutAnimation,
+  Pressable,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { BookOpen, ChevronDown, Trash2 } from 'lucide-react-native';
 import { InstalledApp, Native, Schedule } from '../native/BlockerNative';
 import { useNow, useProtection } from '../hooks/useProtection';
 import {
-  MAX_FOCUS_APPS, SchedulePatch, addFocusApp, addSchedule, deleteSchedule, endFocusEarly, refresh,
-  removeFocusApp, setFocusRemaining, setGranularFocusToggle, startFocus, updateSchedule
+  MAX_FOCUS_APPS,
+  SchedulePatch,
+  addFocusApp,
+  addSchedule,
+  deleteSchedule,
+  endFocusEarly,
+  refresh,
+  removeFocusApp,
+  setFocusRemaining,
+  setGranularFocusToggle,
+  startFocus,
+  updateSchedule,
 } from '../services/ProtectionManager';
 import { AppIcon } from './AppBlockerScreen';
 import StudyScreen from './StudyScreen';
-import { AnimatedToggleRow, Badge, Btn, Card, Fab, Icons, LockBar, Sub, Title, errMsg, fmt, showAlert, useTheme } from '../ui';
+import {
+  AnimatedToggleRow,
+  Btn,
+  CyberSwitch,
+  Fab,
+  GlowCard,
+  Icons,
+  LockBar,
+  PressableScale,
+  StatusPillBadge,
+  Sub,
+  Title,
+  errMsg,
+  fmt,
+  showAlert,
+  useTheme,
+} from '../ui';
 
 const PRESETS = [30, 60, 120, 240, 480, 720, 1440];
 const label = (m: number) => (m < 60 ? `${m} min` : `${m / 60} h`);
@@ -29,53 +64,100 @@ function nextRoundedHour(): number {
   return ((d.getHours() + 1) % 24) * 60;
 }
 
-function Chips({ values, selected, onPick }: { values: number[]; selected?: number; onPick: (m: number) => void }) {
+function Chips({
+  values,
+  selected,
+  onPick,
+}: {
+  values: number[];
+  selected?: number;
+  onPick: (m: number) => void;
+}) {
   const t = useTheme();
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
       {values.map(m => {
         const sel = m === selected;
         return (
-          <Pressable
+          <PressableScale
             key={m}
             onPress={() => onPick(m)}
             style={{
-              paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1,
-              borderColor: sel ? t.accent : t.border, backgroundColor: sel ? t.accentSoft : 'transparent',
-              shadowColor: sel ? t.accent : 'transparent', shadowOpacity: sel ? 0.85 : 0,
-              shadowRadius: sel ? 8 : 0, shadowOffset: { width: 0, height: 0 }, elevation: sel ? 4 : 0
+              paddingVertical: 8,
+              paddingHorizontal: 15,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: sel ? t.accentWellBorder : t.border,
+              backgroundColor: sel ? t.accentWell : 'transparent',
+              shadowColor: sel ? t.accent : 'transparent',
+              shadowOpacity: sel ? 0.6 : 0,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: sel ? 3 : 0,
             }}>
-            <Text style={{
-              color: sel ? t.accent : t.text, fontWeight: '700',
-              textShadowColor: sel ? t.accentSoft : 'transparent', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: sel ? 6 : 0
-            }}>{label(m)}</Text>
-          </Pressable>
+            <Text
+              style={{
+                color: sel ? '#FFFFFF' : t.sub,
+                fontWeight: '700',
+                fontSize: 12.5,
+              }}>
+              {label(m)}
+            </Text>
+          </PressableScale>
         );
       })}
     </View>
   );
 }
 
+function formatDuration(startMin: number, endMin: number): string {
+  const diff = endMin >= startMin ? endMin - startMin : 1440 - startMin + endMin;
+  if (diff === 0 || diff === 1440) return '24h';
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
 /** A button showing a 12-hour time that opens Android's system clock picker. */
 function TimeButton({ minute, onChange }: { minute: number; onChange: (m: number) => void }) {
   const t = useTheme();
   return (
-    <Pressable
+    <PressableScale
       onPress={() => Native.pickTime(minute).then(onChange).catch(() => {})}
-      style={({ pressed }) => [{
-        backgroundColor: t.glass, borderColor: t.border, borderWidth: 1, borderRadius: 14,
-        paddingVertical: 9, paddingHorizontal: 14, minWidth: 106, alignItems: 'center',
-        flexDirection: 'row', gap: 7, justifyContent: 'center',
-        transform: [{ scale: pressed ? 0.95 : 1 }], opacity: pressed ? 0.8 : 1
-      }]}>
-      <Icons.clock size={14} color={t.accent} strokeWidth={2.3} />
-      <Text style={{ color: t.text, fontWeight: '700', fontSize: 14, letterSpacing: -0.2 }}>{clock12(minute)}</Text>
-    </Pressable>
+      style={{
+        backgroundColor: t.bg,
+        borderColor: t.cardBorder,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        minWidth: 110,
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: 8,
+        justifyContent: 'center',
+        marginTop: 6,
+      }}>
+      <Icons.clock size={15} color={t.accent} strokeWidth={2.3} />
+      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13.5, letterSpacing: -0.2 }}>
+        {clock12(minute)}
+      </Text>
+    </PressableScale>
   );
 }
 
-/** One row of the accordion: collapsed shows the summary, expanded shows the editor. */
-function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp[]; initialOpen?: boolean }) {
+/** One row of the schedule accordion: collapsed shows the summary, expanded shows the editor. */
+function ScheduleRow({
+  s,
+  apps,
+  initialOpen,
+}: {
+  s: Schedule;
+  apps: InstalledApp[];
+  initialOpen?: boolean;
+}) {
   const t = useTheme();
   const p = useProtection();
   const isSaved = (p.state.savedSchedules ?? []).includes(s.id);
@@ -90,16 +172,30 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
   const [appQuery, setAppQuery] = useState('');
 
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
-  const appsDirty = JSON.stringify([...(allowedApps ?? [])].sort()) !== JSON.stringify([...(s.allowedApps ?? [])].sort());
+  const appsDirty =
+    JSON.stringify([...(allowedApps ?? [])].sort()) !== JSON.stringify([...(s.allowedApps ?? [])].sort());
   const dirty = !isSaved || label_ !== s.label || start !== s.startMin || end !== s.endMin || appsDirty;
 
-  const prevScheduleJson = useRef(JSON.stringify({ id: s.id, label: s.label, start: s.startMin, end: s.endMin, apps: (s.allowedApps ?? []).slice().sort() }));
+  const prevScheduleJson = useRef(
+    JSON.stringify({
+      id: s.id,
+      label: s.label,
+      start: s.startMin,
+      end: s.endMin,
+      apps: (s.allowedApps ?? []).slice().sort(),
+    })
+  );
 
   useEffect(() => {
-    const nextJson = JSON.stringify({ id: s.id, label: s.label, start: s.startMin, end: s.endMin, apps: (s.allowedApps ?? []).slice().sort() });
+    const nextJson = JSON.stringify({
+      id: s.id,
+      label: s.label,
+      start: s.startMin,
+      end: s.endMin,
+      apps: (s.allowedApps ?? []).slice().sort(),
+    });
     if (nextJson !== prevScheduleJson.current) {
       prevScheduleJson.current = nextJson;
-      // Never wipe in-progress edits if the user is actively editing this schedule
       if (!dirty) {
         setLabel(s.label);
         setStart(s.startMin);
@@ -108,6 +204,7 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
       }
     }
   }, [s.id, s.label, s.startMin, s.endMin, JSON.stringify(s.allowedApps ?? []), dirty]);
+
   const guard = (fn: () => Promise<unknown>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
 
   const patch: SchedulePatch = {
@@ -115,20 +212,24 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
     startMin: start,
     endMin: end,
     enabled: s.enabled,
-    allowedApps
+    allowedApps,
   };
 
-  const save = () => guard(async () => {
-    const wasSaved = isSaved;
-    const r = await updateSchedule(s.id, patch);
-    if (r !== 'applied') {
-      showAlert('Change requested', `That change applies only after ${delayText} and confirming, since protection is active.`);
-    } else if (!wasSaved) {
-      showAlert('Schedule saved', `"${patch.label}" is saved and active. Future changes will be protected.`);
-    } else {
-      showAlert('Schedule saved', `"${patch.label}" has been updated.`);
-    }
-  });
+  const save = () =>
+    guard(async () => {
+      const wasSaved = isSaved;
+      const r = await updateSchedule(s.id, patch);
+      if (r !== 'applied') {
+        showAlert(
+          'Change requested',
+          `That change applies only after ${delayText} and confirming, since protection is active.`
+        );
+      } else if (!wasSaved) {
+        showAlert('Schedule saved', `"${patch.label}" is saved and active. Future changes will be protected.`);
+      } else {
+        showAlert('Schedule saved', `"${patch.label}" has been updated.`);
+      }
+    });
 
   const toggleEnabled = (enabled: boolean) => {
     guard(async () => {
@@ -139,17 +240,21 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
     });
   };
 
-  const remove = () => showAlert('Delete schedule?', `Remove "${s.label}"?`, [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Delete', style: 'destructive', onPress: () => guard(async () => {
-        const r = await deleteSchedule(s.id);
-        if (r !== 'applied') {
-          showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming.`);
-        }
-      })
-    }
-  ]);
+  const remove = () =>
+    showAlert('Delete schedule?', `Remove "${s.label}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () =>
+          guard(async () => {
+            const r = await deleteSchedule(s.id);
+            if (r !== 'applied') {
+              showAlert('Change requested', `Deleting this applies only after ${delayText} and confirming.`);
+            }
+          }),
+      },
+    ]);
 
   const toggleOpen = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -160,55 +265,69 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
 
   const filteredApps = useMemo(() => {
     const q = appQuery.trim().toLowerCase();
-    const matched = apps.filter(a => !q || a.label.toLowerCase().includes(q) || a.packageName.toLowerCase().includes(q));
-    return matched.sort((a, b) => {
-      const aAllowed = allowedApps.includes(a.packageName) ? 1 : 0;
-      const bAllowed = allowedApps.includes(b.packageName) ? 1 : 0;
-      if (aAllowed !== bAllowed) return bAllowed - aAllowed;
-      return a.label.localeCompare(b.label);
-    }).slice(0, 80);
+    const matched = apps.filter(
+      a => !q || a.label.toLowerCase().includes(q) || a.packageName.toLowerCase().includes(q)
+    );
+    return matched
+      .sort((a, b) => {
+        const aAllowed = allowedApps.includes(a.packageName) ? 1 : 0;
+        const bAllowed = allowedApps.includes(b.packageName) ? 1 : 0;
+        if (aAllowed !== bAllowed) return bAllowed - aAllowed;
+        return a.label.localeCompare(b.label);
+      })
+      .slice(0, 80);
   }, [apps, appQuery, allowedApps]);
 
   const toggleApp = (pkg: string) => {
-    setAllowedApps(prev =>
-      prev.includes(pkg) ? prev.filter(p => p !== pkg) : [...prev, pkg]
-    );
+    setAllowedApps(prev => (prev.includes(pkg) ? prev.filter(p => p !== pkg) : [...prev, pkg]));
   };
 
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: t.cardBorder, paddingVertical: 10 }}>
+    <View style={{ borderTopWidth: 1, borderTopColor: t.cardBorder, paddingVertical: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Pressable
           onPress={toggleOpen}
           style={({ pressed }) => [{
-            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            opacity: pressed ? 0.7 : 1,
           }]}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>{label_ || s.label}</Text>
-            <Text style={{ color: t.sub, fontSize: 13, marginTop: 1 }}>
-              {clock12(start)} – {clock12(end)}
+            <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
+              {label_ || s.label}
+            </Text>
+            <Text style={{ color: t.sub, fontSize: 12.5, marginTop: 2 }}>
+              {clock12(start)} – {clock12(end)} ({formatDuration(start, end)})
               {allowedApps.length > 0 ? ` • ${allowedApps.length} apps allowed` : ''}
             </Text>
           </View>
           <Animated.View style={{ transform: [{ rotate: rotateInterp }] }}>
             <ChevronDown size={18} color={t.sub} />
           </Animated.View>
-          {!isSaved && <Badge label="New" tone="warn" />}
-          {s.activeNow && <Badge label="Active" tone="ok" />}
+          {!isSaved && <StatusPillBadge label="New" tone="warn" size="sm" />}
+          {s.activeNow && <StatusPillBadge label="Active" tone="ok" size="sm" breathing />}
         </Pressable>
-        <Switch value={s.enabled} onValueChange={toggleEnabled} trackColor={{ true: t.accent }} />
+        <CyberSwitch value={s.enabled} onValueChange={toggleEnabled} />
       </View>
 
       {open && (
-        <View style={{ marginTop: 12, gap: 12 }}>
+        <View style={{ marginTop: 14, gap: 12 }}>
           <TextInput
             value={label_}
             onChangeText={setLabel}
             placeholder="Schedule name"
             placeholderTextColor={t.sub}
             style={{
-              backgroundColor: t.card, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12,
-              paddingHorizontal: 14, paddingVertical: 10
+              backgroundColor: t.bg,
+              color: '#FFFFFF',
+              borderColor: t.cardBorder,
+              borderWidth: 1,
+              borderRadius: 12,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              fontSize: 13.5,
             }}
           />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -216,7 +335,12 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
               <Sub>Starts</Sub>
               <TimeButton minute={start} onChange={setStart} />
             </View>
-            <Icons.clock size={16} color={t.sub} />
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}>
+              <Text style={{ color: '#10B981', fontSize: 12.5, fontWeight: '700', marginBottom: 2 }}>
+                {formatDuration(start, end)}
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 10.5, letterSpacing: 0.2 }}>duration</Text>
+            </View>
             <View>
               <Sub>Ends</Sub>
               <TimeButton minute={end} onChange={setEnd} />
@@ -224,39 +348,48 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
           </View>
 
           {/* Per-schedule unblocked apps customization */}
-          <View style={{ marginTop: 4, padding: 12, backgroundColor: t.card, borderRadius: 12, borderWidth: 1, borderColor: t.cardBorder }}>
+          <View
+            style={{
+              marginTop: 6,
+              padding: 14,
+              backgroundColor: t.bg,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: t.cardBorder,
+            }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>Allowed Apps</Text>
-                <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Allowed Apps</Text>
+                <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 2 }}>
                   {allowedApps.length === 0
                     ? 'Default essential apps allowed'
                     : `${allowedApps.length} custom app${allowedApps.length === 1 ? '' : 's'} unblocked`}
                 </Text>
               </View>
-              <Pressable
+              <Btn
+                label={showAppPicker ? 'Done' : 'Customize'}
+                kind={showAppPicker ? 'primary' : 'ghost'}
                 onPress={() => setShowAppPicker(!showAppPicker)}
-                style={{
-                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-                  backgroundColor: showAppPicker ? t.accent : t.cardBorder,
-                  borderWidth: 1, borderColor: showAppPicker ? t.accent : t.border
-                }}>
-                <Text style={{ color: showAppPicker ? '#fff' : t.text, fontSize: 12, fontWeight: '700' }}>
-                  {showAppPicker ? 'Done' : 'Customize'}
-                </Text>
-              </Pressable>
+              />
             </View>
 
             {showAppPicker && (
-              <View style={{ marginTop: 10 }}>
+              <View style={{ marginTop: 12 }}>
                 <TextInput
                   value={appQuery}
                   onChangeText={setAppQuery}
                   placeholder="Search apps to allow..."
                   placeholderTextColor={t.sub}
                   style={{
-                    backgroundColor: t.bg, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 8,
-                    paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, marginBottom: 8
+                    backgroundColor: t.card,
+                    color: '#FFFFFF',
+                    borderColor: t.cardBorder,
+                    borderWidth: 1,
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    fontSize: 13,
+                    marginBottom: 10,
                   }}
                 />
                 <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
@@ -273,16 +406,23 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
                         key={a.packageName}
                         onPress={() => toggleApp(a.packageName)}
                         style={({ pressed }) => [{
-                          flexDirection: 'row', alignItems: 'center', paddingVertical: 7,
-                          gap: 8, borderBottomWidth: 1, borderBottomColor: t.cardBorder,
-                          opacity: pressed ? 0.7 : 1
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 8,
+                          gap: 10,
+                          borderBottomWidth: 1,
+                          borderBottomColor: t.cardBorder,
+                          opacity: pressed ? 0.7 : 1,
                         }]}>
                         <AppIcon pkg={a.packageName} />
-                        <Text style={{ color: t.text, flex: 1, fontSize: 13 }} numberOfLines={1}>{a.label}</Text>
+                        <Text style={{ color: '#FFFFFF', flex: 1, fontSize: 13 }} numberOfLines={1}>
+                          {a.label}
+                        </Text>
                         <View pointerEvents="none">
                           <Switch
                             value={isAllowed}
-                            trackColor={{ true: t.accent }}
+                            trackColor={{ true: t.accent, false: t.border }}
+                            thumbColor="#FFFFFF"
                           />
                         </View>
                       </Pressable>
@@ -293,8 +433,12 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
             )}
           </View>
 
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {dirty && <View style={{ flex: 1 }}><Btn label={isSaved ? "Save" : "Save schedule"} icon={Icons.clock} onPress={save} /></View>}
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+            {dirty && (
+              <View style={{ flex: 1 }}>
+                <Btn label={isSaved ? 'Save' : 'Save schedule'} kind="primary" icon={Icons.clock} onPress={save} />
+              </View>
+            )}
             <View style={dirty ? undefined : { flex: 1 }}>
               <Btn label="Delete" kind="danger" icon={Trash2} onPress={remove} />
             </View>
@@ -305,25 +449,43 @@ function ScheduleRow({ s, apps, initialOpen }: { s: Schedule; apps: InstalledApp
   );
 }
 
-function SchedulesCard({ apps, onAddNew, newestId }: { apps: InstalledApp[]; onAddNew: () => void; newestId: string | null }) {
+function SchedulesCard({
+  apps,
+  onAddNew,
+  newestId,
+}: {
+  apps: InstalledApp[];
+  onAddNew: () => void;
+  newestId: string | null;
+}) {
   const t = useTheme();
   const p = useProtection();
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
 
   return (
-    <Card style={{ paddingBottom: p.schedules.length ? 4 : 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+    <GlowCard style={{ padding: 18, paddingBottom: p.schedules.length ? 6 : 18 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Title icon={Icons.clock}>Daily schedules</Title>
           <Sub>Focus mode turns on by itself during each active schedule below.</Sub>
         </View>
-        <Btn label="Add" icon={Icons.plus} onPress={onAddNew} />
+        <Btn label="Add" icon={Icons.plus} kind="ghost" onPress={onAddNew} />
       </View>
-      {p.schedules.length === 0 && <Sub>No schedules yet — tap Add, or the + button, to create one.</Sub>}
-      {p.schedules.map(s => <ScheduleRow key={s.id} s={s} apps={apps} initialOpen={s.id === newestId} />)}
-      <Sub>First-time schedule setup is saved immediately. Once saved, editing, shrinking or turning one off waits for {delayText}.</Sub>
+      {p.schedules.length === 0 && (
+        <Text style={{ color: t.sub, fontSize: 13, marginTop: 12 }}>
+          No schedules yet — tap Add, or the + button, to create one.
+        </Text>
+      )}
+      <View style={{ marginTop: 8 }}>
+        {p.schedules.map(s => (
+          <ScheduleRow key={s.id} s={s} apps={apps} initialOpen={s.id === newestId} />
+        ))}
+      </View>
+      <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 10, lineHeight: 16 }}>
+        First-time schedule setup is saved immediately. Once saved, editing, shrinking or turning one off waits for {delayText}.
+      </Text>
       <LockBar lockKey="schedule" />
-    </Card>
+    </GlowCard>
   );
 }
 
@@ -341,12 +503,23 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const chosen = sel.map(pkg => byPkg.get(pkg) ?? {
-      packageName: pkg, label: `${pkg} (not installed)`, isSystem: false, category: 'Other', blocked: false, scanExempt: false
-    });
-    const others = apps.filter(a =>
-      !sel.includes(a.packageName) && (showSystem || !a.isSystem) &&
-      (!needle || a.label.toLowerCase().includes(needle)));
+    const chosen = sel.map(
+      pkg =>
+        byPkg.get(pkg) ?? {
+          packageName: pkg,
+          label: `${pkg} (not installed)`,
+          isSystem: false,
+          category: 'Other',
+          blocked: false,
+          scanExempt: false,
+        }
+    );
+    const others = apps.filter(
+      a =>
+        !sel.includes(a.packageName) &&
+        (showSystem || !a.isSystem) &&
+        (!needle || a.label.toLowerCase().includes(needle))
+    );
     return [...chosen, ...others].slice(0, 80);
   }, [apps, sel, q, showSystem, byPkg]);
 
@@ -355,8 +528,12 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
       if (!on) return await removeFocusApp(a.packageName);
       const r = await addFocusApp(a.packageName, a.label);
       if (r !== 'applied') {
-        showAlert('Change requested',
-          `${a.label} is allowed during focus only after the ${p.delayDays === 1 ? '24-hour' : `${p.delayDays}-day`} timer completes.`);
+        showAlert(
+          'Change requested',
+          `${a.label} is allowed during focus only after the ${
+            p.delayDays === 1 ? '24-hour' : `${p.delayDays}-day`
+          } timer completes.`
+        );
       }
     } catch (e) {
       showAlert('Blocker', errMsg(e));
@@ -364,7 +541,7 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
   };
 
   return (
-    <Card>
+    <GlowCard style={{ padding: 18 }}>
       <Title icon={Icons.apps}>Essential apps ({sel.length}/{MAX_FOCUS_APPS})</Title>
       <Sub>Only these apps (plus calls and your keyboard) work during focus mode.</Sub>
       <TextInput
@@ -372,24 +549,47 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
         onChangeText={setQ}
         placeholder="Search apps"
         placeholderTextColor={t.sub}
-        style={{ marginTop: 10, backgroundColor: t.bg, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 }}
+        style={{
+          marginTop: 12,
+          backgroundColor: t.bg,
+          color: '#FFFFFF',
+          borderColor: t.cardBorder,
+          borderWidth: 1,
+          borderRadius: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          fontSize: 13.5,
+        }}
       />
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-        <Text style={{ color: t.sub }}>Show system apps</Text>
-        <Switch value={showSystem} onValueChange={setShowSystem} trackColor={{ true: t.accent }} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+        <Text style={{ color: t.sub, fontSize: 13 }}>Show system apps</Text>
+        <CyberSwitch value={showSystem} onValueChange={setShowSystem} />
       </View>
-      {rows.map(a => {
-        const on = sel.includes(a.packageName) || pendingAdd.has(a.packageName);
-        return (
-          <View key={a.packageName} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 12 }}>
-            <AppIcon pkg={a.packageName} />
-            <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>{a.label}</Text>
-            {pendingAdd.has(a.packageName) && <Badge label="Pending" tone="warn" />}
-            <Switch value={on} onValueChange={v => toggle(a as InstalledApp, v)} trackColor={{ true: t.accent }} />
-          </View>
-        );
-      })}
-    </Card>
+      <View style={{ marginTop: 8 }}>
+        {rows.map(a => {
+          const on = sel.includes(a.packageName) || pendingAdd.has(a.packageName);
+          return (
+            <View
+              key={a.packageName}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 8,
+                gap: 12,
+                borderBottomWidth: 1,
+                borderBottomColor: t.cardBorder,
+              }}>
+              <AppIcon pkg={a.packageName} />
+              <Text style={{ color: '#FFFFFF', flex: 1, fontWeight: '600', fontSize: 13.5 }} numberOfLines={1}>
+                {a.label}
+              </Text>
+              {pendingAdd.has(a.packageName) && <StatusPillBadge label="Pending" tone="warn" size="sm" />}
+              <CyberSwitch value={on} onValueChange={v => toggle(a as InstalledApp, v)} />
+            </View>
+          );
+        })}
+      </View>
+    </GlowCard>
   );
 }
 
@@ -399,16 +599,21 @@ function GranularFocusCard() {
     block_fb_reels: false,
     block_insta_reels: false,
     block_insta_search: false,
-    block_yt_shorts: false
+    block_yt_shorts: false,
   };
 
-  const onToggle = async (key: 'block_fb_reels' | 'block_insta_reels' | 'block_insta_search' | 'block_yt_shorts', on: boolean) => {
+  const onToggle = async (
+    key: 'block_fb_reels' | 'block_insta_reels' | 'block_insta_search' | 'block_yt_shorts',
+    on: boolean
+  ) => {
     try {
       const r = await setGranularFocusToggle(key, on);
       if (r !== 'applied') {
         const delayText = p.delayDays === 1 ? '24-hour' : `${p.delayDays}-day`;
-        showAlert('Change requested',
-          `This shield will be disabled only after the ${delayText} timer completes and you confirm.`);
+        showAlert(
+          'Change requested',
+          `This shield will be disabled only after the ${delayText} timer completes and you confirm.`
+        );
       }
     } catch (e) {
       showAlert('Blocker', errMsg(e));
@@ -416,10 +621,10 @@ function GranularFocusCard() {
   };
 
   return (
-    <Card>
+    <GlowCard style={{ padding: 18 }}>
       <Title icon={Icons.shieldOn}>Distraction Shields</Title>
       <Sub>Exit short-form video feeds & adult content while keeping parent apps usable.</Sub>
-      <View style={{ marginTop: 10 }}>
+      <View style={{ marginTop: 12 }}>
         <AnimatedToggleRow
           icon={Icons.play}
           label="Block YouTube Shorts"
@@ -457,7 +662,7 @@ function GranularFocusCard() {
         />
         <LockBar lockKey="granular_focus" />
       </View>
-    </Card>
+    </GlowCard>
   );
 }
 
@@ -476,7 +681,7 @@ export default function FocusScreen() {
   const active = p.focus.active;
   const studyActive = p.study?.active;
   const effectivePage = studyActive ? 'study' : active ? 'focus' : subPage;
-  const now = useNow(active ? 1000 : 0);
+  const now = useNow(active ? 500 : 0);
   const [newestId, setNewestId] = useState<string | null>(null);
 
   const addNewSchedule = () => {
@@ -486,43 +691,60 @@ export default function FocusScreen() {
       .then(id => setNewestId(id))
       .catch(e => showAlert('Blocker', errMsg(e)));
   };
-  // While focus is running, poll a bit faster than the app-wide 5s cadence so a schedule
-  // starting/ending, or a change made elsewhere, shows up here within about 2 seconds.
+
   useEffect(() => {
     if (!active) return;
     const i = setInterval(() => refresh().catch(() => {}), 2000);
     return () => clearInterval(i);
   }, [active]);
-  // p.focus.remainingMs only refreshes on each poll; derive a fixed end time from it and tick the
-  // display every second in between, so the countdown moves smoothly instead of jumping every few
-  // seconds, and immediately reflects any change we just made (refresh() runs right after it).
-  const [endsAt, setEndsAt] = useState(() => Date.now() + p.focus.remainingMs);
+
+  const activeSchedule = p.schedules.find(s => s.activeNow);
+  const timerRunning = p.focus.until > Date.now();
+
+  const targetEnd = useMemo(() => {
+    if (p.focus.until > Date.now()) {
+      return p.focus.until;
+    }
+    if (activeSchedule) {
+      const d = new Date();
+      const curSecOfDay = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+      const endSec = activeSchedule.endMin * 60;
+      let secLeft = endSec - curSecOfDay;
+      if (secLeft <= 0) secLeft += 86400;
+      return Date.now() + secLeft * 1000 - d.getMilliseconds();
+    }
+    return p.focus.remainingMs > 0 ? Date.now() + p.focus.remainingMs : 0;
+  }, [p.focus.until, activeSchedule?.id, activeSchedule?.endMin, active]);
+
+  const liveRemaining = targetEnd > 0 ? Math.max(0, targetEnd - now) : Math.max(0, p.focus.remainingMs);
+  const prevRemainingRef = useRef<number>(liveRemaining);
   useEffect(() => {
-    setEndsAt(Date.now() + p.focus.remainingMs);
-  }, [p.focus.remainingMs]);
-  const liveRemaining = Math.max(0, endsAt - now);
-  useEffect(() => {
-    if (liveRemaining === 0 && active) refresh().catch(() => {});
+    if (prevRemainingRef.current > 0 && liveRemaining === 0 && active) {
+      refresh().catch(() => {});
+    }
+    prevRemainingRef.current = liveRemaining;
   }, [liveRemaining, active]);
 
   const byPkg = useMemo(() => new Map(apps.map(a => [a.packageName, a])), [apps]);
   const delayText = p.delayDays === 1 ? '24 hours' : `${p.delayDays} days`;
   const guard = (fn: () => Promise<unknown>) => fn().catch(e => showAlert('Blocker', errMsg(e)));
   const chosenMinutes = custom.trim() ? Math.max(1, Math.min(10080, parseInt(custom, 10) || 0)) : minutes;
-  const timerRunning = p.focus.until > Date.now();
-  const activeSchedule = p.schedules.find(s => s.activeNow);
 
-  const endNow = () => guard(async () => {
-    if (timerRunning) {
-      await endFocusEarly();
-    } else if (activeSchedule) {
-      const r = await updateSchedule(activeSchedule.id, {
-        label: activeSchedule.label, startMin: activeSchedule.startMin, endMin: activeSchedule.endMin, enabled: false
-      });
-      if (r === 'applied') return;
-    }
-    showAlert('Change requested', `Focus ends early only after the ${delayText} timer completes and you confirm.`);
-  });
+  const endNow = () =>
+    guard(async () => {
+      if (timerRunning) {
+        await endFocusEarly();
+      } else if (activeSchedule) {
+        const r = await updateSchedule(activeSchedule.id, {
+          label: activeSchedule.label,
+          startMin: activeSchedule.startMin,
+          endMin: activeSchedule.endMin,
+          enabled: false,
+        });
+        if (r === 'applied') return;
+      }
+      showAlert('Change requested', `Focus ends early only after the ${delayText} timer completes and you confirm.`);
+    });
 
   const activeFocusApps = useMemo(() => {
     const set = new Set(p.focus.apps);
@@ -535,125 +757,160 @@ export default function FocusScreen() {
   return (
     <View style={{ flex: 1 }}>
       {/* Top Segmented Page Switcher */}
-      <View style={{
-        flexDirection: 'row',
-        backgroundColor: t.bgAlt,
-        borderRadius: 14,
-        padding: 3,
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 4,
-        borderWidth: 1,
-        borderColor: t.border
-      }}>
-        <Pressable
+      <View
+        style={{
+          flexDirection: 'row',
+          backgroundColor: '#0E1322',
+          borderRadius: 16,
+          padding: 4,
+          marginHorizontal: 16,
+          marginTop: 8,
+          marginBottom: 6,
+          borderWidth: 1,
+          borderColor: '#1E2640',
+        }}>
+        <PressableScale
           onPress={() => !studyActive && setSubPage('focus')}
-          style={({ pressed }) => [{
-            flex: 1,
-            paddingVertical: 9,
-            borderRadius: 11,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'row',
-            gap: 7,
-            backgroundColor: effectivePage === 'focus' ? t.accent : 'transparent',
-            opacity: (studyActive && effectivePage !== 'focus') ? 0.35 : pressed ? 0.8 : 1,
-            shadowColor: effectivePage === 'focus' ? t.accent : 'transparent',
-            shadowOpacity: effectivePage === 'focus' ? 0.6 : 0,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: effectivePage === 'focus' ? 3 : 0
-          }]}>
-          <Icons.focus size={15} color={effectivePage === 'focus' ? '#FFF' : t.sub} strokeWidth={2.4} />
-          <Text style={{
-            color: effectivePage === 'focus' ? '#FFF' : t.sub,
-            fontWeight: '700',
-            fontSize: 13,
-            letterSpacing: -0.2
-          }}>
-            Focus Mode
-          </Text>
-        </Pressable>
+          style={{ flex: 1 }}>
+          <View
+            style={{
+              paddingVertical: 10,
+              borderRadius: 12,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              backgroundColor: effectivePage === 'focus' ? t.accent : 'transparent',
+              opacity: studyActive && effectivePage !== 'focus' ? 0.35 : 1,
+              shadowColor: effectivePage === 'focus' ? t.accent : 'transparent',
+              shadowOpacity: effectivePage === 'focus' ? 0.6 : 0,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: effectivePage === 'focus' ? 3 : 0,
+            }}>
+            <Icons.focus size={16} color={effectivePage === 'focus' ? '#FFF' : t.sub} strokeWidth={2.4} />
+            <Text
+              style={{
+                color: effectivePage === 'focus' ? '#FFF' : t.sub,
+                fontWeight: '700',
+                fontSize: 13,
+                letterSpacing: -0.2,
+              }}>
+              Focus Mode
+            </Text>
+          </View>
+        </PressableScale>
 
-        <Pressable
+        <PressableScale
           onPress={() => !active && setSubPage('study')}
-          style={({ pressed }) => [{
-            flex: 1,
-            paddingVertical: 9,
-            borderRadius: 11,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'row',
-            gap: 7,
-            backgroundColor: effectivePage === 'study' ? t.accent : 'transparent',
-            opacity: (active && effectivePage !== 'study') ? 0.35 : pressed ? 0.8 : 1,
-            shadowColor: effectivePage === 'study' ? t.accent : 'transparent',
-            shadowOpacity: effectivePage === 'study' ? 0.6 : 0,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: effectivePage === 'study' ? 3 : 0
-          }]}>
-          <BookOpen size={15} color={effectivePage === 'study' ? '#FFF' : t.sub} strokeWidth={2.4} />
-          <Text style={{
-            color: effectivePage === 'study' ? '#FFF' : t.sub,
-            fontWeight: '700',
-            fontSize: 13,
-            letterSpacing: -0.2
-          }}>
-            Study Mode
-          </Text>
-        </Pressable>
+          style={{ flex: 1 }}>
+          <View
+            style={{
+              paddingVertical: 10,
+              borderRadius: 12,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              backgroundColor: effectivePage === 'study' ? t.accent : 'transparent',
+              opacity: active && effectivePage !== 'study' ? 0.35 : 1,
+              shadowColor: effectivePage === 'study' ? t.accent : 'transparent',
+              shadowOpacity: effectivePage === 'study' ? 0.6 : 0,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: effectivePage === 'study' ? 3 : 0,
+            }}>
+            <BookOpen size={16} color={effectivePage === 'study' ? '#FFF' : t.sub} strokeWidth={2.4} />
+            <Text
+              style={{
+                color: effectivePage === 'study' ? '#FFF' : t.sub,
+                fontWeight: '700',
+                fontSize: 13,
+                letterSpacing: -0.2,
+              }}>
+              Study Mode
+            </Text>
+          </View>
+        </PressableScale>
       </View>
 
       {effectivePage === 'study' ? (
         <StudyScreen />
       ) : active ? (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 10 }}>
-          <Card>
-            <Title size={22} icon={Icons.focus}>Focus mode</Title>
-            <Text style={{ color: t.accent, fontSize: 40, fontWeight: '800', marginVertical: 8, fontVariant: ['tabular-nums'] }}>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 10, paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+          <GlowCard active tone="ok" style={{ padding: 20 }}>
+            <Title size={21} icon={Icons.focus}>Focus mode active</Title>
+            <Text
+              style={{
+                color: '#FFFFFF',
+                fontSize: 42,
+                fontWeight: '800',
+                marginVertical: 10,
+                fontVariant: ['tabular-nums'],
+                letterSpacing: -1,
+              }}>
               {fmt(liveRemaining)}
             </Text>
             <Sub>
-              {timerRunning ? 'Running from your timer' : `Running from "${activeSchedule?.label ?? 'a schedule'}"`}.
-              Settings and every app except your essential apps are locked until it ends.
+              {timerRunning
+                ? 'Running from your timer'
+                : `Running from "${activeSchedule?.label ?? 'a schedule'}" (${activeSchedule ? formatDuration(activeSchedule.startMin, activeSchedule.endMin) : ''})`}.
+              Settings and all non-essential apps are locked until completion.
             </Sub>
             <LockBar lockKey="focus" />
-          </Card>
+          </GlowCard>
 
-          <Card>
+          <GlowCard style={{ padding: 18 }}>
             <Title icon={Icons.play}>Open an essential app</Title>
-            {activeFocusApps.map(pkg => {
-              const a = byPkg.get(pkg);
-              return (
-                <View key={pkg} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 12 }}>
-                  <AppIcon pkg={pkg} />
-                  <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>{a?.label ?? pkg}</Text>
-                  <Btn label="Open" disabled={!a} onPress={() => guard(() => Native.launchApp(pkg))} />
-                </View>
-              );
-            })}
-          </Card>
+            <View style={{ marginTop: 8 }}>
+              {activeFocusApps.map(pkg => {
+                const a = byPkg.get(pkg);
+                return (
+                  <View
+                    key={pkg}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 9,
+                      gap: 12,
+                      borderBottomWidth: 1,
+                      borderBottomColor: t.cardBorder,
+                    }}>
+                    <AppIcon pkg={pkg} />
+                    <Text style={{ color: '#FFFFFF', flex: 1, fontWeight: '600', fontSize: 13.5 }} numberOfLines={1}>
+                      {a?.label ?? pkg}
+                    </Text>
+                    <Btn label="Open" disabled={!a} kind="ghost" onPress={() => guard(() => Native.launchApp(pkg))} />
+                  </View>
+                );
+              })}
+            </View>
+          </GlowCard>
 
           {timerRunning && (
-            <Card>
+            <GlowCard style={{ padding: 18 }}>
               <Title icon={Icons.clock}>Change the timer</Title>
-              <Sub>Making it longer applies now. Shortening waits for the {delayText} timer.</Sub>
+              <Sub>Making it longer applies immediately. Shortening waits for the {delayText} timer.</Sub>
               <Chips
                 values={PRESETS}
-                onPick={m => guard(async () => {
-                  const r = await setFocusRemaining(m);
-                  if (r !== 'applied') {
-                    showAlert('Change requested', `The shorter timer applies only after ${delayText}, if focus is still running.`);
-                  }
-                })}
+                onPick={m =>
+                  guard(async () => {
+                    const r = await setFocusRemaining(m);
+                    if (r !== 'applied') {
+                      showAlert(
+                        'Change requested',
+                        `The shorter timer applies only after ${delayText}, if focus is still running.`
+                      );
+                    }
+                  })
+                }
               />
-            </Card>
+            </GlowCard>
           )}
 
-          <Card>
+          <GlowCard style={{ padding: 18 }}>
             <Btn label="End focus now" kind="danger" icon={Icons.unlock} onPress={endNow} />
-          </Card>
+          </GlowCard>
 
           <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
           <GranularFocusCard />
@@ -661,33 +918,58 @@ export default function FocusScreen() {
         </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 10, paddingBottom: 90 }} keyboardShouldPersistTaps="handled">
-            <Card>
-              <Title size={22} icon={Icons.focus}>Focus mode</Title>
+          <ScrollView
+            contentContainerStyle={{ padding: 16, paddingTop: 10, paddingBottom: 90 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <GlowCard style={{ padding: 18 }}>
+              <Title size={21} icon={Icons.focus}>Focus mode</Title>
               <Sub>Locks all settings and every app except your essential apps for the time you choose.</Sub>
-              <Chips values={PRESETS} selected={custom.trim() ? undefined : minutes} onPick={m => { setCustom(''); setMinutes(m); }} />
+              <Chips
+                values={PRESETS}
+                selected={custom.trim() ? undefined : minutes}
+                onPick={m => {
+                  setCustom('');
+                  setMinutes(m);
+                }}
+              />
               <TextInput
                 value={custom}
                 onChangeText={setCustom}
                 keyboardType="number-pad"
                 placeholder="Or custom minutes (1 to 10080)"
                 placeholderTextColor={t.sub}
-                style={{ marginTop: 12, backgroundColor: t.card, color: t.text, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 }}
+                style={{
+                  marginTop: 14,
+                  backgroundColor: t.bg,
+                  color: '#FFFFFF',
+                  borderColor: t.cardBorder,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  fontSize: 13.5,
+                }}
               />
-              <View style={{ height: 12 }} />
+              <View style={{ height: 14 }} />
               <Btn
                 label={`Start focus for ${label(chosenMinutes)}`}
                 icon={Icons.play}
-                onPress={() => showAlert(
-                  'Start focus mode?',
-                  `Everything except your ${p.focus.apps.length} essential apps will be locked for ${label(chosenMinutes)}. Ending it early takes ${delayText}.`,
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Start', style: 'destructive', onPress: () => guard(() => startFocus(chosenMinutes)) }
-                  ]
-                )}
+                kind="primary"
+                onPress={() =>
+                  showAlert(
+                    'Start focus mode?',
+                    `Everything except your ${p.focus.apps.length} essential apps will be locked for ${label(
+                      chosenMinutes
+                    )}. Ending it early takes ${delayText}.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Start', style: 'destructive', onPress: () => guard(() => startFocus(chosenMinutes)) },
+                    ]
+                  )
+                }
               />
-            </Card>
+            </GlowCard>
 
             <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
             <GranularFocusCard />

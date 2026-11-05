@@ -206,7 +206,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.ibbl.cellfin"
         )
         private val FB_VIDEO_REELS_PLAYER_IDS = listOf(
-            // Dedicated full-screen Facebook Katana Reels viewers
+            // Dedicated full-screen Facebook Katana Reels viewers (NEVER include inline newsfeed shelf IDs here)
             "com.facebook.katana:id/fb_shorts_viewer_container",
             "com.facebook.katana:id/fb_shorts_viewer_view_pager",
             "com.facebook.katana:id/fb_shorts_unified_viewer",
@@ -214,14 +214,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.katana:id/reels_viewer_root",
             "com.facebook.katana:id/watch_and_go_reels_container",
             "com.facebook.katana:id/fb_shorts_player_fragment",
-            // Channel Feed & Warion (scrollable video player launched from newsfeed)
+            "com.facebook.katana:id/reels_audio_pill",
+            "com.facebook.katana:id/reels_audio_title",
+            "com.facebook.katana:id/reels_ufi_container",
+            "com.facebook.katana:id/fb_shorts_ufi_container",
+            "com.facebook.katana:id/fb_shorts_remix_button",
+            "com.facebook.katana:id/reels_remix_button",
+            "com.facebook.katana:id/reels_viewer",
+            // Channel Feed & Warion full-screen video overlay
             "com.facebook.katana:id/warion_root_container",
             "com.facebook.katana:id/warion_container",
             "com.facebook.katana:id/warion_video_view",
-            "com.facebook.katana:id/channel_feed",
-            "com.facebook.katana:id/channel_feed_fragment",
-            "com.facebook.katana:id/channel_feed_view",
-            "com.facebook.katana:id/channel_view",
             "com.facebook.katana:id/fullscreen_video",
             "com.facebook.katana:id/fullscreen_video_player",
             "com.facebook.katana:id/video_fullscreen_player",
@@ -230,8 +233,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.lite:id/reels_screen",
             "com.facebook.lite:id/reels_player",
             "com.facebook.lite:id/video_player_reels",
-            "com.facebook.lite:id/watch_screen",
-            "com.facebook.lite:id/video_player"
+            "com.facebook.lite:id/watch_screen"
+        )
+        private val FB_REELS_AND_VIDEO_TAB_IDS = listOf(
+            "com.facebook.katana:id/reels_tab",
+            "com.facebook.katana:id/tab_reels",
+            "com.facebook.katana:id/fb_shorts_tab",
+            "com.facebook.katana:id/video_tab",
+            "com.facebook.katana:id/tab_video",
+            "com.facebook.katana:id/watch_tab",
+            "com.facebook.katana:id/tab_watch",
+            "com.facebook.katana:id/video_home_tab"
         )
         private val FB_NEWSFEED_IDS = listOf(
             "com.facebook.katana:id/feed_composer",
@@ -4214,7 +4226,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (list.isNullOrEmpty()) return false
         var selected = false
         for (node in list) {
-            if (node.isSelected) selected = true
+            val cd = node.contentDescription?.toString()?.lowercase()
+            val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) node.stateDescription?.toString()?.lowercase() else null
+            if (node.isSelected ||
+                cd?.contains("selected") == true ||
+                cd?.contains("active") == true ||
+                stateDesc?.contains("selected") == true ||
+                stateDesc?.contains("active") == true) {
+                selected = true
+            }
             node.recycle()
         }
         return selected
@@ -4235,6 +4255,21 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun clickNodeOrParent(node: AccessibilityNodeInfo?): Boolean {
+        var cur = node
+        var count = 0
+        while (cur != null && count++ < 6) {
+            if (cur.isClickable) {
+                return cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            val p = cur.parent
+            if (cur !== node) cur.recycle()
+            cur = p
+        }
+        cur?.recycle()
+        return false
+    }
+
     private fun exitSubFeature(pkg: String, featureName: String) {
         val now = System.currentTimeMillis()
         lastGranularHit[pkg] = now
@@ -4248,16 +4283,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (r != null) {
                     try {
                         val homeTab = findHomeTabNode(r)
-                        homeTab?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        homeTab?.recycle()
+                        if (homeTab != null) {
+                            clickNodeOrParent(homeTab)
+                            homeTab.recycle()
+                        }
                     } finally {
                         runCatching { r.recycle() }
                     }
                 }
-            }, 80L)
+            }, 60L)
         }
 
-        // 3. Stage 1 retry at 150ms: if still in sub-feature, press Back again
+        // 3. Stage 1 retry at 120ms: if still in sub-feature, press Back again
         main.postDelayed({
             if (currentFgPkg == pkg) {
                 val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
@@ -4277,9 +4314,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-        }, 150L)
+        }, 120L)
 
-        // 4. Stage 2 retry at 350ms: if STILL in Reels/Video, kick to Home
+        // 4. Stage 2 retry at 220ms: if STILL in Reels/Video, kick to Home
         main.postDelayed({
             if (currentFgPkg == pkg) {
                 val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
@@ -4295,7 +4332,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-        }, 350L)
+        }, 220L)
 
         showOverlay(
             getFearAllahHeading(),
@@ -4321,12 +4358,35 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return node
             }
         }
-        return findNodeMatchingText(root, listOf("home, tab", "home tab", "news feed"))
+        return findNodeMatchingText(root, listOf("home, tab", "home tab", "news feed", "home", "feeds", "হোম"))
     }
 
     private fun isFacebookStory(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
         val evCls = ev?.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
+
+        // Absolute blacklist: If it's a Reels / Shorts activity or view, IT IS NEVER A STORY
+        if (evCls.contains("fbshorts") || rootCls.contains("fbshorts") ||
+            evCls.contains("reelsviewer") || rootCls.contains("reelsviewer") ||
+            evCls.contains("reelwatch") || rootCls.contains("reelwatch") ||
+            evCls.contains("warion") || rootCls.contains("warion") ||
+            evCls.contains("channelfeed") || rootCls.contains("channelfeed") ||
+            hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)) {
+            return false
+        }
+
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(1500))
+        val t = sb.toString().lowercase()
+
+        // If screen has clear Reels / Video text, NEVER whitelist as a story
+        if ("original audio" in t || "original sound" in t || "remix" in t ||
+            "reels audio" in t || "use template" in t || "watch more reels" in t ||
+            "fbshorts" in t || "fb shorts" in t || "swipe up" in t ||
+            ("reels" in t && ("audio" in t || "remix" in t || "sound" in t || "music" in t))) {
+            return false
+        }
+
         if (evCls.contains("story") || evCls.contains("stories") ||
             rootCls.contains("story") || rootCls.contains("stories")) {
             return true
@@ -4336,33 +4396,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(1500))
-        val t = sb.toString().lowercase()
-
-        if ("reply to " in t || "send message to " in t || "your story" in t ||
-            "create a story" in t || "create story" in t || "add to story" in t ||
-            "share to story" in t || "stories tray" in t || "story tray" in t ||
-            "view story" in t || "seen story" in t || "unseen story" in t ||
-            "story by " in t || "'s story" in t || "স্টোরি" in t || "স্টোরিজ" in t) {
+        if ("reply to " in t || "send message to " in t || "stories tray" in t ||
+            "story tray" in t || "view story" in t || "seen story" in t || "unseen story" in t ||
+            "story by " in t || "'s story" in t || "স্টোরিজ" in t) {
             return true
         }
 
-        return hasNodeWithStoryId(root, 0, intArrayOf(200))
-    }
-
-    private fun hasNodeWithStoryId(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): Boolean {
-        if (n == null || depth > 10 || budget[0]-- <= 0) return false
-        val id = n.viewIdResourceName?.toString()?.lowercase().orEmpty()
-        if (id.contains("story") || id.contains("stories")) {
-            return true
-        }
-        for (i in 0 until n.childCount) {
-            val c = n.getChild(i) ?: continue
-            val found = hasNodeWithStoryId(c, depth + 1, budget)
-            c.recycle()
-            if (found) return true
-        }
         return false
     }
 
@@ -4400,189 +4439,208 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
-        // Fast story whitelist: NEVER block Facebook Stories
-        if (isFacebookStory(root, ev)) {
+    private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
+        // Only inspect actual click events, NEVER passive scrolling or focus changes
+        if (ev.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
             return false
         }
 
-        // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards
-        if (ev != null && (ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED)) {
+        val src = ev.source
+        // Whitelist stories: Clicking on a Story must never be blocked
+        if (isFacebookStoryClick(ev, src)) {
+            runCatching { src?.recycle() }
+            return false
+        }
+
+        val evCd = ev.contentDescription?.toString().orEmpty().lowercase().trim()
+        val evText = ev.text.joinToString(" ").lowercase().trim()
+        val srcCd = src?.contentDescription?.toString().orEmpty().lowercase().trim()
+        val srcText = src?.text?.toString().orEmpty().lowercase().trim()
+        val srcId = src?.viewIdResourceName?.toString().orEmpty().lowercase()
+        val srcCls = src?.className?.toString().orEmpty().lowercase()
+
+        fun isReelOrVideoAction(s: String): Boolean {
+            if (s.isEmpty()) return false
+            val lower = s.trim().lowercase()
+            return lower == "reels" || lower == "reel" || lower == "shorts" ||
+                   lower == "video" || lower == "watch" || lower == "videos" ||
+                   lower == "facebook reels" || lower == "fb shorts" ||
+                   lower == "রিলস" || lower == "রিল" || lower == "ভিডিও" || lower == "ওয়াচ" ||
+                   lower.startsWith("reels, tab") || lower.startsWith("video, tab") ||
+                   lower.startsWith("watch, tab") || lower.startsWith("reels tab") ||
+                   lower.startsWith("video tab") || lower.startsWith("watch tab") ||
+                   lower == "play video" || lower == "watch video" || lower == "view reel" ||
+                   lower == "watch reel" || lower == "reels and short videos" ||
+                   lower == "ভিডিও চালান" || lower == "রিল দেখুন"
+        }
+
+        fun isReelOrVideoId(id: String): Boolean {
+            if (id.isEmpty()) return false
+            val lower = id.lowercase()
+            return lower.contains("reels_tab") || lower.contains("tab_reels") ||
+                   lower.contains("video_tab") || lower.contains("tab_video") ||
+                   lower.contains("watch_tab") || lower.contains("tab_watch") ||
+                   lower.contains("fb_shorts_tab") || lower.contains("fb_shorts_container") ||
+                   lower.contains("fb_shorts_recycler_view") || lower.contains("reels_recycler_view") ||
+                   lower.contains("fb_shorts_root") || lower.contains("reels_page_container") ||
+                   lower.contains("rich_video_player") || lower.contains("video_player_view") ||
+                   lower.contains("video_play_button") || lower.contains("video_container")
+        }
+
+        // 1. Direct event text / contentDescription / id
+        if (isReelOrVideoAction(evCd) || isReelOrVideoAction(evText) ||
+            isReelOrVideoAction(srcCd) || isReelOrVideoAction(srcText) ||
+            isReelOrVideoId(srcId)) {
+            runCatching { src?.recycle() }
+            return true
+        }
+
+        // 2. Check parent chain (e.g. clicked card inside Reels carousel or video container)
+        if (src != null) {
+            var parent = src.parent
+            var depth = 0
+            while (parent != null && depth < 4) {
+                val pId = parent.viewIdResourceName?.toString().orEmpty().lowercase()
+                val pCd = parent.contentDescription?.toString().orEmpty().lowercase().trim()
+                if (isReelOrVideoId(pId) || isReelOrVideoAction(pCd)) {
+                    runCatching { parent.recycle() }
+                    runCatching { src.recycle() }
+                    return true
+                }
+                val nextP = parent.parent
+                parent.recycle()
+                parent = nextP
+                depth++
+            }
+            parent?.recycle()
+
+            // 3. Check direct children
+            for (i in 0 until src.childCount) {
+                val c = src.getChild(i) ?: continue
+                val ct = c.text?.toString().orEmpty().lowercase().trim()
+                val ccd = c.contentDescription?.toString().orEmpty().lowercase().trim()
+                val cid = c.viewIdResourceName?.toString().orEmpty().lowercase()
+                val isHit = isReelOrVideoAction(ct) || isReelOrVideoAction(ccd) || isReelOrVideoId(cid)
+                c.recycle()
+                if (isHit) {
+                    runCatching { src.recycle() }
+                    return true
+                }
+            }
+        }
+
+        // 4. Click on video player surface directly (excluding stories)
+        if ((ev.className?.toString().orEmpty().contains("Video") || ev.className?.toString().orEmpty().contains("Player") ||
+             srcCls.contains("video") || srcCls.contains("player")) &&
+            !srcCls.contains("story") && !evCd.contains("story")) {
+            runCatching { src?.recycle() }
+            return true
+        }
+
+        runCatching { src?.recycle() }
+        return false
+    }
+
+    private fun isFacebookHomeTabSelected(root: AccessibilityNodeInfo): Boolean {
+        val homeTabIds = listOf(
+            "com.facebook.katana:id/home_tab",
+            "com.facebook.katana:id/tab_home",
+            "com.facebook.katana:id/feed_tab",
+            "com.facebook.lite:id/home_tab"
+        )
+        for (id in homeTabIds) {
+            if (isTabSelectedById(root, id)) return true
+        }
+        return scanSelectedTab(root, listOf("home, tab", "home tab", "news feed", "feeds", "হোম"))
+    }
+
+    private fun isFacebookReelsOrVideoTabSelected(root: AccessibilityNodeInfo): Boolean {
+        // If the Home tab is selected, we are definitely NOT on the Reels or Video tab
+        if (isFacebookHomeTabSelected(root)) return false
+
+        for (id in FB_REELS_AND_VIDEO_TAB_IDS) {
+            if (isTabSelectedById(root, id)) return true
+        }
+        return scanSelectedTab(root, listOf(
+            "reels, tab", "reels tab", "tab reels", "facebook reels",
+            "video, tab", "video tab", "tab video", "watch, tab", "watch tab", "tab watch",
+            "shorts, tab", "shorts tab", "রিলস", "ভিডিও", "ওয়াচ"
+        ))
+    }
+
+    private fun isFacebookHomeFeed(root: AccessibilityNodeInfo): Boolean {
+        if (isFacebookHomeTabSelected(root)) return true
+        if (hasAnyNodeId(root, FB_NEWSFEED_IDS)) return true
+
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(300))
+        val t = sb.toString().lowercase()
+        return "what's on your mind" in t || "কী ভাবছেন" in t || "create a post" in t
+    }
+
+    private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards FIRST
+        if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (isFacebookVideoOrReelClick(ev)) {
                 return true
             }
         }
 
-        // 1. Navigation bar tabs (Katana and Lite)
-        val isReelsOrVideoTab = isTabSelectedById(root, "com.facebook.katana:id/reels_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_reels") ||
-            isTabSelectedById(root, "com.facebook.katana:id/fb_shorts_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/video_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_video") ||
-            isTabSelectedById(root, "com.facebook.katana:id/watch_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_watch") ||
-            isTabSelectedById(root, "com.facebook.katana:id/video_home_tab") ||
-            scanSelectedTab(root, listOf(
-                "reels", "reel", "facebook reels", "watch", "video", "videos",
-                "shorts", "fb shorts", "রিলস", "রিল", "ভিডিও", "ওয়াচ"
-            ))
-        if (isReelsOrVideoTab) return true
-
-        // 2. Full-screen Video or Reels player IDs
-        if (hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)) return true
-
-        // 3. Activity / Window class names
-        val evCls = ev?.className?.toString().orEmpty().lowercase()
-        val rootCls = root.className?.toString().orEmpty().lowercase()
-        val isVideoClass = evCls.contains("channelfeed") || rootCls.contains("channelfeed") ||
-            evCls.contains("warion") || rootCls.contains("warion") ||
-            evCls.contains("fullscreenvideo") || rootCls.contains("fullscreenvideo") ||
-            evCls.contains("fbshorts") || rootCls.contains("fbshorts") ||
-            evCls.contains("reelsviewer") || rootCls.contains("reelsviewer") ||
-            evCls.contains("reelwatch") || rootCls.contains("reelwatch") ||
-            evCls.contains("unifiedvideoviewer") || rootCls.contains("unifiedvideoviewer") ||
-            evCls.contains("videoplayer") || rootCls.contains("videoplayer") ||
-            evCls.contains("richvideoplayer") || rootCls.contains("richvideoplayer") ||
-            evCls.contains("watchandgo") || rootCls.contains("watchandgo") ||
-            evCls.contains("fbshortsvieweractivity") || rootCls.contains("fbshortsvieweractivity")
-        if (isVideoClass) return true
-
-        // 4. Content and screen inspection (budget 2500)
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(2500))
-        val t = sb.toString().lowercase()
-
-        // Check if Home News Feed is active (preserves text & image post browsing)
-        val isHomeTabSelected = isTabSelectedById(root, "com.facebook.katana:id/home_tab") ||
-            isTabSelectedById(root, "com.facebook.katana:id/tab_home") ||
-            scanSelectedTab(root, listOf("home, tab", "home tab", "news feed, tab", "news feed tab"))
-        val hasHomeFeedComposer = "what's on your mind" in t || "what’s on your mind" in t || "কী ভাবছেন" in t
-        val isHomeFeedActive = (isHomeTabSelected || hasHomeFeedComposer) && !hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)
-
-        // Dedicated Reels or Watch explore hub / viewer
-        val isReelsViewer = ("reels" in t || "reel" in t || "রিলস" in t) &&
-            ("original audio" in t || "original sound" in t || "use template" in t || "use audio" in t ||
-             "remix" in t || "remix reel" in t || "reels audio" in t || "send in messenger" in t ||
-             "create reel" in t || "watch more reels" in t || "swipe up" in t ||
-             ("like" in t && "comment" in t && "share" in t && !isHomeFeedActive))
-
-        val isWatchHub = ("watch" in t || "video" in t || "ওয়াচ" in t || "ভিডিও" in t) &&
-            ("for you" in t || "following" in t || "live" in t || "suggested videos" in t || "up next" in t)
-
-        val hasVideoPlaybackControls = ("pause video" in t || "play video" in t || "double tap to pause" in t ||
-            "double-tap to pause" in t || "video seek" in t || "video scrubber" in t || "seek bar" in t ||
-            "video playback" in t || "rich video player" in t || "elapsed time" in t || "video duration" in t ||
-            "enter full screen" in t || "fullscreen video" in t)
-
-        val hasVideoView = hasVideoPlaybackNode(root, 0, intArrayOf(500))
-
-        if (!isHomeFeedActive) {
-            // When not in home feed: ANY Reels viewer, Watch hub, or video player must be blocked
-            if (isReelsViewer || isWatchHub || hasVideoPlaybackControls || hasVideoView ||
-                "reels and short videos" in t || "fb shorts" in t ||
-                (t.startsWith("reels") || t.startsWith("reel"))) {
-                return true
-            }
-        } else {
-            // When inside Home Feed: block only if an active video post or Reels shelf is playing
-            if (hasVideoPlaybackControls && ("seek" in t || "elapsed time" in t || "pause video" in t || "double tap to pause" in t || "video scrubber" in t)) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
-        val src = ev.source
-        if (isFacebookStoryClick(ev, src)) {
-            runCatching { src?.recycle() }
+        // Fast story whitelist: NEVER block Facebook Stories
+        if (isFacebookStory(root, ev)) {
             return false
         }
-        val evCd = ev.contentDescription?.toString().orEmpty().lowercase()
-        val evText = ev.text.joinToString(" ").lowercase()
-        val evCls = ev.className?.toString().orEmpty().lowercase()
-        val srcCd = src?.contentDescription?.toString().orEmpty().lowercase()
-        val srcText = src?.text?.toString().orEmpty().lowercase()
-        val srcCls = src?.className?.toString().orEmpty().lowercase()
 
-        fun isVideoStr(s: String): Boolean {
-            if (s.isEmpty()) return false
-            if (s.contains("photo") || s.contains("image") || s.contains("gallery") || s.contains("profile picture") || s.contains("story") || s.contains("stories") || s.contains("স্টোরি")) return false
-            return s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") ||
-                s.contains("shorts") || s.contains("fb shorts") || s.contains("রিলস") || s.contains("রিল") ||
-                s.contains("ভিডিও") || s.contains("ওয়াচ")
+        // 1. Full-screen Video or Reels player IDs (ONLY dedicated full-screen viewer containers)
+        if (hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)) return true
+
+        // 2. Activity / Window class names (dedicated full-screen video/reels activities only)
+        val evCls = ev?.className?.toString().orEmpty().lowercase()
+        val rootCls = root.className?.toString().orEmpty().lowercase()
+        val isDedicatedVideoActivity =
+            evCls.contains("fbshortsvieweractivity") || rootCls.contains("fbshortsvieweractivity") ||
+            evCls.contains("reelsvieweractivity") || rootCls.contains("reelsvieweractivity") ||
+            evCls.contains("reelsactivity") || rootCls.contains("reelsactivity") ||
+            evCls.contains("warionactivity") || rootCls.contains("warionactivity") ||
+            evCls.contains("channelactivity") || rootCls.contains("channelactivity") ||
+            evCls.contains("fullscreenvideoactivity") || rootCls.contains("fullscreenvideoactivity") ||
+            evCls.contains("unifiedvideovieweractivity") || rootCls.contains("unifiedvideovieweractivity")
+        if (isDedicatedVideoActivity) return true
+
+        // 3. Navigation bar: If the Reels or Video/Watch tab is selected, block immediately!
+        if (isFacebookReelsOrVideoTabSelected(root)) return true
+
+        // 4. Content and screen inspection
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(3000))
+        val t = sb.toString().lowercase()
+
+        // 5. Check if user is currently on the Home Newsfeed
+        val onHomeFeed = isFacebookHomeFeed(root)
+
+        if (onHomeFeed) {
+            // ON HOME NEWSFEED:
+            // Do NOT block on passive preview shelves ("Reels and short videos") or inline video preview posts!
+            // Only block if a full-screen vertical swipe Reels player has taken over the screen.
+            val isFullScreenOverlay =
+                "swipe up for next reel" in t || "swipe up for next video" in t ||
+                "remix this reel" in t || "remix reel" in t || "watch more reels" in t
+            return isFullScreenOverlay
         }
 
-        if (isVideoStr(evCd) || isVideoStr(evText) || isVideoStr(srcCd) || isVideoStr(srcText)) {
-            return true
-        }
+        // NOT ON HOME FEED (e.g. user navigated to dedicated Reels page, Watch tab, or video viewer):
+        val isReelsPageOrViewer =
+            "original audio" in t || "original sound" in t || "reels audio" in t ||
+            "use template" in t || "use audio" in t || "remix this reel" in t ||
+            "remix reel" in t || "watch more reels" in t || "swipe up for next reel" in t ||
+            "swipe up for next video" in t || "fbshorts" in t || "fb shorts" in t ||
+            t.startsWith("reels") || t.startsWith("reel") || t.startsWith("রিলস") ||
+            ("reels" in t && ("create reel" in t || "my reels" in t || "audio by" in t || "use template" in t || ("like" in t && "comment" in t && "share" in t && "follow" in t))) ||
+            ("reels" in t && ("remix" in t || "original audio" in t || "audio" in t || "sound" in t)) ||
+            ("রিলস" in t && ("অরিজিনাল" in t || "অডিও" in t || "টেমপ্লেট" in t || "অনুসরণ" in t || "তৈরি করুন" in t)) ||
+            ("watch" in t && ("for you" in t || "following" in t || "live" in t || "suggested videos" in t))
 
-        if ((evCls.contains("video") || evCls.contains("player") || srcCls.contains("video") || srcCls.contains("player")) &&
-            !evCls.contains("story") && !srcCls.contains("story")) {
-            return true
-        }
-
-        return hasVideoInNodeHierarchy(src)
-    }
-
-    private fun hasVideoInNodeHierarchy(node: AccessibilityNodeInfo?): Boolean {
-        if (node == null) return false
-        val t = node.text?.toString()?.lowercase().orEmpty()
-        val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
-        val cls = node.className?.toString().orEmpty()
-        val id = node.viewIdResourceName?.toString()?.lowercase().orEmpty()
-        fun isStory(s: String) = s.contains("story") || s.contains("stories") || s.contains("স্টোরি")
-        if (isStory(t) || isStory(cd) || isStory(id) || isStory(cls)) return false
-        fun isVideo(s: String) = s.isNotEmpty() && !s.contains("photo") && !s.contains("image") && !isStory(s) &&
-            (s.contains("reel") || s.contains("reels") || s.contains("video") || s.contains("watch") || s.contains("shorts") || s.contains("রিলস") || s.contains("ভিডিও"))
-        if (isVideo(t) || isVideo(cd) || cls.contains("Video") || cls.contains("Player")) return true
-
-        for (i in 0 until node.childCount) {
-            val c = node.getChild(i) ?: continue
-            val ct = c.text?.toString()?.lowercase().orEmpty()
-            val ccd = c.contentDescription?.toString()?.lowercase().orEmpty()
-            val ccls = c.className?.toString().orEmpty()
-            val hit = isVideo(ct) || isVideo(ccd) || ccls.contains("Video") || ccls.contains("Player")
-            c.recycle()
-            if (hit) return true
-        }
-
-        var p = node.parent
-        var depth = 0
-        while (p != null && depth < 3) {
-            val pt = p.text?.toString()?.lowercase().orEmpty()
-            val pcd = p.contentDescription?.toString()?.lowercase().orEmpty()
-            val pcls = p.className?.toString().orEmpty()
-            val hit = isVideo(pt) || isVideo(pcd) || pcls.contains("Video") || pcls.contains("Player")
-            val nextP = p.parent
-            p.recycle()
-            if (hit) {
-                nextP?.recycle()
-                return true
-            }
-            p = nextP
-            depth++
-        }
-        p?.recycle()
-        return false
-    }
-
-    private fun hasVideoPlaybackNode(n: AccessibilityNodeInfo?, depth: Int, budget: IntArray): Boolean {
-        if (n == null || depth > 15 || budget[0]-- <= 0) return false
-        val cls = n.className?.toString().orEmpty()
-        val id = n.viewIdResourceName?.toString().orEmpty()
-        if (cls.contains("TextureView") || cls.contains("SurfaceView") || cls.contains("VideoView") ||
-            cls.contains("RichVideoPlayer") || id.contains("video_player") || id.contains("reels_player")) {
-            return true
-        }
-        for (i in 0 until n.childCount) {
-            val c = n.getChild(i) ?: continue
-            val found = hasVideoPlaybackNode(c, depth + 1, budget)
-            c.recycle()
-            if (found) return true
-        }
-        return false
+        return isReelsPageOrViewer
     }
 
     // -------------------------------------------------------------------------
@@ -5114,17 +5172,22 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isNodeOrTabSelected(root: AccessibilityNodeInfo, descs: List<String>): Boolean {
-        return scanSelectedTab(root, descs, 0, intArrayOf(80))
+        return scanSelectedTab(root, descs, 0, intArrayOf(250))
     }
 
-    private fun scanSelectedTab(n: AccessibilityNodeInfo?, descs: List<String>, depth: Int = 0, budget: IntArray = intArrayOf(80)): Boolean {
-        if (n == null || depth > 15 || budget[0]-- <= 0) return false
+    private fun scanSelectedTab(n: AccessibilityNodeInfo?, descs: List<String>, depth: Int = 0, budget: IntArray = intArrayOf(250)): Boolean {
+        if (n == null || depth > 25 || budget[0]-- <= 0) return false
         val cd = n.contentDescription?.toString()?.lowercase()
         val text = n.text?.toString()?.lowercase()
-        val isSelected = n.isSelected || cd?.contains("selected") == true || text?.contains("selected") == true
+        val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) n.stateDescription?.toString()?.lowercase() else null
+        val isSelected = n.isSelected ||
+            cd?.contains("selected") == true ||
+            text?.contains("selected") == true ||
+            stateDesc?.contains("selected") == true ||
+            stateDesc?.contains("active") == true
         if (isSelected) {
             if (cd != null && descs.any { cd.contains(it) }) return true
-            if (text != null && descs.any { text == it }) return true
+            if (text != null && descs.any { text.contains(it) }) return true
         }
         for (i in 0 until n.childCount) {
             val c = n.getChild(i)

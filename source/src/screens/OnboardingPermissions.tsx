@@ -1,10 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { PermissionKind, Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { getPopupLanguage, markOnboarded, refresh, setPopupLanguage, setProtection, setShield } from '../services/ProtectionManager';
-import { Badge, Btn, Card, Icons, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
+import {
+  getPopupLanguage,
+  markOnboarded,
+  refresh,
+  setPopupLanguage,
+  setProtection,
+  setShield,
+} from '../services/ProtectionManager';
+import {
+  Btn,
+  CyberSwitch,
+  GlowCard,
+  Icons,
+  PressableScale,
+  StatusPillBadge,
+  Sub,
+  Title,
+  errMsg,
+  showAlert,
+  useTheme,
+} from '../ui';
 
 const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: string; how: string }[] = [
   {
@@ -12,29 +31,29 @@ const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: strin
     title: 'Accessibility service',
     icon: Icons.eye,
     why: 'Reads the browser address bar and detects blocked apps.',
-    how: 'Installed apps → Blocker → turn on.'
+    how: 'Installed apps → Blocker → turn on.',
   },
   {
     kind: 'deviceAdmin',
     title: 'Device admin',
     icon: Icons.shieldOn,
     why: 'Prevents Blocker from being uninstalled.',
-    how: 'Tap Activate this device admin app.'
+    how: 'Tap Activate this device admin app.',
   },
   {
     kind: 'usageAccess',
     title: 'Usage access',
     icon: Icons.apps,
     why: 'Lets Blocker see which app is in the foreground.',
-    how: 'Select Blocker and allow usage access.'
+    how: 'Select Blocker and allow usage access.',
   },
   {
     kind: 'overlay',
     title: 'Display over other apps',
     icon: Icons.layers,
     why: 'Shows the blocking screen on top of blocked content.',
-    how: 'Allow display over other apps for Blocker.'
-  }
+    how: 'Allow display over other apps for Blocker.',
+  },
 ];
 
 export default function OnboardingPermissions({ onDone }: { onDone: () => void }) {
@@ -47,9 +66,11 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getPopupLanguage().then(l => {
-      if (l === 'bn' || l === 'en') setSelectedLang(l);
-    }).catch(() => {});
+    getPopupLanguage()
+      .then(l => {
+        if (l === 'bn' || l === 'en') setSelectedLang(l);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -105,28 +126,28 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
     }
   };
 
-  // Step 0: Initial Language Selection for Blocker Popups
+  // Step 0: Language Selection
   if (step === 'language') {
     return (
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <Title size={26} icon={Icons.shieldOn}>Popup Message Language</Title>
-        <Text style={{ color: t.sub, marginTop: 6, marginBottom: 20, lineHeight: 21 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <Title size={24} icon={Icons.shieldOn}>Popup Message Language</Title>
+        <Text style={{ color: t.sub, marginTop: 8, marginBottom: 20, lineHeight: 21, fontSize: 13.5 }}>
           Choose your preferred language for the blocker warning popups, Quranic reminders, and Hadiths.
           {'\n'}(The main application settings and navigation remain in English.)
         </Text>
 
         {/* Option 1: English */}
-        <Pressable
-          onPress={() => handleSelectLanguage('en')}
-          style={{ marginBottom: 14 }}>
-          <Card
+        <PressableScale onPress={() => handleSelectLanguage('en')} style={{ marginBottom: 14 }}>
+          <GlowCard
+            tone={selectedLang === 'en' ? 'accent' : 'default'}
             style={{
-              borderColor: selectedLang === 'en' ? t.accent : t.cardBorder,
-              borderWidth: selectedLang === 'en' ? 2 : 1,
-              backgroundColor: selectedLang === 'en' ? t.accentSoft : t.card
+              padding: 18,
+              borderColor: selectedLang === 'en' ? t.accentWellBorder : t.cardBorder,
+              borderWidth: 1.5,
+              backgroundColor: selectedLang === 'en' ? t.accentWell : t.card,
             }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View
                   style={{
                     width: 22,
@@ -135,7 +156,7 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
                     borderWidth: 2,
                     borderColor: selectedLang === 'en' ? t.accent : t.sub,
                     alignItems: 'center',
-                    justifyContent: 'center'
+                    justifyContent: 'center',
                   }}>
                   {selectedLang === 'en' && (
                     <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.accent }} />
@@ -143,7 +164,7 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
                 </View>
                 <Title size={18}>English</Title>
               </View>
-              {selectedLang === 'en' && <Badge label="Selected" tone="ok" />}
+              {selectedLang === 'en' && <StatusPillBadge label="Selected" tone="ok" size="sm" />}
             </View>
 
             <Sub>Displays verses & Hadiths in English:</Sub>
@@ -151,37 +172,33 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
               style={{
                 marginTop: 10,
                 padding: 12,
-                borderRadius: 10,
-                backgroundColor: 'rgba(0,0,0,0.25)',
+                borderRadius: 12,
+                backgroundColor: 'rgba(0,0,0,0.3)',
                 borderLeftWidth: 3,
-                borderLeftColor: selectedLang === 'en' ? t.accent : t.border
+                borderLeftColor: selectedLang === 'en' ? t.accent : t.border,
               }}>
               <Text style={{ color: '#F3F0FF', fontWeight: '700', fontSize: 13, marginBottom: 3 }}>
                 🛡️ Fear Allah
               </Text>
-              <Text style={{ color: t.sub, fontSize: 12, fontStyle: 'italic', lineHeight: 17 }}>
-                “Does he not know that Allah sees?”
-                {'\n'}— Surah Al-Alaq (96:14)
+              <Text style={{ color: t.sub, fontSize: 12, fontStyle: 'italic', lineHeight: 18 }}>
+                "Does he not know that Allah sees?" (Quran 96:14)
               </Text>
-              <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
-                <Text style={{ color: t.accent, fontSize: 11, fontWeight: '700' }}>[ Astaghfirullah ]</Text>
-              </View>
             </View>
-          </Card>
-        </Pressable>
+          </GlowCard>
+        </PressableScale>
 
-        {/* Option 2: বাংলা (Bangla) */}
-        <Pressable
-          onPress={() => handleSelectLanguage('bn')}
-          style={{ marginBottom: 20 }}>
-          <Card
+        {/* Option 2: Bangla */}
+        <PressableScale onPress={() => handleSelectLanguage('bn')} style={{ marginBottom: 20 }}>
+          <GlowCard
+            tone={selectedLang === 'bn' ? 'accent' : 'default'}
             style={{
-              borderColor: selectedLang === 'bn' ? t.accent : t.cardBorder,
-              borderWidth: selectedLang === 'bn' ? 2 : 1,
-              backgroundColor: selectedLang === 'bn' ? t.accentSoft : t.card
+              padding: 18,
+              borderColor: selectedLang === 'bn' ? t.accentWellBorder : t.cardBorder,
+              borderWidth: 1.5,
+              backgroundColor: selectedLang === 'bn' ? t.accentWell : t.card,
             }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View
                   style={{
                     width: 22,
@@ -190,7 +207,7 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
                     borderWidth: 2,
                     borderColor: selectedLang === 'bn' ? t.accent : t.sub,
                     alignItems: 'center',
-                    justifyContent: 'center'
+                    justifyContent: 'center',
                   }}>
                   {selectedLang === 'bn' && (
                     <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.accent }} />
@@ -198,156 +215,134 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
                 </View>
                 <Title size={18}>বাংলা (Bangla)</Title>
               </View>
-              {selectedLang === 'bn' && <Badge label="নির্বাচিত" tone="ok" />}
+              {selectedLang === 'bn' && <StatusPillBadge label="Selected" tone="ok" size="sm" />}
             </View>
 
-            <Sub>পপআপে পবিত্র কুরআনের আয়াত ও হাদিস বাংলায় প্রদর্শিত হবে:</Sub>
+            <Sub>Displays verses & Hadiths in Bengali:</Sub>
             <View
               style={{
                 marginTop: 10,
                 padding: 12,
-                borderRadius: 10,
-                backgroundColor: 'rgba(0,0,0,0.25)',
+                borderRadius: 12,
+                backgroundColor: 'rgba(0,0,0,0.3)',
                 borderLeftWidth: 3,
-                borderLeftColor: selectedLang === 'bn' ? t.accent : t.border
+                borderLeftColor: selectedLang === 'bn' ? t.accent : t.border,
               }}>
               <Text style={{ color: '#F3F0FF', fontWeight: '700', fontSize: 13, marginBottom: 3 }}>
                 🛡️ আল্লাহকে ভয় করুন
               </Text>
-              <Text style={{ color: t.sub, fontSize: 12, lineHeight: 18 }}>
-                “সে কি জানে না যে, নিশ্চয়ই আল্লাহ সবকিছু দেখেন?”
-                {'\n'}— সূরা আল-আলাক (৯৬:১৪)
+              <Text style={{ color: t.sub, fontSize: 12, fontStyle: 'italic', lineHeight: 18 }}>
+                "তিনি কি জানেন না যে, নিশ্চয়ই আল্লাহ সবকিছু দেখেন?" (সূরা আল-আলাক: ১৪)
               </Text>
-              <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
-                <Text style={{ color: t.accent, fontSize: 11, fontWeight: '700' }}>[ আস্তাগফিরুল্লাহ ]</Text>
-              </View>
             </View>
-          </Card>
-        </Pressable>
-
-        <Text style={{ color: t.sub, fontSize: 12, textAlign: 'center', marginBottom: 14 }}>
-          💡 You can change this language setting at any time from Settings.
-        </Text>
+          </GlowCard>
+        </PressableScale>
 
         <Btn
-          label={selectedLang === 'bn' ? 'এগিয়ে যান / Continue to Setup' : 'Continue to Setup'}
+          label="Continue to Permissions"
           icon={Icons.chevronRight}
+          kind="primary"
           onPress={() => setStep('permissions')}
         />
       </ScrollView>
     );
   }
 
-  // Step 2: Guide user on which buttons to enable by default
-  if (step === 'defaults') {
-    const batteryOk = !!perms?.battery;
+  // Step 1: Permissions
+  if (step === 'permissions') {
     return (
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <Title size={26} icon={Icons.shieldOn}>Recommended Defaults</Title>
-        <Text style={{ color: t.sub, marginTop: 6, marginBottom: 20, lineHeight: 20 }}>
-          Permissions granted! Enable these recommended buttons by default to ensure full protection:
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <Title size={24} icon={Icons.shieldOn}>Required Permissions</Title>
+        <Text style={{ color: t.sub, marginTop: 8, marginBottom: 18, lineHeight: 21, fontSize: 13.5 }}>
+          To enforce airtight uninstallation protection and instant content blocking, Blocker requires standard Android permissions.
         </Text>
 
-        {/* 1. Master Protection */}
-        <Card style={{ borderColor: enableProtection ? t.accent : t.cardBorder, borderWidth: 1.5 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <Title icon={Icons.shieldOn} tone={enableProtection ? 'ok' : 'accent'}>1. Master Protection</Title>
-              <Sub>Recommended: ON. Blocks adult websites, search keywords, and blacklisted apps.</Sub>
-            </View>
-            <Switch value={enableProtection} onValueChange={setEnableProtection} trackColor={{ true: t.ok }} />
-          </View>
-        </Card>
+        {STEPS.map(s => {
+          const ok = granted(s.kind);
+          const Ico = s.icon;
+          return (
+            <GlowCard key={s.kind} style={{ padding: 18, marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 8 }}>
+                  <Ico size={19} color={ok ? t.okGlow : t.accent} strokeWidth={2.4} />
+                  <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }} numberOfLines={1}>
+                    {s.title}
+                  </Text>
+                </View>
+                <StatusPillBadge label={ok ? 'Granted' : 'Missing'} tone={ok ? 'ok' : 'warn'} size="sm" />
+              </View>
+              <Sub>{s.why}</Sub>
+              {!ok && (
+                <View style={{ marginTop: 12 }}>
+                  <Btn label={`Grant ${s.title}`} kind="primary" onPress={() => grant(s.kind)} />
+                </View>
+              )}
+            </GlowCard>
+          );
+        })}
 
-        {/* 2. Anti-Tamper & Uninstall Shield */}
-        <Card style={{ borderColor: enableShield ? t.accent : t.cardBorder, borderWidth: 1.5 }}>
+        {/* Unrestricted Battery */}
+        <GlowCard style={{ padding: 18, marginTop: 4, marginBottom: 18 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <Title icon={Icons.lock} tone={enableShield ? 'ok' : 'accent'}>2. Uninstall & Settings Shield</Title>
-              <Sub>Recommended: ON. Locks Developer options, Device Admin, and Settings to prevent bypass.</Sub>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Title icon={Icons.clock} size={16}>Unrestricted Background</Title>
+              <Sub>Recommended: prevents Android from killing the background watchdog.</Sub>
             </View>
-            <Switch value={enableShield} onValueChange={setEnableShield} trackColor={{ true: t.ok }} />
-          </View>
-        </Card>
-
-        {/* 3. Background Unrestricted Battery */}
-        <Card style={{ borderColor: batteryOk ? t.ok : t.border, borderWidth: 1.5 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <Title icon={Icons.clock} tone={batteryOk ? 'ok' : 'accent'}>3. Unrestricted Background</Title>
-              <Sub>Recommended: Unrestricted. Prevents Android from killing Blocker in the background.</Sub>
-            </View>
-            {batteryOk ? (
-              <Badge label="Unrestricted" tone="ok" />
+            {perms?.battery ? (
+              <StatusPillBadge label="Active" tone="ok" size="sm" />
             ) : (
-              <Btn label="Allow" kind="primary" onPress={allowBackground} />
+              <Btn label="Allow" kind="ghost" onPress={allowBackground} />
             )}
           </View>
-        </Card>
+        </GlowCard>
 
-        <View style={{ marginTop: 14 }}>
-          <Btn
-            label={loading ? 'Applying...' : 'Enable Recommended Defaults & Start'}
-            disabled={loading}
-            icon={Icons.play}
-            onPress={finishSetup}
-          />
-        </View>
+        <Btn
+          label={all ? 'Continue to Default Setup' : `Next: Grant ${next?.title ?? 'Permission'}`}
+          icon={Icons.chevronRight}
+          kind={all ? 'primary' : 'ghost'}
+          onPress={() => {
+            if (all) setStep('defaults');
+            else if (next) grant(next.kind);
+          }}
+        />
       </ScrollView>
     );
   }
 
-  // Step 1: Required system permissions
+  // Step 2: Defaults Confirmation
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <Title size={26} icon={Icons.shieldOn}>Set up Blocker</Title>
-        <Pressable
-          onPress={() => setStep('language')}
-          style={{
-            paddingHorizontal: 10,
-            paddingVertical: 5,
-            borderRadius: 8,
-            backgroundColor: t.accentSoft,
-            borderWidth: 1,
-            borderColor: t.accent
-          }}>
-          <Text style={{ color: t.accent, fontSize: 12, fontWeight: '700' }}>
-            {selectedLang === 'bn' ? 'ভাষা: বাংলা' : 'Lang: English'}
-          </Text>
-        </Pressable>
-      </View>
-      <Text style={{ color: t.sub, marginTop: 4, marginBottom: 20, lineHeight: 20 }}>
-        Grant these four permissions. Status updates live when you return to the app.
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <Title size={24} icon={Icons.shieldOn}>Finalize Security</Title>
+      <Text style={{ color: t.sub, marginTop: 8, marginBottom: 20, lineHeight: 21, fontSize: 13.5 }}>
+        Enable Blocker's foundational protection guards. You can customize additional blocklists and timers after onboarding.
       </Text>
 
-      {STEPS.map((s, i) => {
-        const ok = granted(s.kind);
-        const current = next?.kind === s.kind;
-        return (
-          <Card key={s.kind} style={current ? { borderColor: t.accent, borderWidth: 1.5 } : undefined}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <View style={{ flex: 1, paddingRight: 6 }}>
-                <Title icon={s.icon} tone={ok ? 'ok' : 'accent'}>{i + 1}. {s.title}</Title>
-              </View>
-              <Badge label={ok ? 'Granted' : 'Missing'} tone={ok ? 'ok' : 'danger'} />
-            </View>
-            <Sub>{s.why}</Sub>
-            {!ok && <Text style={{ color: t.sub, fontSize: 12, marginTop: 6 }}>{s.how}</Text>}
-            {!ok && (
-              <View style={{ marginTop: 12 }}>
-                <Btn label="Grant" kind={current ? 'primary' : 'ghost'} icon={s.icon} onPress={() => grant(s.kind)} />
-              </View>
-            )}
-          </Card>
-        );
-      })}
+      <GlowCard style={{ padding: 18, marginBottom: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Title icon={Icons.shieldOn}>Master Protection</Title>
+            <Sub>Enforces adult domain blocklists, distraction keywords & browser filtering.</Sub>
+          </View>
+          <CyberSwitch value={enableProtection} onValueChange={setEnableProtection} />
+        </View>
+      </GlowCard>
+
+      <GlowCard style={{ padding: 18, marginBottom: 22 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Title icon={Icons.lock}>Anti-Tamper & Uninstall Guard</Title>
+            <Sub>Protects Settings, launcher shortcuts, and device admin deactivation.</Sub>
+          </View>
+          <CyberSwitch value={enableShield} onValueChange={setEnableShield} />
+        </View>
+      </GlowCard>
 
       <Btn
-        label={all ? 'Next: Recommended Defaults' : 'Grant all permissions to continue'}
-        disabled={!all}
-        icon={Icons.chevronRight}
-        onPress={() => setStep('defaults')}
+        label={loading ? 'Activating Security…' : 'Enter Blocker'}
+        icon={Icons.shieldOn}
+        kind="primary"
+        disabled={loading}
+        onPress={finishSetup}
       />
     </ScrollView>
   );

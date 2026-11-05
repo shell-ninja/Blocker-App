@@ -1,15 +1,46 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, SectionList, Switch, Text, TextInput, View } from 'react-native';
+import {
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  SectionList,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { InstalledApp, Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
-import { addApp, exemptApp, removeApp, setAppUsageLimit, unexemptApp } from '../services/ProtectionManager';
-import { Badge, Btn, Card, Icons, IconToggle, LockBar, Sub, Title, errMsg, showAlert, useTheme } from '../ui';
+import {
+  addApp,
+  exemptApp,
+  removeApp,
+  setAppUsageLimit,
+  unexemptApp,
+} from '../services/ProtectionManager';
+import {
+  Btn,
+  CyberSwitch,
+  GlowCard,
+  Icons,
+  IconToggle,
+  LockBar,
+  PressableScale,
+  StatusPillBadge,
+  Sub,
+  Title,
+  errMsg,
+  showAlert,
+  useTheme,
+} from '../ui';
 
 const iconCache = new Map<string, string>();
 
 export function AppIcon({ pkg }: { pkg: string }) {
   const t = useTheme();
   const [uri, setUri] = useState<string | undefined>(iconCache.get(pkg));
+
   useEffect(() => {
     if (uri) return;
     let live = true;
@@ -23,9 +54,21 @@ export function AppIcon({ pkg }: { pkg: string }) {
       live = false;
     };
   }, [pkg, uri]);
-  return uri
-    ? <Image source={{ uri }} style={{ width: 40, height: 40, borderRadius: 12 }} />
-    : <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.glass }} />;
+
+  return uri ? (
+    <Image source={{ uri }} style={{ width: 42, height: 42, borderRadius: 12 }} />
+  ) : (
+    <View
+      style={{
+        width: 42,
+        height: 42,
+        borderRadius: 12,
+        backgroundColor: t.bgAlt,
+        borderColor: t.cardBorder,
+        borderWidth: 1,
+      }}
+    />
+  );
 }
 
 function fmtMinutes(m: number): string {
@@ -46,7 +89,14 @@ interface LimitModalProps {
   onSave: (minutes: number) => Promise<void>;
 }
 
-function AppLimitModal({ app, currentLimit, todayUsage, hasUsageAccess, onClose, onSave }: LimitModalProps) {
+function AppLimitModal({
+  app,
+  currentLimit,
+  todayUsage,
+  hasUsageAccess,
+  onClose,
+  onSave,
+}: LimitModalProps) {
   const t = useTheme();
   const [selectedMinutes, setSelectedMinutes] = useState<number>(currentLimit);
   const [customHours, setCustomHours] = useState<string>(
@@ -103,71 +153,112 @@ function AppLimitModal({ app, currentLimit, todayUsage, hasUsageAccess, onClose,
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
-        <View style={{
-          backgroundColor: t.bgAlt, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 24, padding: 20,
-          maxHeight: '90%'
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(3, 4, 10, 0.78)',
+          justifyContent: 'center',
+          padding: 20,
         }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <View
+          style={{
+            backgroundColor: t.bgAlt,
+            borderColor: t.cardBorderGlow,
+            borderWidth: 1.5,
+            borderRadius: 24,
+            padding: 22,
+            maxHeight: '90%',
+            shadowColor: '#000',
+            shadowOpacity: 0.6,
+            shadowRadius: 24,
+            shadowOffset: { width: 0, height: 10 },
+            elevation: 14,
+          }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 18 }}>
             <AppIcon pkg={app.packageName} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: t.text, fontSize: 18, fontWeight: '700' }} numberOfLines={1}>{app.label}</Text>
-              <Text style={{ color: t.sub, fontSize: 12 }} numberOfLines={1}>{app.packageName}</Text>
+              <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }} numberOfLines={1}>
+                {app.label}
+              </Text>
+              <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                {app.packageName}
+              </Text>
             </View>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Daily Usage Progress */}
-            <Card style={{ padding: 14, marginBottom: 16 }}>
+            {/* Daily Usage Progress Bento Card */}
+            <GlowCard style={{ padding: 14, marginBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ color: t.sub, fontSize: 13 }}>Today's Usage</Text>
-                <Text style={{ color: t.text, fontWeight: '700', fontSize: 14 }}>{fmtMinutes(todayUsage)}</Text>
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>
+                  {fmtMinutes(todayUsage)}
+                </Text>
               </View>
               {selectedMinutes > 0 && (
-                <View style={{ marginTop: 8 }}>
-                  <View style={{
-                    height: 6, borderRadius: 3, backgroundColor: t.glass, overflow: 'hidden', flexDirection: 'row'
-                  }}>
-                    <View style={{
-                      height: '100%',
-                      width: `${Math.min(100, Math.round((todayUsage / selectedMinutes) * 100))}%`,
-                      backgroundColor: todayUsage >= selectedMinutes ? t.danger : t.accent
-                    }} />
+                <View style={{ marginTop: 10 }}>
+                  <View
+                    style={{
+                      height: 7,
+                      borderRadius: 4,
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      overflow: 'hidden',
+                      flexDirection: 'row',
+                    }}>
+                    <View
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, Math.round((todayUsage / selectedMinutes) * 100))}%`,
+                        backgroundColor: todayUsage >= selectedMinutes ? t.danger : t.accent,
+                      }}
+                    />
                   </View>
-                  <Text style={{ color: t.sub, fontSize: 11, marginTop: 4 }}>
+                  <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 6 }}>
                     {todayUsage >= selectedMinutes
                       ? 'Limit reached today — app is blocked'
                       : `${fmtMinutes(Math.max(0, selectedMinutes - todayUsage))} remaining today`}
                   </Text>
                 </View>
               )}
-            </Card>
+            </GlowCard>
 
             {!hasUsageAccess && (
-              <View style={{
-                backgroundColor: t.warnSoft, borderColor: t.warn, borderWidth: 1, borderRadius: 14,
-                padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 10
-              }}>
+              <View
+                style={{
+                  backgroundColor: t.warnSoft,
+                  borderColor: t.warnBorder,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  padding: 14,
+                  marginBottom: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                }}>
                 <Icons.clock size={20} color={t.warn} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.text, fontWeight: '700', fontSize: 13 }}>Usage Access Required</Text>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                    Usage Access Required
+                  </Text>
                   <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
                     Blocker needs Usage Access to accurately track daily screen time.
                   </Text>
-                  <Pressable
+                  <PressableScale
                     onPress={() => Native.openPermissionSettings('usageAccess')}
                     style={{ marginTop: 8, alignSelf: 'flex-start' }}>
-                    <Text style={{ color: t.warn, fontWeight: '700', fontSize: 13 }}>Enable in Settings →</Text>
-                  </Pressable>
+                    <Text style={{ color: t.warn, fontWeight: '700', fontSize: 13 }}>
+                      Enable in Settings →
+                    </Text>
+                  </PressableScale>
                 </View>
               </View>
             )}
 
-            <Text style={{ color: t.text, fontWeight: '700', fontSize: 14, marginBottom: 10 }}>
+            <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14, marginBottom: 6 }}>
               Set Daily Usage Limit
             </Text>
-            <Text style={{ color: t.sub, fontSize: 12, marginBottom: 12 }}>
-              {app.label} will be blocked once this daily limit is reached.
+            <Text style={{ color: t.sub, fontSize: 12, marginBottom: 14 }}>
+              {app.label} will be blocked once this daily allowance is reached.
             </Text>
 
             {/* Presets Grid */}
@@ -175,72 +266,103 @@ function AppLimitModal({ app, currentLimit, todayUsage, hasUsageAccess, onClose,
               {presets.map(p => {
                 const active = !isCustom && selectedMinutes === p.val;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={p.val}
                     onPress={() => {
                       setIsCustom(false);
                       setSelectedMinutes(p.val);
                     }}
-                    style={({ pressed }) => [{
-                      backgroundColor: active ? t.accent : t.card,
-                      borderColor: active ? t.accent : t.cardBorder,
-                      borderWidth: 1, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14,
-                      opacity: pressed ? 0.8 : 1
-                    }]}>
-                    <Text style={{ color: active ? '#fff' : t.text, fontWeight: '600', fontSize: 13 }}>
+                    style={{
+                      backgroundColor: active ? t.accentWell : t.card,
+                      borderColor: active ? t.accentWellBorder : t.cardBorder,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      paddingVertical: 8,
+                      paddingHorizontal: 14,
+                    }}>
+                    <Text
+                      style={{
+                        color: active ? '#FFFFFF' : t.sub,
+                        fontWeight: active ? '700' : '600',
+                        fontSize: 13,
+                      }}>
                       {p.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
-              <Pressable
+              <PressableScale
                 onPress={() => setIsCustom(true)}
-                style={({ pressed }) => [{
-                  backgroundColor: isCustom ? t.accent : t.card,
-                  borderColor: isCustom ? t.accent : t.cardBorder,
-                  borderWidth: 1, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14,
-                  opacity: pressed ? 0.8 : 1
-                }]}>
-                <Text style={{ color: isCustom ? '#fff' : t.text, fontWeight: '600', fontSize: 13 }}>
+                style={{
+                  backgroundColor: isCustom ? t.accentWell : t.card,
+                  borderColor: isCustom ? t.accentWellBorder : t.cardBorder,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                }}>
+                <Text
+                  style={{
+                    color: isCustom ? '#FFFFFF' : t.sub,
+                    fontWeight: isCustom ? '700' : '600',
+                    fontSize: 13,
+                  }}>
                   Custom
                 </Text>
-              </Pressable>
+              </PressableScale>
             </View>
 
             {/* Custom Input */}
             {isCustom && (
-              <View style={{
-                backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 14,
-                padding: 12, marginBottom: 14
-              }}>
-                <Text style={{ color: t.sub, fontSize: 12, marginBottom: 8 }}>Enter custom daily allowance:</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <GlowCard style={{ padding: 14, marginBottom: 14 }}>
+                <Text style={{ color: t.sub, fontSize: 12, marginBottom: 10 }}>
+                  Enter custom daily allowance:
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <TextInput
                       value={customHours}
                       onChangeText={setCustomHours}
                       keyboardType="numeric"
                       style={{
-                        backgroundColor: t.glass, borderColor: t.border, borderWidth: 1, borderRadius: 10,
-                        color: t.text, paddingHorizontal: 12, paddingVertical: 8, textAlign: 'center', width: 55, fontWeight: '700'
+                        backgroundColor: t.bg,
+                        borderColor: t.cardBorder,
+                        borderWidth: 1,
+                        borderRadius: 10,
+                        color: '#FFFFFF',
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        textAlign: 'center',
+                        width: 55,
+                        fontWeight: '700',
+                        fontSize: 14,
                       }}
                     />
                     <Text style={{ color: t.sub, fontSize: 13 }}>hours</Text>
                   </View>
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <TextInput
                       value={customMins}
                       onChangeText={setCustomMins}
                       keyboardType="numeric"
                       style={{
-                        backgroundColor: t.glass, borderColor: t.border, borderWidth: 1, borderRadius: 10,
-                        color: t.text, paddingHorizontal: 12, paddingVertical: 8, textAlign: 'center', width: 55, fontWeight: '700'
+                        backgroundColor: t.bg,
+                        borderColor: t.cardBorder,
+                        borderWidth: 1,
+                        borderRadius: 10,
+                        color: '#FFFFFF',
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        textAlign: 'center',
+                        width: 55,
+                        fontWeight: '700',
+                        fontSize: 14,
                       }}
                     />
                     <Text style={{ color: t.sub, fontSize: 13 }}>mins</Text>
                   </View>
                 </View>
-              </View>
+              </GlowCard>
             )}
           </ScrollView>
 
@@ -249,7 +371,12 @@ function AppLimitModal({ app, currentLimit, todayUsage, hasUsageAccess, onClose,
               <Btn label="Cancel" kind="ghost" onPress={onClose} disabled={saving} />
             </View>
             <View style={{ flex: 1 }}>
-              <Btn label={saving ? "Saving…" : "Save Limit"} kind="primary" onPress={handleSave} disabled={saving} />
+              <Btn
+                label={saving ? 'Saving…' : 'Save Limit'}
+                kind="primary"
+                onPress={handleSave}
+                disabled={saving}
+              />
             </View>
           </View>
         </View>
@@ -269,14 +396,26 @@ export default function AppBlockerScreen() {
 
   useEffect(() => {
     setLoading(true);
-    Native.getInstalledApps(showSystem).then(setApps).catch(e => showAlert('Blocker', errMsg(e))).finally(() => setLoading(false));
+    Native.getInstalledApps(showSystem)
+      .then(setApps)
+      .catch(e => showAlert('Blocker', errMsg(e)))
+      .finally(() => setLoading(false));
   }, [showSystem]);
 
   const blocked = useMemo(() => new Set(p.state.blockedApps), [p.state.blockedApps]);
   const exempt = useMemo(() => new Set(p.state.exemptApps), [p.state.exemptApps]);
-  const pendingRemoval = useMemo(() => new Set((p.state.queue.remove_apps ?? []).map(a => a.v)), [p.state.queue]);
-  const pendingExempt = useMemo(() => new Set((p.state.queue.exempt_apps ?? []).map(a => a.v)), [p.state.queue]);
-  const pendingLimits = useMemo(() => new Set((p.state.queue.app_limits ?? []).map(a => a.v)), [p.state.queue]);
+  const pendingRemoval = useMemo(
+    () => new Set((p.state.queue.remove_apps ?? []).map(a => a.v)),
+    [p.state.queue]
+  );
+  const pendingExempt = useMemo(
+    () => new Set((p.state.queue.exempt_apps ?? []).map(a => a.v)),
+    [p.state.queue]
+  );
+  const pendingLimits = useMemo(
+    () => new Set((p.state.queue.app_limits ?? []).map(a => a.v)),
+    [p.state.queue]
+  );
 
   const appLimits = useMemo(() => p.appLimits ?? {}, [p.appLimits]);
   const appUsage = useMemo(() => p.appUsageToday ?? {}, [p.appUsageToday]);
@@ -285,7 +424,8 @@ export default function AppBlockerScreen() {
     const needle = q.trim().toLowerCase();
     const groups = new Map<string, InstalledApp[]>();
     for (const a of apps) {
-      if (needle && !a.label.toLowerCase().includes(needle) && !a.packageName.toLowerCase().includes(needle)) continue;
+      if (needle && !a.label.toLowerCase().includes(needle) && !a.packageName.toLowerCase().includes(needle))
+        continue;
       groups.set(a.category, [...(groups.get(a.category) ?? []), a]);
     }
     const order = (c: string) => (c === 'Browsers' ? 0 : c === 'Other' ? 2 : 1);
@@ -299,8 +439,10 @@ export default function AppBlockerScreen() {
       if (on) return await addApp(a.packageName);
       const r = await removeApp(a.packageName, a.label);
       if (r !== 'applied') {
-        showAlert(r === 'restarted' ? 'Timer restarted' : 'Unblock requested',
-          `${a.label} stays blocked until the ${p.delayDays}-day timer completes. Confirm it in Settings or below.`);
+        showAlert(
+          r === 'restarted' ? 'Timer restarted' : 'Unblock requested',
+          `${a.label} stays blocked until the ${p.delayDays}-day timer completes. Confirm it in Settings or below.`
+        );
       }
     } catch (e) {
       showAlert('Blocker', errMsg(e));
@@ -312,8 +454,10 @@ export default function AppBlockerScreen() {
       if (exempt.has(a.packageName)) return await unexemptApp(a.packageName);
       const r = await exemptApp(a.packageName, a.label);
       if (r !== 'applied') {
-        showAlert('Change requested',
-          `${a.label} keeps being screen-scanned until the ${p.delayDays}-day timer completes. Confirm it in Settings.`);
+        showAlert(
+          'Change requested',
+          `${a.label} keeps being screen-scanned until the ${p.delayDays}-day timer completes. Confirm it in Settings.`
+        );
       }
     } catch (e) {
       showAlert('Blocker', errMsg(e));
@@ -335,27 +479,43 @@ export default function AppBlockerScreen() {
     <View style={{ flex: 1 }}>
       <View style={{ padding: 16, paddingBottom: 8 }}>
         <Title icon={Icons.apps}>Apps</Title>
-        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.card, borderColor: t.cardBorder, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, marginTop: 12 }}>
+
+        {/* Bento Search Bar */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: t.card,
+            borderColor: t.cardBorder,
+            borderWidth: 1,
+            borderRadius: 14,
+            paddingHorizontal: 14,
+            marginTop: 12,
+          }}>
           <Icons.search size={16} color={t.sub} />
           <TextInput
             value={q}
             onChangeText={setQ}
             placeholder="Search apps"
             placeholderTextColor={t.sub}
-            style={{ flex: 1, color: t.text, paddingHorizontal: 8, paddingVertical: 10 }}
+            style={{ flex: 1, color: '#FFFFFF', paddingHorizontal: 10, paddingVertical: 10, fontSize: 13.5 }}
           />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-          <Text style={{ color: t.sub }}>Show system apps</Text>
-          <Switch value={showSystem} onValueChange={setShowSystem} trackColor={{ true: t.accent }} />
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <Text style={{ color: t.sub, fontSize: 13 }}>Show system apps</Text>
+          <CyberSwitch value={showSystem} onValueChange={setShowSystem} />
         </View>
-        <Text style={{ color: t.sub, fontSize: 12, marginTop: 8 }}>
+
+        <Text style={{ color: t.sub, fontSize: 12, marginTop: 10, lineHeight: 16 }}>
           Tap the timer button on any app to set a daily usage limit (e.g. 3h a day). Once reached, the app is blocked.
         </Text>
+
         <LockBar lockKey="remove_apps" />
         <LockBar lockKey="exempt_apps" />
         <LockBar lockKey="app_limits" />
       </View>
+
       <SectionList
         sections={sections}
         keyExtractor={a => a.packageName}
@@ -364,9 +524,23 @@ export default function AppBlockerScreen() {
         maxToRenderPerBatch={12}
         windowSize={5}
         removeClippedSubviews={true}
-        ListEmptyComponent={<Text style={{ color: t.sub, textAlign: 'center', marginTop: 40 }}>{loading ? 'Loading apps…' : 'No apps found'}</Text>}
+        ListEmptyComponent={
+          <Text style={{ color: t.sub, textAlign: 'center', marginTop: 40, fontSize: 13.5 }}>
+            {loading ? 'Loading apps…' : 'No apps found'}
+          </Text>
+        }
         renderSectionHeader={({ section }) => (
-          <Text style={{ color: t.sub, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', paddingTop: 14, paddingBottom: 6, backgroundColor: t.bg }}>
+          <Text
+            style={{
+              color: t.sub,
+              fontSize: 12,
+              fontWeight: '700',
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+              paddingTop: 14,
+              paddingBottom: 6,
+              backgroundColor: t.bg,
+            }}>
             {section.title}
           </Text>
         )}
@@ -377,41 +551,71 @@ export default function AppBlockerScreen() {
           const isPendingLimit = pendingLimits.has(item.packageName);
 
           return (
-            <View style={{
-              flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10,
-              borderBottomColor: t.glass, borderBottomWidth: 1
-            }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 9,
+                gap: 12,
+                borderBottomColor: t.cardBorder,
+                borderBottomWidth: 1,
+              }}>
               <AppIcon pkg={item.packageName} />
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.text, fontWeight: '600' }} numberOfLines={1}>{item.label}</Text>
+                <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 13.5 }} numberOfLines={1}>
+                  {item.label}
+                </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <Text style={{ color: t.sub, fontSize: 11 }} numberOfLines={1}>
+                  <Text style={{ color: t.sub, fontSize: 11.5 }} numberOfLines={1}>
                     {used > 0 ? `${fmtMinutes(used)} today` : item.packageName}
                   </Text>
                 </View>
+
                 {/* Daily limit badge button */}
-                <Pressable
+                <PressableScale
                   onPress={() => setTargetApp(item)}
-                  style={({ pressed }) => [{
-                    marginTop: 4, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5,
-                    backgroundColor: limit > 0 ? t.accentSoft : t.glass,
-                    borderColor: limit > 0 ? t.accent : t.border,
-                    borderWidth: 1, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2,
-                    opacity: pressed ? 0.7 : 1
-                  }]}>
-                  <Icons.clock size={11} color={limit > 0 ? t.accent : t.sub} />
-                  <Text style={{ color: limit > 0 ? t.accent : t.sub, fontSize: 11, fontWeight: '600' }}>
+                  style={{
+                    marginTop: 5,
+                    alignSelf: 'flex-start',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 5,
+                    backgroundColor: limit > 0 ? t.accentWell : 'rgba(255, 255, 255, 0.04)',
+                    borderColor: limit > 0 ? t.accentWellBorder : t.border,
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                  }}>
+                  <Icons.clock size={11} color={limit > 0 ? '#A78BFA' : t.sub} />
+                  <Text
+                    style={{
+                      color: limit > 0 ? '#A78BFA' : t.sub,
+                      fontSize: 11,
+                      fontWeight: '700',
+                    }}>
                     {limit > 0 ? `${fmtMinutes(limit)}/day` : 'Set timer'}
                   </Text>
                   {isPendingLimit && (
                     <Text style={{ color: t.warn, fontSize: 10, fontWeight: '700' }}>• pending</Text>
                   )}
-                </Pressable>
+                </PressableScale>
               </View>
 
-              {pendingRemoval.has(item.packageName) && <Badge label="Unblock pending" tone="warn" icon={false} />}
-              <IconToggle Icon={isExempt ? Icons.eyeOff : Icons.eye} active={isExempt} onPress={() => toggleExempt(item)} />
-              <Switch value={blocked.has(item.packageName)} onValueChange={v => toggleBlock(item, v)} trackColor={{ true: t.danger }} />
+              {pendingRemoval.has(item.packageName) && (
+                <StatusPillBadge label="Unblock pending" tone="warn" size="sm" icon={false} />
+              )}
+              <IconToggle
+                Icon={isExempt ? Icons.eyeOff : Icons.eye}
+                active={isExempt}
+                onPress={() => toggleExempt(item)}
+              />
+              <Switch
+                value={blocked.has(item.packageName)}
+                onValueChange={v => toggleBlock(item, v)}
+                trackColor={{ true: t.danger, false: t.border }}
+                thumbColor="#FFFFFF"
+              />
             </View>
           );
         }}
@@ -419,8 +623,8 @@ export default function AppBlockerScreen() {
 
       <AppLimitModal
         app={targetApp}
-        currentLimit={targetApp ? (appLimits[targetApp.packageName] ?? 0) : 0}
-        todayUsage={targetApp ? (appUsage[targetApp.packageName] ?? 0) : 0}
+        currentLimit={targetApp ? appLimits[targetApp.packageName] ?? 0 : 0}
+        todayUsage={targetApp ? appUsage[targetApp.packageName] ?? 0 : 0}
         hasUsageAccess={p.perms?.usageAccess ?? false}
         onClose={() => setTargetApp(null)}
         onSave={saveAppLimit}

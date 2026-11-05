@@ -8,17 +8,37 @@ This document contains release notes, changelogs, and notable changes for all re
 
 **Release Date:** November 2026  
 **Version:** 1.0.6.7  
+**Build:** 66  
 
 ### Major Fixes & Enhancements:
+- **Comprehensive Cyber Design System Overhaul:**
+  - **Deep Obsidian-Midnight Canvas:** Deep dark canvas (`#070913`) layered with a subtle, low-opacity violet/indigo dot-matrix grid pattern (`CyberBackground`).
+  - **Elevated 3D Bento Cards:** Dark slate-navy squircle surfaces (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights—emerald-mint tinted borders for active primary status cards, and subtle slate/purple borders for secondary cards and 2x2 stat grids.
+  - **Luminous Accents & Status Badges:** High-vibrancy emerald green (`#10B981` / `#00E676`) for active switches, checkmarks, and translucent pill badges; electric purple/violet (`#7C3AED` / `#9333EA`) for brand shield icons, icon wells, and active bottom navigation indicators.
+  - **High-Contrast Tabular Typography:** Crisp high-contrast white headings and bold tabular numerals paired with cool muted slate-gray subtitles (`#8B97B0`).
+  - **Hardware-Accelerated 60/120fps Live Motion:**
+    - Ambient breathing glow pulses on active status pill badges and primary hero shield icons.
+    - Live rolling numeric counter animations whenever stat card metrics change or load.
+    - Fluid spring-animated toggle switches with smooth morphing across inactive, active, and locked states.
+    - Tactile press physics (0.96x spring scale-down on press with crisp rebound) on interactive cards, buttons, and navigation tabs.
+- **Facebook Reels & Video Precision Guard (Scroll vs. Click Separation):**
+  - **Newsfeed Scrolling Preserved:** Resolved issue where users were kicked out of Facebook simply when scrolling past horizontal "Reels and short videos" preview carousels or inline video posts on their Home newsfeed.
+  - **Context-Aware Feed Guard (`isFacebookHomeFeed`):** While browsing the Home newsfeed, passive presence of horizontal preview shelves or inline video previews is completely ignored.
+  - **Physical Click-Only Interception (`isFacebookVideoOrReelClick`):** Strictly targets physical user clicks (`TYPE_VIEW_CLICKED`) on Reel cards, play buttons, or Reels navigation tabs. Passive scroll events (`TYPE_VIEW_SCROLLED`, `TYPE_VIEW_SELECTED`) are ignored.
+  - **Cleaned Full-Screen Viewer Containers (`FB_VIDEO_REELS_PLAYER_IDS`):** Strictly contains dedicated full-screen viewer containers (e.g. `fb_shorts_viewer_container`, `reels_viewer_root`, `watch_and_go_reels_container`, `fullscreen_video_player`), eliminating false positives from feed containers.
+  - **Dedicated Tab Detection (`isFacebookReelsOrVideoTabSelected`):** Verifies the Home tab is not active, then checks if the Reels, Shorts, or Video/Watch tab is selected. Navigating to the Reels page triggers immediate ejection and redirects back to Home.
+  - **Facebook Stories Preservation:** Comprehensive story detection (`isFacebookStory`, `isFacebookStoryClick`, `FB_STORY_IDS`) ensures Stories are strictly whitelisted and never blocked.
+- **Focus Mode Daily Schedule Duration Indicator:**
+  - Added duration badge preview ("Duration: Xh Ym") directly on each daily schedule card in Focus Mode so users instantly see how long protection will remain active.
+- **UI Alignment & Polish:**
+  - Perfectly aligned bottom navigation bar fonts and icons (`CyberBottomBar`).
+  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link now align cleanly in a unified row.
+- **Startup Resilience & Crash Immunity:**
+  - Eliminated infinite re-render loops and startup blank screens.
+  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes or blank screens.
 - **Default Granular Distraction Shields Default to OFF (Opt-In):**
   - Resolved issue where Facebook Reels, YouTube Shorts, Instagram Reels, and Instagram Search were blocked by default upon app initialization.
   - All granular social media shields now default to `false` across Kotlin SharedPreferences (`BlockerStore.granularToggle`), TypeScript protection manager (`DEFAULT_GRANULAR`), and React Native UI screens.
-  - Users have complete, granular opt-in control over which short-form distraction features they want to restrict.
-- **Facebook Stories Whitelisting & Preservation:**
-  - Resolved false-positive blocking where viewing Facebook Stories was blocked as Reels / News Feed video.
-  - Because personal stories can contain video clips or background music rendered in `TextureView` or `SurfaceView`, previous detectors flagged the Story viewer as an unlisted video player.
-  - Implemented comprehensive Facebook Story detection (`isFacebookStory`, `isFacebookStoryClick`, `FB_STORY_IDS`) evaluating view IDs, class signatures (`StoryViewerActivity`, `StoriesViewPager`, etc.), and story UI cues ("Story by", "Your story", "Create a story", "Stories tray", "Reply to...", "স্টোরি").
-  - Removed generic video control IDs from full-screen Reels viewer lists so story playback overlays are never misidentified. Facebook Stories are strictly whitelisted and never blocked.
 - **Maximum Anti-Tamper & Anti-Uninstall Lockdown (Airtight Fortress):**
   - Permanently removed all accessibility pausing, bypasses, or temporary exemption loopholes. Blocker operates with strict, non-negotiable 24/7 enforcement.
   - **Zero-ms Launcher Interceptor:** Press-and-hold (long-press) on the Blocker launcher icon, drag-to-uninstall, and app shortcut menus are intercepted and cancelled within 0 milliseconds across all Android OEM launchers (HiOS, XOS, OneUI, Pixel, MIUI, Nova, Lawnchair).
@@ -27,11 +47,6 @@ This document contains release notes, changelogs, and notable changes for all re
   - **Device Administrator OS Invariant:** Enforces Android Device Administrator policy preventing direct uninstallation at the OS level (`"This app is an active device administrator and must be deactivated before uninstalling"`).
   - **Device Owner Permanent Lockdown:** Integrates `dpm.setUninstallBlocked(admin, packageName, true)` and `UserManager.DISALLOW_UNINSTALL_APPS` for unbreakable, hardware-enforced uninstallation blocking when provisioned as Device Owner.
   - **Zero-Overlay Idle Architecture:** Detaches overlay windows from Android WindowManager when idle so legitimate apps encounter no touch-filtering or tapjacking interference.
-- **Professional UI Refinement & Polish:**
-  - Redesigned dark & light themes with high-contrast, modern slate-violet glassmorphism (`#0B0914` background, deep `#131024` surface cards, crisp borders, and refined `#8B5CF6` accent lighting).
-  - Modernized Home dashboard stats grid with dedicated icons for web redirection, app blocks, screen closes, and tamper defense with tabular numeric formatting.
-  - Replaced temporary pause button with permanent **bKash & Banking Shield** status dashboard and architecture inspector on Home and Settings.
-  - Refined toggle rows, switches (`thumbColor`), card border radii, and button tactile active-state scaling.
 
 ---
 

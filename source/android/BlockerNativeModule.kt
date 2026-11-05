@@ -358,15 +358,20 @@ object BlockerStore {
     /** Minutes remaining until a window closes, from a given minute-of-day. */
     private fun minutesUntil(target: Int, from: Int): Int = if (target > from) target - from else 1440 - from + target
 
-    fun focusRemainingMs(c: Context): Long {
+    fun focusRemainingMs(c: Context): Long = runCatching {
         val now = SecureTime.now(c)
         val untilMs = (focusUntil(c) - now).coerceAtLeast(0L)
-        val mOfDay = minuteOfDay(c)
+        val cal = Calendar.getInstance().apply { timeInMillis = now }
+        val secOfDay = cal.get(Calendar.HOUR_OF_DAY) * 3600 + cal.get(Calendar.MINUTE) * 60 + cal.get(Calendar.SECOND)
         val activeEnds = schedules(c).filter { scheduleIsActiveNow(it, c) }
-            .map { minutesUntil(it.endMin, mOfDay) * 60_000L }
+            .map {
+                val endSec = it.endMin * 60
+                val secUntil = if (endSec > secOfDay) endSec - secOfDay else (86400 - secOfDay + endSec)
+                secUntil * 1000L
+            }
         val schedMs = activeEnds.maxOrNull() ?: 0L
-        return maxOf(untilMs, schedMs)
-    }
+        maxOf(untilMs, schedMs)
+    }.getOrDefault(0L)
 
     /** Returns the union of allowed apps configured for all schedules currently active. */
     fun scheduleAllowedApps(c: Context): Set<String> {
@@ -826,20 +831,33 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun getPermissionStatus(promise: Promise) {
-        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val isDevOwner = DeviceOwnerHelper.isDeviceOwner(ctx)
-        val myAdmin = ComponentName(ctx, MyDeviceAdminReceiver::class.java)
-        val isAdmin = dpm.isAdminActive(admin) || dpm.isAdminActive(myAdmin) || isDevOwner
-        promise.resolve(Arguments.createMap().apply {
-            putBoolean("accessibility", isAccessibilityOn())
-            putBoolean("overlay", Settings.canDrawOverlays(ctx))
-            putBoolean("usageAccess", hasUsageAccess())
-            putBoolean("deviceAdmin", isAdmin)
-            putBoolean("isDeviceOwner", isDevOwner)
-            putBoolean("adminLost", BlockerStore.prefs(ctx).getBoolean("admin_lost", false))
-            putBoolean("battery", isIgnoringBatteryOptimizations())
-            putBoolean("secureSettings", ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
-        })
+        try {
+            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            val isDevOwner = DeviceOwnerHelper.isDeviceOwner(ctx)
+            val myAdmin = ComponentName(ctx, MyDeviceAdminReceiver::class.java)
+            val isAdmin = (dpm?.isAdminActive(admin) == true) || (dpm?.isAdminActive(myAdmin) == true) || isDevOwner
+            promise.resolve(Arguments.createMap().apply {
+                putBoolean("accessibility", isAccessibilityOn())
+                putBoolean("overlay", Settings.canDrawOverlays(ctx))
+                putBoolean("usageAccess", hasUsageAccess())
+                putBoolean("deviceAdmin", isAdmin)
+                putBoolean("isDeviceOwner", isDevOwner)
+                putBoolean("adminLost", BlockerStore.prefs(ctx).getBoolean("admin_lost", false))
+                putBoolean("battery", isIgnoringBatteryOptimizations())
+                putBoolean("secureSettings", ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
+            })
+        } catch (t: Throwable) {
+            promise.resolve(Arguments.createMap().apply {
+                putBoolean("accessibility", true)
+                putBoolean("overlay", true)
+                putBoolean("usageAccess", true)
+                putBoolean("deviceAdmin", true)
+                putBoolean("isDeviceOwner", false)
+                putBoolean("adminLost", false)
+                putBoolean("battery", true)
+                putBoolean("secureSettings", false)
+            })
+        }
     }
 
     @ReactMethod
@@ -1205,7 +1223,13 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
     }
 
     @ReactMethod
-    fun getDelayDays(promise: Promise) = promise.resolve(BlockerStore.delayDays(ctx))
+    fun getDelayDays(promise: Promise) {
+        try {
+            promise.resolve(BlockerStore.delayDays(ctx))
+        } catch (t: Throwable) {
+            promise.resolve(1)
+        }
+    }
 
     /** Starts the countdown for `key`; idempotent while a countdown is running. Resolves unlock epoch ms. */
     @ReactMethod
@@ -1226,20 +1250,24 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun getSettingLocks(keys: ReadableArray, promise: Promise) {
-        val now = SecureTime.now(ctx)
-        val out = Arguments.createMap()
-        for (i in 0 until keys.size()) {
-            val k = keys.getString(i) ?: continue
-            val until = BlockerStore.pendingUntil(ctx, k)
-            out.putMap(k, Arguments.createMap().apply {
-                putBoolean("pending", until != 0L)
-                putDouble("unlockAt", until.toDouble())
-                putDouble("remainingMs", (until - now).coerceAtLeast(0L).toDouble())
-                putBoolean("ready", until != 0L && now >= until)
-                putBoolean("open", BlockerStore.guardOpen(ctx, k))
-            })
+        try {
+            val now = SecureTime.now(ctx)
+            val out = Arguments.createMap()
+            for (i in 0 until keys.size()) {
+                val k = keys.getString(i) ?: continue
+                val until = BlockerStore.pendingUntil(ctx, k)
+                out.putMap(k, Arguments.createMap().apply {
+                    putBoolean("pending", until != 0L)
+                    putDouble("unlockAt", until.toDouble())
+                    putDouble("remainingMs", (until - now).coerceAtLeast(0L).toDouble())
+                    putBoolean("ready", until != 0L && now >= until)
+                    putBoolean("open", BlockerStore.guardOpen(ctx, k))
+                })
+            }
+            promise.resolve(out)
+        } catch (t: Throwable) {
+            promise.resolve(Arguments.createMap())
         }
-        promise.resolve(out)
     }
 
     /** Manual confirmation after countdown reaches zero; opens a 10-minute window to apply the change. */
@@ -1499,21 +1527,25 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun getSchedules(promise: Promise) {
-        val out = Arguments.createArray()
-        BlockerStore.schedules(ctx).forEach { s ->
-            out.pushMap(Arguments.createMap().apply {
-                putString("id", s.id)
-                putString("label", s.label)
-                putInt("startMin", s.startMin)
-                putInt("endMin", s.endMin)
-                putBoolean("enabled", s.enabled)
-                putBoolean("activeNow", BlockerStore.scheduleIsActiveNow(s))
-                val appsArr = Arguments.createArray()
-                s.allowedApps.forEach { appsArr.pushString(it) }
-                putArray("allowedApps", appsArr)
-            })
+        try {
+            val out = Arguments.createArray()
+            BlockerStore.schedules(ctx).forEach { s ->
+                out.pushMap(Arguments.createMap().apply {
+                    putString("id", s.id)
+                    putString("label", s.label)
+                    putInt("startMin", s.startMin)
+                    putInt("endMin", s.endMin)
+                    putBoolean("enabled", s.enabled)
+                    putBoolean("activeNow", BlockerStore.scheduleIsActiveNow(s, ctx))
+                    val appsArr = Arguments.createArray()
+                    s.allowedApps.forEach { appsArr.pushString(it) }
+                    putArray("allowedApps", appsArr)
+                })
+            }
+            promise.resolve(out)
+        } catch (t: Throwable) {
+            promise.resolve(Arguments.createArray())
         }
-        promise.resolve(out)
     }
 
     private fun windowLen(start: Int, end: Int) = if (start <= end) end - start else 1440 - start + end
@@ -1584,30 +1616,57 @@ class BlockerNativeModule(private val rc: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun getStats(promise: Promise) {
-        promise.resolve(Arguments.createMap().apply {
-            putInt("sitesBlockedToday", BlockerStore.stat(ctx, "sites"))
-            putInt("appsBlockedToday", BlockerStore.stat(ctx, "apps"))
-            putInt("tamperAttemptsToday", BlockerStore.stat(ctx, "tamper"))
-            putInt("screenBlocksToday", BlockerStore.stat(ctx, "screen"))
-            putBoolean("focusActive", BlockerStore.focusActive(ctx))
-            putDouble("focusUntil", BlockerStore.focusUntil(ctx).toDouble())
-            putDouble("focusRemainingMs", BlockerStore.focusRemainingMs(ctx).toDouble())
-            putArray("focusApps", Arguments.fromList(BlockerStore.focusApps(ctx).toList()))
-            putBoolean("active", BlockerStore.active(ctx))
-            putBoolean("shield", BlockerStore.shield(ctx))
-            putBoolean("studyActive", BlockerStore.studyActive(ctx))
-            putDouble("studyUntil", BlockerStore.studyUntil(ctx).toDouble())
-            putDouble("studyRemainingMs", BlockerStore.studyRemainingMs(ctx).toDouble())
-            putInt("studyTotalRounds", BlockerStore.studyTotalRounds(ctx))
-            putInt("studyCurrentRound", BlockerStore.studyCurrentRound(ctx))
-            putBoolean("studyIsBreak", BlockerStore.studyIsBreak(ctx))
-            putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
-            putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
-            putBoolean("preventPowerOff", BlockerStore.preventPowerOff(ctx))
-            putString("popupLanguage", BlockerStore.popupLanguage(ctx))
-            putBoolean("bankingModeActive", BlockerStore.isBankingMode(ctx))
-            putBoolean("autoPauseBanking", BlockerStore.isAutoPauseBanking(ctx))
-        })
+        try {
+            promise.resolve(Arguments.createMap().apply {
+                putInt("sitesBlockedToday", BlockerStore.stat(ctx, "sites"))
+                putInt("appsBlockedToday", BlockerStore.stat(ctx, "apps"))
+                putInt("tamperAttemptsToday", BlockerStore.stat(ctx, "tamper"))
+                putInt("screenBlocksToday", BlockerStore.stat(ctx, "screen"))
+                putBoolean("focusActive", BlockerStore.focusActive(ctx))
+                putDouble("focusUntil", BlockerStore.focusUntil(ctx).toDouble())
+                putDouble("focusRemainingMs", BlockerStore.focusRemainingMs(ctx).toDouble())
+                putArray("focusApps", Arguments.fromList(BlockerStore.focusApps(ctx).toList()))
+                putBoolean("active", BlockerStore.active(ctx))
+                putBoolean("shield", BlockerStore.shield(ctx))
+                putBoolean("studyActive", BlockerStore.studyActive(ctx))
+                putDouble("studyUntil", BlockerStore.studyUntil(ctx).toDouble())
+                putDouble("studyRemainingMs", BlockerStore.studyRemainingMs(ctx).toDouble())
+                putInt("studyTotalRounds", BlockerStore.studyTotalRounds(ctx))
+                putInt("studyCurrentRound", BlockerStore.studyCurrentRound(ctx))
+                putBoolean("studyIsBreak", BlockerStore.studyIsBreak(ctx))
+                putInt("studyFocusMinutes", BlockerStore.studyFocusMinutes(ctx))
+                putInt("studyBreakMinutes", BlockerStore.studyBreakMinutes(ctx))
+                putBoolean("preventPowerOff", BlockerStore.preventPowerOff(ctx))
+                putString("popupLanguage", BlockerStore.popupLanguage(ctx))
+                putBoolean("bankingModeActive", BlockerStore.isBankingMode(ctx))
+                putBoolean("autoPauseBanking", BlockerStore.isAutoPauseBanking(ctx))
+            })
+        } catch (t: Throwable) {
+            promise.resolve(Arguments.createMap().apply {
+                putInt("sitesBlockedToday", 0)
+                putInt("appsBlockedToday", 0)
+                putInt("tamperAttemptsToday", 0)
+                putInt("screenBlocksToday", 0)
+                putBoolean("focusActive", false)
+                putDouble("focusUntil", 0.0)
+                putDouble("focusRemainingMs", 0.0)
+                putArray("focusApps", Arguments.createArray())
+                putBoolean("active", false)
+                putBoolean("shield", true)
+                putBoolean("studyActive", false)
+                putDouble("studyUntil", 0.0)
+                putDouble("studyRemainingMs", 0.0)
+                putInt("studyTotalRounds", 0)
+                putInt("studyCurrentRound", 0)
+                putBoolean("studyIsBreak", false)
+                putInt("studyFocusMinutes", 0)
+                putInt("studyBreakMinutes", 0)
+                putBoolean("preventPowerOff", false)
+                putString("popupLanguage", "en")
+                putBoolean("bankingModeActive", false)
+                putBoolean("autoPauseBanking", false)
+            })
+        }
     }
 
     @ReactMethod

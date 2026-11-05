@@ -42,10 +42,11 @@ import {
   startStudy,
 } from '../services/ProtectionManager';
 import {
-  Badge,
   Btn,
-  Card,
+  GlowCard,
   Icons,
+  PressableScale,
+  StatusPillBadge,
   Sub,
   Title,
   errMsg,
@@ -109,28 +110,33 @@ function ChipSelector<T extends number>({
       {values.map(val => {
         const isSelected = val === selected;
         return (
-          <Pressable
+          <PressableScale
             key={String(val)}
             onPress={() => onPick(val)}
-            style={({ pressed }) => [
-              styles.chip,
-              {
-                borderColor: isSelected ? t.accent : t.border,
-                backgroundColor: isSelected ? t.accentSoft : 'transparent',
-                transform: [{ scale: pressed ? 0.95 : 1 }],
-              },
-            ]}>
+            style={{
+              paddingVertical: 8,
+              paddingHorizontal: 15,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: isSelected ? t.accentWellBorder : t.border,
+              backgroundColor: isSelected ? t.accentWell : 'transparent',
+              shadowColor: isSelected ? t.accent : 'transparent',
+              shadowOpacity: isSelected ? 0.6 : 0,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: isSelected ? 3 : 0,
+            }}>
             <Text
               style={[
                 styles.chipText,
                 {
-                  color: isSelected ? t.accent : t.text,
-                  fontWeight: isSelected ? '800' : '600',
+                  color: isSelected ? '#FFFFFF' : t.sub,
+                  fontWeight: isSelected ? '700' : '600',
                 },
               ]}>
               {formatLabel(val)}
             </Text>
-          </Pressable>
+          </PressableScale>
         );
       })}
     </View>
@@ -169,11 +175,14 @@ export default function StudyScreen() {
     return () => clearInterval(interval);
   }, [active]);
 
-  const endsAt = useMemo(() => {
-    return Date.now() + (p.study?.remainingMs || 0);
-  }, [p.study?.remainingMs, active]);
+  const targetEnd = useMemo(() => {
+    if (p.study?.until && p.study.until > Date.now()) {
+      return p.study.until;
+    }
+    return (p.study?.remainingMs || 0) > 0 ? Date.now() + p.study.remainingMs : 0;
+  }, [p.study?.until, active]);
 
-  const liveRemaining = Math.max(0, endsAt - now);
+  const liveRemaining = targetEnd > 0 ? Math.max(0, targetEnd - now) : 0;
 
   useEffect(() => {
     if (active && liveRemaining === 0) {
@@ -205,7 +214,6 @@ export default function StudyScreen() {
       const res = await setWifiEnabled(targetState);
       setWifiOn(res);
       if (!targetState && res) {
-        // If system blocked direct toggle, launch system panel
         openWifiSettings().catch(() => {});
       }
     } catch (_) {
@@ -241,7 +249,7 @@ export default function StudyScreen() {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.04,
+          toValue: 1.03,
           duration: 1800,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
@@ -263,8 +271,12 @@ export default function StudyScreen() {
     : focusMinutes;
 
   const handleStartStudy = () => {
-    const wifiNotice = wifiOn ? '\n\n• Wi-Fi is currently ON. Blocker will attempt to disable it. Turn it off in the Network Shield card for guaranteed offline focus.' : '';
-    const dndNotice = !dndAccess ? '\n\n• Note: Do Not Disturb permission is not granted. Blocker will mute volumes directly, but granting DND permission ensures complete call and alert silence.' : '';
+    const wifiNotice = wifiOn
+      ? '\n\n• Wi-Fi is currently ON. Blocker will attempt to disable it. Turn it off in the Network Shield card for guaranteed offline focus.'
+      : '';
+    const dndNotice = !dndAccess
+      ? '\n\n• Note: Do Not Disturb permission is not granted. Blocker will mute volumes directly, but granting DND permission ensures complete call and alert silence.'
+      : '';
     showAlert(
       'Activate Strict Study Mode?',
       `Your phone will be completely locked down for ${totalRounds} rounds of ${chosenFocus} min focus${
@@ -288,26 +300,22 @@ export default function StudyScreen() {
   };
 
   const handleSkipBreak = () => {
-    showAlert(
-      'Skip Break?',
-      'Start the next focus round immediately?',
-      [
-        { text: 'Keep Resting', style: 'cancel' },
-        {
-          text: 'Start Focus',
-          style: 'default',
-          onPress: () => {
-            skipStudyBreak().catch(err => showAlert('Error', errMsg(err)));
-          },
+    showAlert('Skip Break?', 'Start the next focus round immediately?', [
+      { text: 'Keep Resting', style: 'cancel' },
+      {
+        text: 'Start Focus',
+        style: 'default',
+        onPress: () => {
+          skipStudyBreak().catch(err => showAlert('Error', errMsg(err)));
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const startHoldEmergency = () => {
     setEmergencyHoldProgress(0);
     const start = Date.now();
-    const duration = 4000; // 4 seconds hold
+    const duration = 4000;
     holdTimerRef.current = setInterval(() => {
       const elapsed = Date.now() - start;
       const prog = Math.min(1, elapsed / duration);
@@ -352,28 +360,26 @@ export default function StudyScreen() {
         <ScrollView
           contentContainerStyle={styles.activeContainer}
           showsVerticalScrollIndicator={false}>
-          {/* Header Status Card */}
-          <Card>
+          {/* Header Status Bento Card */}
+          <GlowCard active tone={isBreak ? 'ok' : 'accent'} style={{ padding: 20 }}>
             <View style={styles.phaseHeader}>
               <View
                 style={[
                   styles.phaseIconContainer,
-                  { backgroundColor: themeBg, borderColor: themeColor },
+                  { backgroundColor: isBreak ? t.okWell : t.accentWell, borderColor: themeColor },
                 ]}>
                 {isBreak ? (
-                  <Coffee size={22} color={themeColor} strokeWidth={2.4} />
+                  <Coffee size={22} color={t.okGlow} strokeWidth={2.4} />
                 ) : (
-                  <Flame size={22} color={themeColor} strokeWidth={2.4} />
+                  <Flame size={22} color="#A78BFA" strokeWidth={2.4} />
                 )}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.phaseTitle, { color: themeColor }]}>
+                <Text style={[styles.phaseTitle, { color: isBreak ? t.okGlow : '#FFFFFF' }]}>
                   {isBreak ? 'Short Break' : `Focus Round ${currentRound} of ${roundsCount}`}
                 </Text>
                 <Text style={[styles.phaseSub, { color: t.sub }]}>
-                  {isBreak
-                    ? 'Rest your eyes, hydrate, and stretch.'
-                    : 'Aggressive phone lockout is active.'}
+                  {isBreak ? 'Rest your eyes, hydrate, and stretch.' : 'Aggressive phone lockout is active.'}
                 </Text>
               </View>
             </View>
@@ -383,18 +389,18 @@ export default function StudyScreen() {
               style={[
                 styles.timerDial,
                 {
-                  borderColor: themeColor,
-                  backgroundColor: themeBg,
+                  borderColor: isBreak ? t.okBorder : t.accentWellBorder,
+                  backgroundColor: isBreak ? t.okWell : '#110F24',
                   transform: [{ scale: pulseAnim }],
                   shadowColor: themeColor,
                 },
               ]}>
-              <Text style={[styles.timerDigits, { color: t.text }]}>
+              <Text style={[styles.timerDigits, { color: '#FFFFFF' }]}>
                 {formatStudyTime(liveRemaining)}
               </Text>
               <View style={styles.timerSubBadge}>
-                <Lock size={12} color={themeColor} strokeWidth={2.5} />
-                <Text style={[styles.timerSubText, { color: themeColor }]}>
+                <Lock size={12} color={isBreak ? t.okGlow : '#A78BFA'} strokeWidth={2.5} />
+                <Text style={[styles.timerSubText, { color: isBreak ? t.okGlow : '#A78BFA' }]}>
                   {isBreak ? 'Break Time' : 'Phone Locked Down'}
                 </Text>
               </View>
@@ -402,7 +408,7 @@ export default function StudyScreen() {
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
-              <View style={[styles.progressTrack, { backgroundColor: t.glass }]}>
+              <View style={[styles.progressTrack, { backgroundColor: 'rgba(255, 255, 255, 0.08)' }]}>
                 <View
                   style={[
                     styles.progressBar,
@@ -458,56 +464,51 @@ export default function StudyScreen() {
                 );
               })}
             </View>
-          </Card>
+          </GlowCard>
 
           {/* Break Action */}
           {isBreak && (
-            <Card>
+            <GlowCard style={{ padding: 18 }}>
               <Title icon={FastForward}>Ready to continue?</Title>
               <Sub>You can skip the rest of your break and start the next round now.</Sub>
-              <View style={{ height: 10 }} />
-              <Btn
-                label={`Start Round ${currentRound + 1}`}
-                icon={Play}
-                onPress={handleSkipBreak}
-              />
-            </Card>
+              <View style={{ height: 12 }} />
+              <Btn label={`Start Round ${currentRound + 1}`} kind="primary" icon={Play} onPress={handleSkipBreak} />
+            </GlowCard>
           )}
 
           {/* Active Protections Summary */}
-          <Card>
+          <GlowCard style={{ padding: 18 }}>
             <Title icon={ShieldAlert}>Active Lockouts</Title>
             <View style={styles.lockoutGrid}>
               <View style={styles.lockoutItem}>
                 {wifiOn ? <Wifi size={16} color={t.warn} strokeWidth={2.4} /> : <WifiOff size={16} color={t.ok} strokeWidth={2.4} />}
-                <Text style={[styles.lockoutText, { color: t.text, flex: 1 }]}>
+                <Text style={[styles.lockoutText, { color: '#FFFFFF', flex: 1 }]}>
                   {wifiOn ? 'Wi-Fi is ON — network settings blocked' : 'Wi-Fi is OFF — device is completely offline'}
                 </Text>
                 {wifiOn && (
-                  <Pressable
+                  <PressableScale
                     onPress={handleToggleWifi}
-                    style={({ pressed }) => [{
+                    style={{
                       paddingVertical: 4,
                       paddingHorizontal: 9,
                       backgroundColor: t.dangerSoft,
                       borderRadius: 8,
                       borderWidth: 1,
-                      borderColor: t.danger,
-                      opacity: pressed ? 0.7 : 1
-                    }]}>
+                      borderColor: t.dangerBorder,
+                    }}>
                     <Text style={{ color: t.danger, fontSize: 11, fontWeight: '800' }}>Turn Off</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </View>
               <View style={styles.lockoutItem}>
                 <BellOff size={16} color={t.danger} strokeWidth={2.4} />
-                <Text style={[styles.lockoutText, { color: t.text }]}>
+                <Text style={[styles.lockoutText, { color: '#FFFFFF' }]}>
                   Notifications shade & alerts silenced
                 </Text>
               </View>
               <View style={styles.lockoutItem}>
                 <Lock size={16} color={t.danger} strokeWidth={2.4} />
-                <Text style={[styles.lockoutText, { color: t.text }]}>
+                <Text style={[styles.lockoutText, { color: '#FFFFFF' }]}>
                   All launcher apps locked out
                 </Text>
               </View>
@@ -515,34 +516,27 @@ export default function StudyScreen() {
             <Text style={[styles.lockoutTip, { color: t.sub }]}>
               Tip: You can lock the screen using the power button anytime. Unlocking will bring you straight back to this timer.
             </Text>
-          </Card>
+          </GlowCard>
 
           {/* Motivational Quote */}
-          <Card>
+          <GlowCard style={{ padding: 18 }}>
             <View style={styles.quoteCard}>
               <Bookmark size={16} color={t.accent} strokeWidth={2.4} />
-              <Text style={[styles.quoteText, { color: t.text }]}>
-                "{quote.quote}"
-              </Text>
-              <Text style={[styles.quoteSource, { color: t.accent }]}>
-                — {quote.source}
-              </Text>
+              <Text style={[styles.quoteText, { color: '#FFFFFF' }]}>"{quote.quote}"</Text>
+              <Text style={[styles.quoteSource, { color: '#A78BFA' }]}>— {quote.source}</Text>
             </View>
-          </Card>
+          </GlowCard>
 
           {/* Emergency Stop Button */}
           <View style={styles.emergencyContainer}>
-            <Pressable
+            <PressableScale
               onPress={() => setShowEmergencyModal(true)}
-              style={({ pressed }) => [
-                styles.emergencyBtn,
-                { opacity: pressed ? 0.6 : 1 },
-              ]}>
-              <AlertTriangle size={14} color={t.sub} strokeWidth={2} />
-              <Text style={[styles.emergencyBtnText, { color: t.sub }]}>
-                Emergency Exit
-              </Text>
-            </Pressable>
+              style={styles.emergencyBtn}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={14} color={t.sub} strokeWidth={2} />
+                <Text style={[styles.emergencyBtnText, { color: t.sub }]}>Emergency Exit</Text>
+              </View>
+            </PressableScale>
           </View>
         </ScrollView>
 
@@ -556,22 +550,16 @@ export default function StudyScreen() {
             <View
               style={[
                 styles.modalContent,
-                { backgroundColor: t.bgAlt, borderColor: t.cardBorder },
+                { backgroundColor: t.bgAlt, borderColor: t.cardBorderGlow },
               ]}>
               <View style={styles.modalHeader}>
                 <AlertTriangle size={26} color={t.danger} strokeWidth={2.5} />
-                <Text style={[styles.modalTitle, { color: t.text }]}>
-                  Emergency Exit
-                </Text>
+                <Text style={[styles.modalTitle, { color: '#FFFFFF' }]}>Emergency Exit</Text>
               </View>
               <Text style={[styles.modalMessage, { color: t.sub }]}>
                 Study mode is designed to protect your focus against temptation. Giving up early will cancel all remaining Pomodoro rounds.
               </Text>
-              <Text
-                style={[
-                  styles.modalMessage,
-                  { color: t.warn, fontWeight: '700', marginTop: 8 },
-                ]}>
+              <Text style={[styles.modalMessage, { color: t.warn, fontWeight: '700', marginTop: 8 }]}>
                 Press and hold the button below for 4 seconds to force unlock.
               </Text>
 
@@ -583,11 +571,10 @@ export default function StudyScreen() {
                   style={[
                     styles.holdBtn,
                     {
-                      borderColor: t.danger,
+                      borderColor: t.dangerBorder,
                       backgroundColor: t.dangerSoft,
                     },
                   ]}>
-                  {/* Progress bar fill inside button */}
                   <View
                     style={[
                       styles.holdBtnFill,
@@ -605,16 +592,14 @@ export default function StudyScreen() {
                 </Pressable>
               </View>
 
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   stopHoldEmergency();
                   setShowEmergencyModal(false);
                 }}
                 style={styles.modalCancelBtn}>
-                <Text style={{ color: t.sub, fontWeight: '700' }}>
-                  Keep Studying
-                </Text>
-              </Pressable>
+                <Text style={{ color: t.sub, fontWeight: '700' }}>Keep Studying</Text>
+              </PressableScale>
             </View>
           </View>
         </Modal>
@@ -632,29 +617,25 @@ export default function StudyScreen() {
   const totalHour = Math.floor(totalSessionMinutes / 60);
   const totalMin = totalSessionMinutes % 60;
   const sessionLengthText =
-    totalHour > 0
-      ? `${totalHour}h ${totalMin > 0 ? `${totalMin}m` : ''}`
-      : `${totalMin}m`;
+    totalHour > 0 ? `${totalHour}h ${totalMin > 0 ? `${totalMin}m` : ''}` : `${totalMin}m`;
 
   return (
     <ScrollView
       contentContainerStyle={styles.setupContainer}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled">
-      {/* Hero Card */}
-      <Card>
+      {/* Hero Bento Card */}
+      <GlowCard style={{ padding: 18 }}>
         <View style={styles.heroRow}>
           <View
             style={[
               styles.heroIconBox,
-              { backgroundColor: t.accentSoft, borderColor: t.accent },
+              { backgroundColor: t.accentWell, borderColor: t.accentWellBorder },
             ]}>
-            <BookOpen size={26} color={t.accent} strokeWidth={2.4} />
+            <BookOpen size={24} color="#A78BFA" strokeWidth={2.4} />
           </View>
           <View style={{ flex: 1 }}>
-            <Title size={20} icon={BookOpen}>
-              Study Mode
-            </Title>
+            <Title size={19} icon={BookOpen}>Study Mode</Title>
             <Sub>
               Strict Pomodoro phone lockout. When active, all apps, internet toggles, and notification shades are blocked until finished.
             </Sub>
@@ -663,56 +644,44 @@ export default function StudyScreen() {
 
         {/* Feature Badges */}
         <View style={styles.badgeRow}>
-          <View
-            style={[
-              styles.badgeItem,
-              { backgroundColor: t.glass, borderColor: t.border },
-            ]}>
-            <Lock size={12} color={t.accent} strokeWidth={2.4} />
-            <Text style={[styles.badgeText, { color: t.text }]}>Full Lockout</Text>
+          <View style={[styles.badgeItem, { backgroundColor: t.glass, borderColor: t.border }]}>
+            <Lock size={12} color="#A78BFA" strokeWidth={2.4} />
+            <Text style={[styles.badgeText, { color: '#FFFFFF' }]}>Full Lockout</Text>
           </View>
-          <View
-            style={[
-              styles.badgeItem,
-              { backgroundColor: t.glass, borderColor: t.border },
-            ]}>
-            <BellOff size={12} color={t.accent} strokeWidth={2.4} />
-            <Text style={[styles.badgeText, { color: t.text }]}>No Notifications</Text>
+          <View style={[styles.badgeItem, { backgroundColor: t.glass, borderColor: t.border }]}>
+            <BellOff size={12} color="#A78BFA" strokeWidth={2.4} />
+            <Text style={[styles.badgeText, { color: '#FFFFFF' }]}>No Notifications</Text>
           </View>
-          <View
-            style={[
-              styles.badgeItem,
-              { backgroundColor: t.glass, borderColor: t.border },
-            ]}>
-            <WifiOff size={12} color={t.accent} strokeWidth={2.4} />
-            <Text style={[styles.badgeText, { color: t.text }]}>Internet Shield</Text>
+          <View style={[styles.badgeItem, { backgroundColor: t.glass, borderColor: t.border }]}>
+            <WifiOff size={12} color="#A78BFA" strokeWidth={2.4} />
+            <Text style={[styles.badgeText, { color: '#FFFFFF' }]}>Internet Shield</Text>
           </View>
         </View>
-      </Card>
+      </GlowCard>
 
       {/* Network Shield Card */}
-      <Card>
+      <GlowCard style={{ padding: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
             <View
               style={{
                 width: 38,
                 height: 38,
-                borderRadius: 10,
+                borderRadius: 12,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: wifiOn ? t.warnSoft : t.okSoft,
                 borderWidth: 1,
-                borderColor: wifiOn ? t.warn : t.ok,
+                borderColor: wifiOn ? t.warnBorder : t.okBorder,
               }}>
               {wifiOn ? (
                 <Wifi size={18} color={t.warn} strokeWidth={2.4} />
               ) : (
-                <WifiOff size={18} color={t.ok} strokeWidth={2.4} />
+                <WifiOff size={18} color={t.okGlow} strokeWidth={2.4} />
               )}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' }}>
                 {wifiOn ? 'Wi-Fi is currently ON' : 'Wi-Fi is currently OFF'}
               </Text>
               <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
@@ -722,49 +691,33 @@ export default function StudyScreen() {
               </Text>
             </View>
           </View>
-          <Pressable
+          <Btn
+            label={wifiOn ? 'Turn Off' : 'Turn On'}
+            kind={wifiOn ? 'danger' : 'ghost'}
             onPress={handleToggleWifi}
-            style={({ pressed }) => [{
-              paddingVertical: 7,
-              paddingHorizontal: 12,
-              backgroundColor: wifiOn ? t.dangerSoft : t.accentSoft,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: wifiOn ? t.danger : t.accent,
-              marginLeft: 10,
-              opacity: pressed ? 0.7 : 1,
-            }]}>
-            <Text
-              style={{
-                color: wifiOn ? t.danger : t.accent,
-                fontSize: 12,
-                fontWeight: '800',
-              }}>
-              {wifiOn ? 'Turn Off' : 'Turn On'}
-            </Text>
-          </Pressable>
+          />
         </View>
-      </Card>
+      </GlowCard>
 
       {/* Do Not Disturb Silence Card */}
-      <Card>
+      <GlowCard style={{ padding: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
             <View
               style={{
                 width: 38,
                 height: 38,
-                borderRadius: 10,
+                borderRadius: 12,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: dndAccess ? t.okSoft : t.warnSoft,
                 borderWidth: 1,
-                borderColor: dndAccess ? t.ok : t.warn,
+                borderColor: dndAccess ? t.okBorder : t.warnBorder,
               }}>
-              <BellOff size={18} color={dndAccess ? t.ok : t.warn} strokeWidth={2.4} />
+              <BellOff size={18} color={dndAccess ? t.okGlow : t.warn} strokeWidth={2.4} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' }}>
                 {dndAccess ? 'Silent Mode Ready' : 'DND Permission Required'}
               </Text>
               <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
@@ -775,33 +728,13 @@ export default function StudyScreen() {
             </View>
           </View>
           {!dndAccess && (
-            <Pressable
-              onPress={handleRequestDnd}
-              style={({ pressed }) => [{
-                paddingVertical: 7,
-                paddingHorizontal: 12,
-                backgroundColor: t.warnSoft,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: t.warn,
-                marginLeft: 10,
-                opacity: pressed ? 0.7 : 1,
-              }]}>
-              <Text
-                style={{
-                  color: t.warn,
-                  fontSize: 12,
-                  fontWeight: '800',
-                }}>
-                Grant DND
-              </Text>
-            </Pressable>
+            <Btn label="Grant DND" kind="primary" onPress={handleRequestDnd} />
           )}
         </View>
-      </Card>
+      </GlowCard>
 
       {/* Focus Duration */}
-      <Card>
+      <GlowCard style={{ padding: 18 }}>
         <Title icon={Flame}>Focus Duration</Title>
         <Sub>How long each study session lasts before a rest break.</Sub>
         <ChipSelector
@@ -822,16 +755,16 @@ export default function StudyScreen() {
           style={[
             styles.customInput,
             {
-              backgroundColor: t.card,
+              backgroundColor: t.bg,
               borderColor: t.cardBorder,
-              color: t.text,
+              color: '#FFFFFF',
             },
           ]}
         />
-      </Card>
+      </GlowCard>
 
       {/* Break Duration */}
-      <Card>
+      <GlowCard style={{ padding: 18 }}>
         <Title icon={Coffee}>Break Duration</Title>
         <Sub>Short rest period between focus rounds to recharge your brain.</Sub>
         <ChipSelector
@@ -840,10 +773,10 @@ export default function StudyScreen() {
           onPick={setBreakMinutes}
           formatLabel={m => `${m} min`}
         />
-      </Card>
+      </GlowCard>
 
       {/* Total Rounds */}
-      <Card>
+      <GlowCard style={{ padding: 18 }}>
         <Title icon={RotateCcw}>Session Rounds</Title>
         <Sub>Number of focus blocks to complete in this study cycle.</Sub>
         <ChipSelector
@@ -852,13 +785,13 @@ export default function StudyScreen() {
           onPick={setTotalRounds}
           formatLabel={r => (r === 1 ? '1 round' : `${r} rounds`)}
         />
-      </Card>
+      </GlowCard>
 
       {/* Session Plan Summary & Launch */}
-      <Card>
+      <GlowCard tone="accent" style={{ padding: 18 }}>
         <Title icon={CheckCircle2}>Session Plan</Title>
         <View style={styles.planSummary}>
-          <Text style={[styles.planTitle, { color: t.accent }]}>
+          <Text style={[styles.planTitle, { color: '#FFFFFF' }]}>
             {totalRounds} × {chosenFocus} min focus
             {totalRounds > 1 ? ` + ${totalRounds - 1} × ${breakMinutes} min break` : ''}
           </Text>
@@ -866,13 +799,14 @@ export default function StudyScreen() {
             Total study session: {sessionLengthText}
           </Text>
         </View>
-        <View style={{ height: 12 }} />
+        <View style={{ height: 14 }} />
         <Btn
           label={`Lock Phone & Study (${sessionLengthText})`}
           icon={Flame}
+          kind="primary"
           onPress={handleStartStudy}
         />
-      </Card>
+      </GlowCard>
     </ScrollView>
   );
 }
@@ -888,13 +822,13 @@ const styles = StyleSheet.create({
   },
   heroRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 14,
     alignItems: 'flex-start',
   },
   heroIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -911,7 +845,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingHorizontal: 11,
     borderRadius: 999,
     borderWidth: 1,
   },
@@ -923,24 +857,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 10,
-  },
-  chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
+    marginTop: 12,
   },
   chipText: {
     fontSize: 13,
   },
   customInput: {
-    marginTop: 12,
+    marginTop: 14,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 13.5,
   },
   planSummary: {
     paddingVertical: 4,
@@ -962,7 +890,7 @@ const styles = StyleSheet.create({
   phaseIconContainer: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 14,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -972,7 +900,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   phaseSub: {
-    fontSize: 12,
+    fontSize: 12.5,
     marginTop: 2,
   },
   timerDial: {
@@ -982,7 +910,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1.5,
     marginVertical: 10,
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.5,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
@@ -1004,11 +932,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   progressContainer: {
-    marginTop: 12,
+    marginTop: 14,
     marginBottom: 4,
   },
   progressTrack: {
-    height: 8,
+    height: 7,
     borderRadius: 4,
     overflow: 'hidden',
     width: '100%',
@@ -1018,21 +946,21 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   progressLabel: {
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '600',
     textAlign: 'right',
-    marginTop: 4,
+    marginTop: 5,
   },
   roundsTracker: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 14,
+    marginTop: 16,
   },
   roundPill: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1042,7 +970,7 @@ const styles = StyleSheet.create({
   },
   lockoutGrid: {
     gap: 10,
-    marginTop: 6,
+    marginTop: 8,
   },
   lockoutItem: {
     flexDirection: 'row',
@@ -1088,23 +1016,27 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: 'rgba(3, 4, 10, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
     width: '100%',
-    maxWidth: 340,
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 20,
+    maxWidth: 360,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 14,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   modalTitle: {
     fontSize: 18,
@@ -1135,6 +1067,6 @@ const styles = StyleSheet.create({
   modalCancelBtn: {
     alignItems: 'center',
     paddingVertical: 14,
-    marginTop: 6,
+    marginTop: 8,
   },
 });

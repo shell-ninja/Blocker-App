@@ -151,54 +151,139 @@ async function sync(s: PersistState = snap.state) {
 // ---------- lifecycle ----------
 
 export async function init() {
-  const raw = await Native.loadState();
-  let state: PersistState = raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
-  if (state.customKeywords.some(isRetired)) {
-    state = { ...state, customKeywords: state.customKeywords.filter(k => !isRetired(k)) };
-    Native.saveState(JSON.stringify(state)).catch(() => {});
-  }
-  if (!state.defaultAppsSeeded) {
-    // adding blocks strengthens protection, so this applies immediately, with no delay timer
-    state = { ...state, blockedApps: [...new Set([...state.blockedApps, ...DEFAULT_BLOCKED_APPS])], defaultAppsSeeded: true };
-    Native.saveState(JSON.stringify(state)).catch(() => {});
-  }
-  emit({ state });
   try {
-    await sync(state);
-  } catch {
-    // native side still holds entries pending a locked removal; keep native state.
-    // sync() stops at the first refusal, so push the app lists separately (this is what delivers the default app blocks).
-    try { await Native.setBlockedApps(state.blockedApps); } catch { /* locked removal pending */ }
-    try { await Native.setExemptApps(state.exemptApps); } catch { /* locked removal pending */ }
-  }
-  await refresh();
-  // Ensure any existing schedules already loaded on startup are marked as saved
-  if (!state.savedSchedules || state.savedSchedules.length === 0) {
-    if (snap.schedules.length > 0) {
-      const savedSchedules = snap.schedules.map(s => s.id);
-      persist({ ...snap.state, savedSchedules });
+    const raw = await Native.loadState().catch(() => null);
+    let parsed: any = null;
+    try {
+      if (raw) parsed = JSON.parse(raw);
+    } catch {}
+    let state: PersistState = parsed && typeof parsed === 'object' ? { ...EMPTY, ...parsed } : { ...EMPTY };
+    state.categories = state.categories && typeof state.categories === 'object' ? state.categories : {};
+    state.customDomains = Array.isArray(state.customDomains) ? state.customDomains : [];
+    state.customKeywords = Array.isArray(state.customKeywords) ? state.customKeywords : [];
+    state.whitelist = Array.isArray(state.whitelist) ? state.whitelist : [];
+    state.blockedApps = Array.isArray(state.blockedApps) ? state.blockedApps : [];
+    state.exemptApps = Array.isArray(state.exemptApps) ? state.exemptApps : [];
+    state.queue = state.queue && typeof state.queue === 'object' ? state.queue : {};
+    state.savedSchedules = Array.isArray(state.savedSchedules) ? state.savedSchedules : [];
+    state.granularFocus = state.granularFocus && typeof state.granularFocus === 'object' ? state.granularFocus : DEFAULT_GRANULAR;
+
+    if (state.customKeywords.some(isRetired)) {
+      state = { ...state, customKeywords: state.customKeywords.filter(k => !isRetired(k)) };
+      Native.saveState(JSON.stringify(state)).catch(() => {});
     }
+    if (!state.defaultAppsSeeded) {
+      // adding blocks strengthens protection, so this applies immediately, with no delay timer
+      state = { ...state, blockedApps: [...new Set([...state.blockedApps, ...DEFAULT_BLOCKED_APPS])], defaultAppsSeeded: true };
+      Native.saveState(JSON.stringify(state)).catch(() => {});
+    }
+    emit({ state });
+    try {
+      await sync(state);
+    } catch {
+      // native side still holds entries pending a locked removal; keep native state.
+      // sync() stops at the first refusal, so push the app lists separately (this is what delivers the default app blocks).
+      try { await Native.setBlockedApps(state.blockedApps); } catch { /* locked removal pending */ }
+      try { await Native.setExemptApps(state.exemptApps); } catch { /* locked removal pending */ }
+    }
+    await refresh().catch(() => {});
+    // Ensure any existing schedules already loaded on startup are marked as saved
+    if (!state.savedSchedules || state.savedSchedules.length === 0) {
+      if (snap.schedules && snap.schedules.length > 0) {
+        const savedSchedules = snap.schedules.map(s => s.id);
+        persist({ ...snap.state, savedSchedules });
+      }
+    }
+  } catch (err) {
+    console.warn('init error:', err);
+  } finally {
+    emit({ ready: true });
   }
-  emit({ ready: true });
 }
 
 export async function refresh() {
-  const [perms, stats, delayDays, locks, schedules, granularFocus, appLimits, appUsageToday] = await Promise.all([
-    Native.getPermissionStatus(), Native.getStats(), Native.getDelayDays(), Native.getSettingLocks(LOCK_KEYS),
-    Native.getSchedules(), Native.getGranularFocusToggles().catch(() => DEFAULT_GRANULAR),
-    Native.getAppUsageLimits().catch(() => ({})),
-    Native.getAppUsageToday().catch(() => ({}))
+  const [
+    perms,
+    stats,
+    delayDays,
+    locks,
+    schedules,
+    granularFocus,
+    appLimits,
+    appUsageToday,
+  ] = await Promise.all([
+    Native.getPermissionStatus().catch(() => ({
+      accessibility: true,
+      overlay: true,
+      usageAccess: true,
+      deviceAdmin: true,
+      adminLost: false,
+      battery: true,
+    })),
+    Native.getStats().catch(() => ({
+      sitesBlockedToday: 0,
+      appsBlockedToday: 0,
+      tamperAttemptsToday: 0,
+      screenBlocksToday: 0,
+      focusActive: false,
+      focusUntil: 0,
+      focusRemainingMs: 0,
+      focusApps: [],
+      active: false,
+      shield: true,
+      studyActive: false,
+      studyUntil: 0,
+      studyRemainingMs: 0,
+      studyTotalRounds: 0,
+      studyCurrentRound: 0,
+      studyIsBreak: false,
+      studyFocusMinutes: 0,
+      studyBreakMinutes: 0,
+    })),
+    Native.getDelayDays().catch(() => 1),
+    Native.getSettingLocks(LOCK_KEYS).catch(() => ({} as Record<LockKey, SettingLock>)),
+    Native.getSchedules().catch(() => [] as Schedule[]),
+    Native.getGranularFocusToggles().catch(() => DEFAULT_GRANULAR),
+    Native.getAppUsageLimits().catch(() => ({} as Record<string, number>)),
+    Native.getAppUsageToday().catch(() => ({} as Record<string, number>)),
   ]);
+
+  const safeStats: Stats = stats ?? {
+    sitesBlockedToday: 0,
+    appsBlockedToday: 0,
+    tamperAttemptsToday: 0,
+    screenBlocksToday: 0,
+    focusActive: false,
+    focusUntil: 0,
+    focusRemainingMs: 0,
+    focusApps: [],
+    active: false,
+    shield: true,
+    studyActive: false,
+    studyUntil: 0,
+    studyRemainingMs: 0,
+    studyTotalRounds: 0,
+    studyCurrentRound: 0,
+    studyIsBreak: false,
+    studyFocusMinutes: 0,
+    studyBreakMinutes: 0,
+  };
+  const safeLocks = locks ?? {};
+  const safeSchedules = Array.isArray(schedules) ? schedules : [];
+  const safeGranular = granularFocus ?? DEFAULT_GRANULAR;
+  const safeLimits = appLimits ?? {};
+  const safeUsage = appUsageToday ?? {};
+
   // a pending focus change is pointless once focus mode has ended by itself
-  if (!stats.focusActive && (locks.focus?.pending || locks.focus?.open)) {
+  if (!safeStats.focusActive && (safeLocks.focus?.pending || safeLocks.focus?.open)) {
     await Native.cancelSettingChange('focus').catch(() => {});
-    delete locks.focus;
+    delete safeLocks.focus;
   }
   // drop queued actions whose timer no longer exists (cancelled or applied elsewhere)
-  const queue = { ...snap.state.queue };
+  const queue = { ...(snap.state.queue ?? {}) };
   let dirty = false;
   for (const k of LOCK_KEYS) {
-    const l = locks[k];
+    const l = safeLocks[k];
     if (queue[k]?.length && !l?.pending && !l?.open) {
       delete queue[k];
       dirty = true;
@@ -206,18 +291,32 @@ export async function refresh() {
   }
   if (dirty) persist({ ...snap.state, queue });
   emit({
-    perms, stats, delayDays, locks, schedules, granularFocus, appLimits, appUsageToday, active: stats.active, shield: stats.shield,
-    focus: { active: stats.focusActive, until: stats.focusUntil, remainingMs: stats.focusRemainingMs, apps: stats.focusApps },
+    perms,
+    stats: safeStats,
+    delayDays: typeof delayDays === 'number' ? delayDays : 1,
+    locks: safeLocks,
+    schedules: safeSchedules,
+    granularFocus: safeGranular,
+    appLimits: safeLimits,
+    appUsageToday: safeUsage,
+    active: safeStats.active,
+    shield: safeStats.shield,
+    focus: {
+      active: safeStats.focusActive,
+      until: safeStats.focusUntil,
+      remainingMs: safeStats.focusRemainingMs,
+      apps: safeStats.focusApps ?? [],
+    },
     study: {
-      active: stats.studyActive,
-      until: stats.studyUntil,
-      remainingMs: stats.studyRemainingMs,
-      totalRounds: stats.studyTotalRounds,
-      currentRound: stats.studyCurrentRound,
-      isBreak: stats.studyIsBreak,
-      focusMinutes: stats.studyFocusMinutes,
-      breakMinutes: stats.studyBreakMinutes,
-    }
+      active: safeStats.studyActive,
+      until: safeStats.studyUntil,
+      remainingMs: safeStats.studyRemainingMs,
+      totalRounds: safeStats.studyTotalRounds,
+      currentRound: safeStats.studyCurrentRound,
+      isBreak: safeStats.studyIsBreak,
+      focusMinutes: safeStats.studyFocusMinutes,
+      breakMinutes: safeStats.studyBreakMinutes,
+    },
   });
 }
 

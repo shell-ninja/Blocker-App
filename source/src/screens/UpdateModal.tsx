@@ -23,7 +23,15 @@ import {
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { APP_VERSION } from '../data/appVersion';
 import { compareSemVer } from '../services/UpdateService';
-import { Badge, Btn, Card, errMsg, showAlert, useTheme } from '../ui';
+import {
+  Btn,
+  GlowCard,
+  PressableScale,
+  StatusPillBadge,
+  errMsg,
+  showAlert,
+  useTheme,
+} from '../ui';
 
 interface UpdateModalProps {
   visible: boolean;
@@ -148,112 +156,127 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
       <View style={styles.backdrop}>
         <View style={[styles.container, { backgroundColor: t.bg, borderColor: t.cardBorder }]}>
           {/* Header Bar */}
-          <View style={[styles.header, { borderBottomColor: t.border }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-              <View style={[styles.iconBox, { backgroundColor: t.accentSoft, borderColor: t.accent }]}>
-                <ArrowDownToLine size={18} color={t.accent} strokeWidth={2.4} />
+          <View style={[styles.header, { borderBottomColor: t.cardBorder }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+              <View
+                style={[
+                  styles.iconBox,
+                  { backgroundColor: t.accentWell, borderColor: t.accentWellBorder },
+                ]}>
+                <ArrowDownToLine size={18} color="#A78BFA" strokeWidth={2.4} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.title, { color: t.text }]}>
+                <Text style={[styles.title, { color: '#FFFFFF' }]}>
                   {isNewer ? 'New Update Available' : isAhead ? 'Public Release Notes' : 'Release Notes'}
                 </Text>
-                <Text style={{ color: t.sub, fontSize: 12 }}>
+                <Text style={{ color: t.sub, fontSize: 12, marginTop: 2 }}>
                   {rel.tagName} • Installed: v{APP_VERSION}
                 </Text>
               </View>
             </View>
 
-            <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+            <PressableScale onPress={onClose} hitSlop={12} style={styles.closeBtn}>
               <X size={20} color={t.sub} />
-            </Pressable>
+            </PressableScale>
           </View>
 
           {/* Body Content */}
-          <ScrollView contentContainerStyle={styles.scrollContent}>
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             {/* Version Meta Card */}
-            <View style={[styles.metaCard, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+            <GlowCard style={{ padding: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Package size={16} color={t.accent} />
-                  <Text style={{ color: t.text, fontWeight: '700', fontSize: 15 }}>
+                  <Package size={17} color={t.accent} />
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 15 }}>
                     {rel.name || rel.tagName}
                   </Text>
                 </View>
-                <Badge
+                <StatusPillBadge
                   label={isNewer ? 'Update Available' : isAhead ? 'Public Release' : 'Current Version'}
                   tone={isNewer ? 'warn' : isAhead ? 'idle' : 'ok'}
+                  size="sm"
                 />
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
                 {sizeMb && (
                   <Text style={{ color: t.sub, fontSize: 12 }}>
-                    Size: <Text style={{ color: t.text, fontWeight: '600' }}>{sizeMb} MB</Text>
+                    Size: <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>{sizeMb} MB</Text>
                   </Text>
                 )}
                 {rel.publishedAt && (
                   <Text style={{ color: t.sub, fontSize: 12 }}>
-                    Released: <Text style={{ color: t.text, fontWeight: '600' }}>{rel.publishedAt.split('T')[0]}</Text>
+                    Released:{' '}
+                    <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>
+                      {rel.publishedAt.split('T')[0]}
+                    </Text>
                   </Text>
                 )}
               </View>
-            </View>
+            </GlowCard>
 
             {/* Safety & Settings Persistence Notice */}
-            <View style={[styles.noticeBox, { backgroundColor: t.accentSoft, borderColor: t.border }]}>
-              <Info size={15} color={t.accent} />
-              <Text style={{ color: t.text, fontSize: 12, flex: 1, lineHeight: 17 }}>
+            <View
+              style={[
+                styles.noticeBox,
+                { backgroundColor: t.accentWell, borderColor: t.accentWellBorder },
+              ]}>
+              <Info size={16} color="#A78BFA" />
+              <Text style={{ color: '#FFFFFF', fontSize: 12.5, flex: 1, lineHeight: 18 }}>
                 Updating preserves all your active protections, app timers, custom blocklists, and settings.
               </Text>
             </View>
 
             {/* Permission Banner if needed */}
             {!canInstall && (
-              <Pressable
+              <PressableScale
                 onPress={update.openInstallSettings}
-                style={[styles.noticeBox, { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: '#EF4444' }]}>
-                <AlertCircle size={16} color="#EF4444" />
+                style={[
+                  styles.noticeBox,
+                  { backgroundColor: t.dangerSoft, borderColor: t.dangerBorder },
+                ]}>
+                <AlertCircle size={16} color={t.danger} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 12.5 }}>
+                  <Text style={{ color: t.danger, fontWeight: '700', fontSize: 12.5 }}>
                     Install Unknown Apps Permission Needed
                   </Text>
                   <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 2 }}>
                     Tap here to allow Blocker to install APK updates directly.
                   </Text>
                 </View>
-              </Pressable>
+              </PressableScale>
             )}
 
             {/* Error Notice if any */}
             {update.error && (
-              <View style={[styles.noticeBox, { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: '#EF4444' }]}>
-                <AlertCircle size={16} color="#EF4444" />
+              <View
+                style={[
+                  styles.noticeBox,
+                  { backgroundColor: t.dangerSoft, borderColor: t.dangerBorder },
+                ]}>
+                <AlertCircle size={16} color={t.danger} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 12.5 }}>
-                    Update Notice
-                  </Text>
-                  <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 2 }}>
-                    {update.error}
-                  </Text>
+                  <Text style={{ color: t.danger, fontWeight: '700', fontSize: 12.5 }}>Update Notice</Text>
+                  <Text style={{ color: t.sub, fontSize: 11.5, marginTop: 2 }}>{update.error}</Text>
                 </View>
               </View>
             )}
 
             {/* Release Notes Changelog */}
-            <Text style={[styles.sectionHeading, { color: t.text }]}>What's New & Bug Fixes</Text>
+            <Text style={[styles.sectionHeading, { color: '#FFFFFF' }]}>What's New & Bug Fixes</Text>
 
-            <View style={[styles.notesCard, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+            <GlowCard style={{ padding: 18 }}>
               {sections.length === 0 ? (
                 <Text style={{ color: t.sub, fontSize: 13, fontStyle: 'italic' }}>
                   No changelog description provided.
                 </Text>
               ) : (
                 sections.map((sec, idx) => (
-                  <View key={idx} style={{ marginBottom: 12 }}>
+                  <View key={idx} style={{ marginBottom: 14 }}>
                     {sec.title && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                         <View style={{ width: 4, height: 14, backgroundColor: t.accent, borderRadius: 2 }} />
-                        <Text style={{ color: t.accent, fontWeight: '700', fontSize: 13.5 }}>
+                        <Text style={{ color: '#A78BFA', fontWeight: '700', fontSize: 13.5 }}>
                           {sec.title}
                         </Text>
                       </View>
@@ -261,7 +284,7 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                     {sec.items.map((item, itemIdx) => (
                       <View key={itemIdx} style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
                         <Text style={{ color: t.accent, fontSize: 14, lineHeight: 19 }}>•</Text>
-                        <Text style={{ color: t.text, fontSize: 12.5, lineHeight: 18, flex: 1 }}>
+                        <Text style={{ color: t.sub, fontSize: 12.5, lineHeight: 18, flex: 1 }}>
                           {item}
                         </Text>
                       </View>
@@ -269,15 +292,15 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                   </View>
                 ))
               )}
-            </View>
+            </GlowCard>
           </ScrollView>
 
           {/* Footer Actions & Download Progress */}
-          <View style={[styles.footer, { borderTopColor: t.border, backgroundColor: t.bgAlt }]}>
+          <View style={[styles.footer, { borderTopColor: t.cardBorder, backgroundColor: t.bgAlt }]}>
             {update.downloading ? (
-              <View style={{ width: '100%', gap: 8 }}>
+              <View style={{ width: '100%', gap: 10 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ color: t.text, fontWeight: '600', fontSize: 13 }}>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 13 }}>
                     Downloading update... {progressPercent}%
                   </Text>
                   <Text style={{ color: t.sub, fontSize: 12 }}>
@@ -310,31 +333,40 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                   </Text>
                 </View>
 
-                <Pressable
+                <Btn
+                  label="Install Update Now"
+                  kind="emerald"
+                  icon={Package}
                   onPress={handleUpdate}
-                  style={[styles.primaryBtn, { backgroundColor: t.ok }]}>
-                  <Package size={17} color="#FFFFFF" strokeWidth={2.4} />
-                  <Text style={styles.primaryBtnText}>Install Update Now</Text>
-                </Pressable>
+                />
 
-                <Pressable
+                <Btn
+                  label="Clear Downloaded APK Cache"
+                  kind="ghost"
+                  icon={Trash2}
                   onPress={handleClearCache}
-                  style={[styles.secondaryBtn, { borderColor: t.border }]}>
-                  <Trash2 size={14} color={t.warn} />
-                  <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>Clear Downloaded APK Cache</Text>
-                </Pressable>
+                />
               </View>
             ) : (
               <View style={{ width: '100%', gap: 10 }}>
                 {isNewer ? (
-                  <Pressable
+                  <Btn
+                    label="Download & Install Update"
+                    kind="primary"
+                    icon={ArrowDownToLine}
                     onPress={handleUpdate}
-                    style={[styles.primaryBtn, { backgroundColor: t.accent }]}>
-                    <ArrowDownToLine size={18} color="#FFFFFF" strokeWidth={2.4} />
-                    <Text style={styles.primaryBtnText}>Download & Install Update</Text>
-                  </Pressable>
+                  />
                 ) : (
-                  <View style={{ alignItems: 'center', gap: 4, paddingVertical: 6, backgroundColor: t.card, borderRadius: 12, borderWidth: 1, borderColor: t.cardBorder }}>
+                  <View
+                    style={{
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingVertical: 10,
+                      backgroundColor: t.card,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: t.cardBorder,
+                    }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <CheckCircle2 size={16} color={t.ok} />
                       <Text style={{ color: t.ok, fontWeight: '700', fontSize: 13.5 }}>
@@ -342,26 +374,26 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
                       </Text>
                     </View>
                     <Text style={{ color: t.sub, fontSize: 11.5 }}>
-                      {isAhead ? `Installed v${APP_VERSION} is ahead of GitHub ${rel.tagName}.` : 'No updates are currently required.'}
+                      {isAhead
+                        ? `Installed v${APP_VERSION} is ahead of GitHub ${rel.tagName}.`
+                        : 'No updates are currently required.'}
                     </Text>
                   </View>
                 )}
 
-                <Pressable
+                <Btn
+                  label={update.error ? 'Clear Download Cache & Retry' : 'Clear Downloaded Cache'}
+                  kind="ghost"
+                  icon={Trash2}
                   onPress={handleClearCache}
-                  style={[styles.secondaryBtn, { borderColor: t.border }]}>
-                  <Trash2 size={14} color={t.warn} />
-                  <Text style={{ color: t.warn, fontSize: 12.5, fontWeight: '600' }}>
-                    {update.error ? 'Clear Download Cache & Retry' : 'Clear Downloaded Cache'}
-                  </Text>
-                </Pressable>
+                />
 
-                <Pressable
+                <PressableScale
                   onPress={() => Linking.openURL(rel.htmlUrl).catch(() => {})}
-                  style={[styles.secondaryBtn, { borderColor: t.border }]}>
+                  style={[styles.secondaryBtn, { borderColor: t.cardBorder }]}>
                   <Text style={{ color: t.sub, fontSize: 12.5, fontWeight: '600' }}>View on GitHub Releases</Text>
                   <ExternalLink size={13} color={t.sub} />
-                </Pressable>
+                </PressableScale>
               </View>
             )}
           </View>
@@ -374,13 +406,13 @@ export default function UpdateModal({ visible, onClose }: UpdateModalProps) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(3, 4, 10, 0.8)',
     justifyContent: 'flex-end',
   },
   container: {
-    maxHeight: '88%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
     borderBottomWidth: 0,
     overflow: 'hidden',
@@ -393,8 +425,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   iconBox: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
@@ -403,6 +435,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16.5,
     fontWeight: '800',
+    letterSpacing: -0.2,
   },
   closeBtn: {
     padding: 6,
@@ -412,17 +445,12 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 14,
   },
-  metaCard: {
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
   noticeBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    padding: 12,
-    borderRadius: 12,
+    padding: 14,
+    borderRadius: 14,
     borderWidth: 1,
   },
   sectionHeading: {
@@ -430,35 +458,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
-  notesCard: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
   footer: {
     padding: 18,
     borderTopWidth: 1,
-  },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-  },
-  primaryBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14.5,
   },
   secondaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingVertical: 10,
+    borderRadius: 12,
     borderWidth: 1,
   },
   progressTrack: {

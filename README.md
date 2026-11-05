@@ -2,9 +2,9 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.5`
+# Blocker `v1.0.6.7`
 
-> **Current Version:** `v1.0.6.5` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.7` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with React Native and native Android Accessibility Services.
 
@@ -27,6 +27,45 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 ---
 
 Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetry, and no account required. It blocks distracting websites, full-screen short-form video players (YouTube Shorts, Instagram Reels, Facebook Reels), and adult domains across browsers and apps.
+
+---
+
+## What's New in v1.0.6.7
+
+- **Comprehensive Cyber Design System Overhaul:**
+  - **Deep Obsidian Canvas & Dot-Matrix Glow:** Pure deep dark canvas (`#070913`) layered with a subtle violet/indigo dot-matrix background pattern.
+  - **Elevated 3D Bento Card Layout:** Dark slate-navy squircle card surfaces (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights and emerald-mint / electric-purple status accents.
+  - **Hardware-Accelerated 60/120fps Motion:**
+    - Ambient breathing glow pulses on active protection pill badges and primary hero shield icons.
+    - Live rolling numeric counter roll-up animations whenever stat card metrics change or load.
+    - Fluid spring-animated toggle switches with smooth state morphing.
+    - Tactile press physics (0.96x spring scale-down on press with crisp rebound) on interactive cards, buttons, and navigation tabs.
+  - **High-Contrast Typography:** Crisp bold white headings and bold tabular numerals paired with cool muted slate subtitles (`#8B97B0`).
+
+- **Facebook Reels & Video Precision Guard (Scroll vs. Click Separation):**
+  - **Newsfeed Scrolling Preserved:** Resolved issue where users were kicked out of Facebook simply when scrolling past horizontal "Reels and short videos" preview carousels or inline video posts on their Home newsfeed.
+  - **Context-Aware Feed Guard (`isFacebookHomeFeed`):** While browsing the Home newsfeed, passive presence of horizontal preview shelves or inline video previews is completely ignored.
+  - **Physical Click-Only Interception (`isFacebookVideoOrReelClick`):** Strictly targets physical user clicks (`TYPE_VIEW_CLICKED`) on Reel cards, play buttons, or Reels navigation tabs. Passive scroll events are completely ignored.
+  - **Cleaned Full-Screen Viewer Containers (`FB_VIDEO_REELS_PLAYER_IDS`):** Strictly contains dedicated full-screen viewer containers (e.g. `fb_shorts_viewer_container`, `reels_viewer_root`, `watch_and_go_reels_container`, `fullscreen_video_player`), eliminating false positives from feed containers.
+  - **Dedicated Tab Detection (`isFacebookReelsOrVideoTabSelected`):** Verifies the Home tab is not active, then checks if the Reels, Shorts, or Video/Watch tab is selected. Navigating to the Reels page triggers immediate ejection and redirects back to Home.
+  - **Facebook Stories Whitelisting:** Comprehensive story detection (`isFacebookStory`, `isFacebookStoryClick`, `FB_STORY_IDS`) ensures personal Stories are strictly whitelisted and never blocked.
+
+- **Focus Mode Daily Schedule Duration Indicator:**
+  - Added duration badge preview ("Duration: Xh Ym") directly on each daily schedule card in Focus Mode so users instantly see how long protection will remain active.
+
+- **UI Alignment & Polish:**
+  - Perfectly aligned bottom navigation bar fonts and icons (`CyberBottomBar`).
+  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link now align cleanly in a unified row.
+
+- **Startup Resilience & Crash Immunity:**
+  - Eliminated infinite re-render loops and startup blank screens.
+  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes or blank screens.
+
+- **Maximum Anti-Tamper & Anti-Uninstall Lockdown (Airtight Fortress):**
+  - Permanently removed all accessibility pausing, bypasses, or temporary exemption loopholes. Blocker operates with strict, non-negotiable 24/7 enforcement.
+  - Zero-ms launcher interceptor against long-press uninstallation shortcuts.
+  - Instant App Info and device admin deactivation screen deflection.
+  - Continuous package installer watchdog and permanent Device Owner uninstallation lockdown.
 
 ---
 
