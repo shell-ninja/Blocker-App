@@ -138,9 +138,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             "developer options", "development settings"
         )
         private val APP_RISK_TERMS = listOf(
-            "deactivate", "uninstall", "force stop", "accessibility", "turn off", "remove", "disable", "clear data",
+            "deactivate", "uninstall", "force stop", "turn off", "remove", "disable", "clear data",
             "clear storage", "manage space", "device admin", "admin apps", "modify system settings",
-            "deactivate this device admin app", "deactivate this device administrator"
+            "stop service", "stop blocker", "deactivate this device admin app", "deactivate this device administrator"
         )
 
         private val GRANULAR_TARGET_PKGS = setOf(
@@ -1143,6 +1143,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (hasDestructiveAction) {
             return false
         }
+        // Blocker's accessibility detail screen (Page 2) is strictly protected when shield is engaged
+        if (shieldEngaged() && isBlockerAccessibilityDetailsScreen(root, null, t)) {
+            return false
+        }
         // Legitimate special app access / permission screens:
         // 1. Do Not Disturb / Notification Policy Access:
         val isDnd = "do not disturb" in t || "notification policy" in t || "zen" in t || "dnd" in t ||
@@ -1230,6 +1234,100 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (cls.contains("DatePicker", ignoreCase = true) || cls.contains("TimePicker", ignoreCase = true)) {
                 return true
             }
+        }
+
+        return false
+    }
+
+    private fun isAccessibilityMainListScreen(root: AccessibilityNodeInfo?, textOrEv: Any? = null): Boolean {
+        val t = when (textOrEv) {
+            is String -> textOrEv.lowercase()
+            is AccessibilityEvent -> textOrEv.text.joinToString(" ").lowercase()
+            else -> {
+                val sb = StringBuilder()
+                if (root != null) collectText(root, sb, 0, intArrayOf(300))
+                sb.toString().lowercase()
+            }
+        }
+
+        // Never classify Page 2 as Page 1:
+        if (t.contains("use blocker") || t.contains("blocker shortcut") ||
+            t.contains("scans the screen for blocked keywords") ||
+            t.contains("protects blocker settings from tampering")) {
+            return false
+        }
+
+        // Page 1 list markers:
+        val hasListHeader = "downloaded apps" in t || "downloaded services" in t ||
+            "installed apps" in t || "installed services" in t ||
+            "interaction controls" in t || "system controls" in t ||
+            "display and text" in t || "text and display" in t || "screen readers" in t
+
+        val hasOtherServices = "talkback" in t || "accessibility menu" in t ||
+            "select to speak" in t || "switch access" in t || "alarmo" in t ||
+            "guided vision" in t || "microsoft launcher" in t
+
+        return hasListHeader || (hasOtherServices && ("accessibility" in t || "অ্যাক্সেসিবিলিটি" in t))
+    }
+
+    private fun isBlockerAccessibilityDetailsScreen(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
+        val pkg = ev?.packageName?.toString() ?: root?.packageName?.toString().orEmpty()
+        if (pkg.isNotEmpty() && !isSettingsPkg(pkg) && pkg != "android") return false
+
+        val fullText = if (text.isNotEmpty()) text.lowercase() else {
+            val sb = StringBuilder()
+            if (root != null) collectText(root, sb, 0, intArrayOf(300))
+            if (ev != null) sb.append(" ").append(ev.text.joinToString(" "))
+            sb.toString().lowercase()
+        }
+
+        val name = if (appLabel.isNotEmpty()) appLabel.lowercase() else "blocker"
+        val hasAppName = name in fullText || "blocker" in fullText || packageName.lowercase() in fullText
+
+        // 1. Accessibility stop/disable confirmation dialog specifically targeting Blocker
+        val isStopDialog = (fullText.contains("stop $name") || fullText.contains("stop blocker") ||
+            fullText.contains("turn off $name") || fullText.contains("turn off blocker") ||
+            (fullText.contains("stop") && fullText.contains("service") && hasAppName) ||
+            (fullText.contains("turn off") && fullText.contains("service") && hasAppName) ||
+            (fullText.contains("বন্ধ") && hasAppName))
+
+        if (isStopDialog) return true
+
+        if (!hasAppName) return false
+
+        // 2. Specific toggle text on Page 2:
+        val hasToggleText = fullText.contains("use $name") ||
+            fullText.contains("use blocker") ||
+            fullText.contains("$name shortcut") ||
+            fullText.contains("blocker shortcut") ||
+            fullText.contains("ব্যবহার করুন") ||
+            (fullText.contains("use service") && hasAppName)
+
+        // 3. Blocker's unique accessibility description text (@string/a11y_desc)
+        val hasA11yDesc = fullText.contains("scans the screen for blocked keywords") ||
+            fullText.contains("protects blocker settings from tampering") ||
+            fullText.contains("blocks adult sites and selected apps") ||
+            fullText.contains("blocks adult sites")
+
+        // 4. Android framework fragment class hints
+        val cls1 = ev?.className?.toString().orEmpty()
+        val cls2 = root?.className?.toString().orEmpty()
+        val isA11yToggleClass = cls1.contains("ToggleAccessibilityService", ignoreCase = true) ||
+            cls2.contains("ToggleAccessibilityService", ignoreCase = true) ||
+            cls1.contains("ToggleFeaturePreferenceFragment", ignoreCase = true) ||
+            cls2.contains("ToggleFeaturePreferenceFragment", ignoreCase = true) ||
+            cls1.contains("AccessibilityDetailsSettings", ignoreCase = true) ||
+            cls2.contains("AccessibilityDetailsSettings", ignoreCase = true) ||
+            cls1.contains("AccessibilityServiceWarning", ignoreCase = true) ||
+            cls2.contains("AccessibilityServiceWarning", ignoreCase = true)
+
+        // Page 1 check: If the screen is Page 1 (the main list of accessibility apps), it is NOT Page 2!
+        if (isAccessibilityMainListScreen(root, fullText)) {
+            return false
+        }
+
+        if (hasToggleText || hasA11yDesc || (isA11yToggleClass && hasAppName)) {
+            return true
         }
 
         return false
@@ -1515,6 +1613,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             val rootCls = runCatching { rootInActiveWindow?.className?.toString().orEmpty() }.getOrDefault(evCls)
             val winTitle = ev.text.joinToString(" ").trim().lowercase()  // screen title Samsung/AOSP use ev.text[0]
             val now = System.currentTimeMillis()
+
+            // ── 0. Blocker Accessibility Detail vs Main List ───────────────────────
+            val rootNow = rootInActiveWindow ?: ev.source
+            if (isBlockerAccessibilityDetailsScreen(rootNow, ev)) {
+                kickFromA11yDetails()
+                return
+            }
+            if (isAccessibilityMainListScreen(rootNow, ev)) {
+                // Page 1: Allowed! Allow user to view and manage other accessibility services.
+                return
+            }
 
             // ── 1. Device Admin list screen (OEM-agnostic by title) ─────────────────
             val isAdminListTitle = ADMIN_SCREEN_TITLES.any { it in winTitle }
@@ -2397,6 +2506,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
 
+        // 0. Accessibility Page 2 or Stop Blocker confirmation dialog
+        if (isBlockerAccessibilityDetailsScreen(root, ev, t)) {
+            autoCancelDialog(root)
+            kickFromA11yDetails()
+            return true
+        }
+
         // 1. Uninstall attempt (package installer or confirmation dialog)
         // Also catches generic "Do you want to uninstall this app?" from package installer
         // when we have timer context (i.e. we were just on a Device Admin or App Info screen).
@@ -2530,6 +2646,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         val fullText = "$t $evText"
 
         if (shieldOn) {
+            // Blocker Accessibility Detail (Page 2) vs Main List (Page 1)
+            if (isBlockerAccessibilityDetailsScreen(root, ev, fullText)) {
+                kickFromA11yDetails()
+                return
+            }
+            if (isAccessibilityMainListScreen(root, fullText)) {
+                // Page 1: Allowed! Allow user to view and manage other accessibility services.
+                return
+            }
+
             // 2. Comprehensive Developer Options content detection
             val hasDevTitle = "developer options" in fullText ||
                 "developer mode" in fullText ||
@@ -2716,6 +2842,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (settingsLike) enforceAdbOffThrottled()
         if (!shieldEngaged()) return
 
+        val rootNow = rootInActiveWindow ?: ev.source
+        if (settingsLike && isBlockerAccessibilityDetailsScreen(rootNow, ev)) {
+            kickFromA11yDetails()
+            return
+        }
+        if (settingsLike && isAccessibilityMainListScreen(rootNow, ev)) {
+            return
+        }
+
         if (stateChange) {
             lastWindowOpenUp = nowUp
             val cls = ev.className?.toString()?.lowercase().orEmpty()
@@ -2827,6 +2962,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Blocker row was clicked inside Settings!
         // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization), allow it:
         if (isLegitimatePermissionTitle(currentSettingsScreenTitle)) return
+
+        val root = rootInActiveWindow ?: ev.source
+        if (isAccessibilityMainListScreen(root, null) || isBlockerAccessibilityDetailsScreen(root, ev)) {
+            kickFromA11yDetails()
+            return
+        }
 
         kickFromAppInfo()
     }
@@ -3510,6 +3651,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             try {
                 val rPkg = root.packageName?.toString().orEmpty()
                 if (rPkg.isNotEmpty() && !isSettingsPkg(rPkg)) return@post
+                if (isBlockerAccessibilityDetailsScreen(root, null)) {
+                    kickFromA11yDetails()
+                    return@post
+                }
+                if (isAccessibilityMainListScreen(root, null)) {
+                    return@post
+                }
                 if (!matchesBlockerAppInfo(root, deep)) return@post
                 val activePkg = rPkg.ifEmpty { pkg }
                 if (isActualSettingsPkg(activePkg)) {
@@ -3543,6 +3691,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(300))
         val t = sb.toString().lowercase()
+        if (isAccessibilityMainListScreen(root, t)) return false
         if (isLegitimatePermissionScreen(null, t)) return false
 
         val isOurApp = name.lowercase() in t || "blocker" in t || packageName.lowercase() in t
@@ -3705,6 +3854,51 @@ class BlockerAccessibilityService : AccessibilityService() {
         showOverlay(
             getTamperHeading(),
             if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো পেজ লক করা থাকে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info page is locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+            5000,
+            getTamperSubheading(),
+            getUnderstoodButton()
+        )
+    }
+
+    private fun kickFromA11yDetails() {
+        val now = System.currentTimeMillis()
+        viewingBlockerSettingsUntil = now + 30_000L
+        runCatching { autoCancelDialog(rootInActiveWindow) }
+        performGlobalAction(GLOBAL_ACTION_BACK)
+
+        if (now - lastAppInfoKick < 400L) return
+        lastAppInfoKick = now
+
+        // Pause continuous polling & scanner thread during the kick transition to prevent flicker loop
+        settingsPollActive = false
+        main.removeCallbacks(settingsPollRunnable)
+        synchronized(appInfoLock) {
+            appInfoHotUntil = 0L
+            appInfoFreshUntil = 0L
+        }
+
+        main.postDelayed({
+            val currentRoot = runCatching { rootInActiveWindow }.getOrNull()
+            if (currentRoot != null) {
+                val currentPkg = currentRoot.packageName?.toString().orEmpty()
+                if (isActualSettingsPkg(currentPkg) || isSettingsPkg(currentPkg)) {
+                    if (isBlockerAccessibilityDetailsScreen(currentRoot, null)) {
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                        kickToHome()
+                    }
+                }
+            }
+
+            main.postDelayed({
+                if (!settingsPollActive) startSettingsPoll()
+            }, 500L)
+        }, 120L)
+
+        Log.i("BlockerGuard", "Blocker Accessibility Settings (Page 2) blocked")
+        BlockerStore.incr(this, "tamper")
+        showOverlay(
+            getTamperHeading(),
+            formatA11yLockedBody(),
             5000,
             getTamperSubheading(),
             getUnderstoodButton()
@@ -5028,6 +5222,14 @@ class BlockerAccessibilityService : AccessibilityService() {
             "$bnMsg\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
         } else {
             "$baseMsg\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
+        }
+    }
+
+    private fun formatA11yLockedBody(): String {
+        return if (isBangla()) {
+            "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকার অ্যাক্সেসিবিলিটি সেটিংস লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)"
+        } else {
+            "Blocker Accessibility settings are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)"
         }
     }
 
