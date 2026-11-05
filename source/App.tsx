@@ -5,6 +5,7 @@ import {
   AppState,
   BackHandler,
   Easing,
+  Image,
   Platform,
   Pressable,
   StatusBar,
@@ -12,12 +13,12 @@ import {
   UIManager,
   View,
 } from 'react-native';
-import { ShieldCheck } from 'lucide-react-native';
 import { isSupported } from './src/native/BlockerNative';
 import { useProtection } from './src/hooks/useProtection';
 import { init, refresh } from './src/services/ProtectionManager';
 import { UpdateService } from './src/services/UpdateService';
 import { AlertHost, AmbientBackground, Header, Icons, PressableScale, useTheme } from './src/ui';
+import { APP_ICON_DATA_URI } from './src/data/appIcon';
 import HomeScreen from './src/screens/HomeScreen';
 import AppBlockerScreen from './src/screens/AppBlockerScreen';
 import FocusScreen from './src/screens/FocusScreen';
@@ -53,17 +54,22 @@ class RootErrorBoundary extends React.Component<
           }}>
           <View
             style={{
-              width: 54,
-              height: 54,
-              borderRadius: 18,
+              width: 56,
+              height: 56,
+              borderRadius: 16,
               backgroundColor: '#16122C',
               borderColor: '#7C3AED',
               borderWidth: 1.5,
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 16,
+              overflow: 'hidden',
             }}>
-            <ShieldCheck size={28} color="#A78BFA" strokeWidth={2.4} />
+            <Image
+              source={{ uri: APP_ICON_DATA_URI }}
+              style={{ width: 44, height: 44, borderRadius: 10 }}
+              resizeMode="contain"
+            />
           </View>
           <Text
             style={{
@@ -131,37 +137,23 @@ function MainApp() {
 
   const changeTab = (id: (typeof TABS)[number]['id']) => {
     if (id === tab) return;
+    setTab(id);
+    fade.setValue(0.7);
+    translateY.setValue(4);
     Animated.parallel([
       Animated.timing(fade, {
-        toValue: 0,
-        duration: 90,
+        toValue: 1,
+        duration: 110,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(translateY, {
-        toValue: -6,
-        duration: 90,
+        toValue: 0,
+        duration: 110,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-    ]).start(() => {
-      setTab(id);
-      translateY.setValue(8);
-      Animated.parallel([
-        Animated.timing(fade, {
-          toValue: 1,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
+    ]).start();
   };
 
   useEffect(() => {
@@ -211,8 +203,8 @@ function MainApp() {
         <View style={{ alignItems: 'center', gap: 14 }}>
           <View
             style={{
-              width: 58,
-              height: 58,
+              width: 64,
+              height: 64,
               borderRadius: 20,
               backgroundColor: '#16122C',
               borderColor: '#7C3AED',
@@ -224,8 +216,13 @@ function MainApp() {
               shadowRadius: 16,
               shadowOffset: { width: 0, height: 0 },
               elevation: 8,
+              overflow: 'hidden',
             }}>
-            <ShieldCheck size={30} color="#A78BFA" strokeWidth={2.4} />
+            <Image
+              source={{ uri: APP_ICON_DATA_URI }}
+              style={{ width: 50, height: 50, borderRadius: 12 }}
+              resizeMode="contain"
+            />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '800', letterSpacing: -0.4 }}>

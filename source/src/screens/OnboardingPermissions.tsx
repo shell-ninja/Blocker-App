@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppState, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { LucideIcon } from 'lucide-react-native';
 import { PermissionKind, Native } from '../native/BlockerNative';
 import { useProtection } from '../hooks/useProtection';
@@ -24,6 +24,7 @@ import {
   showAlert,
   useTheme,
 } from '../ui';
+import { APP_ICON_DATA_URI } from '../data/appIcon';
 
 const STEPS: { kind: PermissionKind; title: string; icon: LucideIcon; why: string; how: string }[] = [
   {
@@ -130,7 +131,36 @@ export default function OnboardingPermissions({ onDone }: { onDone: () => void }
   if (step === 'language') {
     return (
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <Title size={24} icon={Icons.shieldOn}>Popup Message Language</Title>
+        <View style={{ alignItems: 'center', marginBottom: 20, marginTop: 10 }}>
+          <View
+            style={{
+              width: 58,
+              height: 58,
+              borderRadius: 18,
+              backgroundColor: '#16122C',
+              borderColor: '#7C3AED',
+              borderWidth: 1.5,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 12,
+              shadowColor: '#7C3AED',
+              shadowOpacity: 0.5,
+              shadowRadius: 12,
+              elevation: 6,
+              overflow: 'hidden',
+            }}>
+            <Image
+              source={{ uri: APP_ICON_DATA_URI }}
+              style={{ width: 46, height: 46, borderRadius: 12 }}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '800', letterSpacing: -0.4 }}>
+            Welcome to Blocker
+          </Text>
+        </View>
+
+        <Title size={20} icon={Icons.shieldOn}>Popup Message Language</Title>
         <Text style={{ color: t.sub, marginTop: 8, marginBottom: 20, lineHeight: 21, fontSize: 13.5 }}>
           Choose your preferred language for the blocker warning popups, Quranic reminders, and Hadiths.
           {'\n'}(The main application settings and navigation remain in English.)

@@ -30,6 +30,7 @@ import {
 } from '../ui';
 import { APP_VERSION, BUILD_NUMBER } from '../data/appVersion';
 import { SHELL_NINJA_LOGO_URI } from '../data/shellNinjaLogo';
+import { APP_ICON_DATA_URI } from '../data/appIcon';
 import { compareSemVer, UpdateService } from '../services/UpdateService';
 import UpdateModal from './UpdateModal';
 
@@ -631,9 +632,16 @@ export default function SettingsScreen() {
           </PressableScale>
         </View>
 
-        <Text style={{ color: t.sub, fontSize: 11.5, textAlign: 'center', opacity: 0.75 }}>
-          Blocker v-{APP_VERSION}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: 0.85 }}>
+          <Image
+            source={{ uri: APP_ICON_DATA_URI }}
+            style={{ width: 16, height: 16, borderRadius: 4 }}
+            resizeMode="contain"
+          />
+          <Text style={{ color: t.sub, fontSize: 11.5, textAlign: 'center' }}>
+            Blocker v-{APP_VERSION}
+          </Text>
+        </View>
       </View>
     </ScrollView>
   );

@@ -251,12 +251,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.facebook.katana:id/newsfeed_fragment",
             "com.facebook.katana:id/primary_feed",
             "com.facebook.katana:id/feed_list",
-            "com.facebook.katana:id/root_search_bar",
-            "com.facebook.katana:id/search_button",
-            "com.facebook.katana:id/messages_jewel",
-            "com.facebook.katana:id/notifications_jewel",
-            "com.facebook.katana:id/bookmarks_tab",
-            "com.facebook.katana:id/tab_bar",
             "com.facebook.lite:id/feed_list",
             "com.facebook.lite:id/composer"
         )
@@ -4168,57 +4162,61 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         lastGranularEventTime[pkg] = now
 
-        val root = rootInActiveWindow ?: ev.source ?: return false
-        if (root.packageName?.toString() != pkg && !root.packageName?.toString().orEmpty().contains("facebook")) {
-            if (!pkg.contains("facebook")) return false
-        }
+        val root = runCatching { rootInActiveWindow }.getOrNull() ?: ev.source ?: return false
+        try {
+            if (root.packageName?.toString() != pkg && !root.packageName?.toString().orEmpty().contains("facebook")) {
+                if (!pkg.contains("facebook")) return false
+            }
 
-        val evCls = ev.className?.toString().orEmpty().lowercase()
-        val rootCls = root.className?.toString().orEmpty().lowercase()
+            val evCls = ev.className?.toString().orEmpty().lowercase()
+            val rootCls = root.className?.toString().orEmpty().lowercase()
 
-        when (pkg) {
-            "com.google.android.youtube" -> {
-                if (!blockYtShorts && !BlockerStore.granularToggle(this, "block_yt_shorts")) return false
-                val isShortsTab = isTabSelectedById(root, "com.google.android.youtube:id/pivot_shorts") ||
-                    scanSelectedTab(root, listOf("shorts"))
-                val isShortsPlayer = hasAnyNodeId(root, YT_SHORTS_PLAYER_IDS) ||
-                    evCls.contains("reelwatch") || rootCls.contains("reelwatch")
-                if (isShortsTab || isShortsPlayer) {
-                    exitSubFeature(pkg, "YouTube Shorts")
-                    return true
-                }
-            }
-            "com.instagram.android" -> {
-                if (blockInstaReels || BlockerStore.granularToggle(this, "block_insta_reels")) {
-                    val isReelsTab = isTabSelectedById(root, "com.instagram.android:id/clips_tab") ||
-                        scanSelectedTab(root, listOf("reels"))
-                    val isReelsPlayer = hasAnyNodeId(root, INSTA_REELS_PLAYER_IDS) ||
-                        evCls.contains("clipsviewer") || rootCls.contains("clipsviewer")
-                    if (isReelsTab || isReelsPlayer) {
-                        exitSubFeature(pkg, "Instagram Reels")
+            when (pkg) {
+                "com.google.android.youtube" -> {
+                    if (!blockYtShorts && !BlockerStore.granularToggle(this, "block_yt_shorts")) return false
+                    val isShortsTab = isTabSelectedById(root, "com.google.android.youtube:id/pivot_shorts") ||
+                        scanSelectedTab(root, listOf("shorts"))
+                    val isShortsPlayer = hasAnyNodeId(root, YT_SHORTS_PLAYER_IDS) ||
+                        evCls.contains("reelwatch") || rootCls.contains("reelwatch")
+                    if (isShortsTab || isShortsPlayer) {
+                        exitSubFeature(pkg, "YouTube Shorts")
                         return true
                     }
                 }
-                if (blockInstaSearch || BlockerStore.granularToggle(this, "block_insta_search")) {
-                    val isSearchTab = isTabSelectedById(root, "com.instagram.android:id/search_tab") ||
-                        scanSelectedTab(root, listOf("search and explore", "search & explore", "explore tab"))
-                    val isSearchInput = isSearchInputFocused(root, INSTA_SEARCH_INPUT_IDS)
-                    if (isSearchTab || isSearchInput) {
-                        exitSubFeature(pkg, "Instagram Search")
-                        return true
+                "com.instagram.android" -> {
+                    if (blockInstaReels || BlockerStore.granularToggle(this, "block_insta_reels")) {
+                        val isReelsTab = isTabSelectedById(root, "com.instagram.android:id/clips_tab") ||
+                            scanSelectedTab(root, listOf("reels"))
+                        val isReelsPlayer = hasAnyNodeId(root, INSTA_REELS_PLAYER_IDS) ||
+                            evCls.contains("clipsviewer") || rootCls.contains("clipsviewer")
+                        if (isReelsTab || isReelsPlayer) {
+                            exitSubFeature(pkg, "Instagram Reels")
+                            return true
+                        }
+                    }
+                    if (blockInstaSearch || BlockerStore.granularToggle(this, "block_insta_search")) {
+                        val isSearchTab = isTabSelectedById(root, "com.instagram.android:id/search_tab") ||
+                            scanSelectedTab(root, listOf("search and explore", "search & explore", "explore tab"))
+                        val isSearchInput = isSearchInputFocused(root, INSTA_SEARCH_INPUT_IDS)
+                        if (isSearchTab || isSearchInput) {
+                            exitSubFeature(pkg, "Instagram Search")
+                            return true
+                        }
+                    }
+                }
+                "com.facebook.katana", "com.facebook.lite" -> {
+                    if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels")) {
+                        if (isFacebookVideoOrReels(root, ev)) {
+                            exitSubFeature(pkg, "Facebook Reels & Video")
+                            return true
+                        }
                     }
                 }
             }
-            "com.facebook.katana", "com.facebook.lite" -> {
-                if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels")) {
-                    if (isFacebookVideoOrReels(root, ev)) {
-                        exitSubFeature(pkg, "Facebook Reels & Video")
-                        return true
-                    }
-                }
-            }
+            return false
+        } finally {
+            runCatching { root.recycle() }
         }
-        return false
     }
 
     private fun isTabSelectedById(root: AccessibilityNodeInfo, tabId: String): Boolean {
@@ -4276,28 +4274,42 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 1. Immediately send Back action
         performGlobalAction(GLOBAL_ACTION_BACK)
 
-        // 2. If in Facebook, also attempt to click the "Home" tab to return safely to feed
-        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
-            main.postDelayed({
-                val r = runCatching { rootInActiveWindow }.getOrNull()
-                if (r != null) {
-                    try {
+        // 2. Return user safely to the app's Home feed / tab without kicking off the app
+        main.postDelayed({
+            val r = runCatching { rootInActiveWindow }.getOrNull() ?: return@postDelayed
+            try {
+                when (pkg) {
+                    "com.facebook.katana", "com.facebook.lite" -> {
                         val homeTab = findHomeTabNode(r)
                         if (homeTab != null) {
                             clickNodeOrParent(homeTab)
                             homeTab.recycle()
                         }
-                    } finally {
-                        runCatching { r.recycle() }
+                    }
+                    "com.instagram.android" -> {
+                        val homeTab = findInstaHomeTabNode(r)
+                        if (homeTab != null) {
+                            clickNodeOrParent(homeTab)
+                            homeTab.recycle()
+                        }
+                    }
+                    "com.google.android.youtube" -> {
+                        val homeTab = findYtHomeTabNode(r)
+                        if (homeTab != null) {
+                            clickNodeOrParent(homeTab)
+                            homeTab.recycle()
+                        }
                     }
                 }
-            }, 60L)
-        }
+            } finally {
+                runCatching { r.recycle() }
+            }
+        }, 50L)
 
-        // 3. Stage 1 retry at 120ms: if still in sub-feature, press Back again
+        // 3. Stage 1 retry at 110ms: if still in sub-feature, press Back again
         main.postDelayed({
             if (currentFgPkg == pkg) {
-                val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
+                val r = runCatching { rootInActiveWindow }.getOrNull()
                 if (r != null) {
                     try {
                         val stillInSubFeature = when (pkg) {
@@ -4314,17 +4326,35 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-        }, 120L)
+        }, 110L)
 
-        // 4. Stage 2 retry at 220ms: if STILL in Reels/Video, kick to Home
+        // 4. Stage 2 retry at 200ms: if STILL in Reels/Shorts/Explore, press Back again and click home tab
         main.postDelayed({
             if (currentFgPkg == pkg) {
-                val r = runCatching { rootInActiveWindow ?: null }.getOrNull()
+                val r = runCatching { rootInActiveWindow }.getOrNull()
                 if (r != null) {
                     try {
-                        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
-                            if (isFacebookVideoOrReels(r, null)) {
-                                kickToHome()
+                        val stillInSubFeature = when (pkg) {
+                            "com.facebook.katana", "com.facebook.lite" -> isFacebookVideoOrReels(r, null)
+                            "com.google.android.youtube" -> hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts")
+                            "com.instagram.android" -> hasAnyNodeId(r, INSTA_REELS_PLAYER_IDS) || isTabSelectedById(r, "com.instagram.android:id/clips_tab")
+                            else -> false
+                        }
+                        if (stillInSubFeature) {
+                            performGlobalAction(GLOBAL_ACTION_BACK)
+                            when (pkg) {
+                                "com.facebook.katana", "com.facebook.lite" -> {
+                                    val homeTab = findHomeTabNode(r)
+                                    homeTab?.let { clickNodeOrParent(it); it.recycle() }
+                                }
+                                "com.instagram.android" -> {
+                                    val homeTab = findInstaHomeTabNode(r)
+                                    homeTab?.let { clickNodeOrParent(it); it.recycle() }
+                                }
+                                "com.google.android.youtube" -> {
+                                    val homeTab = findYtHomeTabNode(r)
+                                    homeTab?.let { clickNodeOrParent(it); it.recycle() }
+                                }
                             }
                         }
                     } finally {
@@ -4332,15 +4362,40 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-        }, 220L)
+        }, 200L)
+    }
 
-        showOverlay(
-            getFearAllahHeading(),
-            if (isBangla()) "ফেসবুক রিলস ও ভিডিও আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "$featureName is blocked for your protection.",
-            3500,
-            getFearAllahSubheading(),
-            getAstaghfirullahButton()
+    private fun findInstaHomeTabNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val ids = listOf(
+            "com.instagram.android:id/feed_tab",
+            "com.instagram.android:id/tab_home",
+            "com.instagram.android:id/action_bar_home"
         )
+        for (id in ids) {
+            val list = root.findAccessibilityNodeInfosByViewId(id)
+            if (!list.isNullOrEmpty()) {
+                val node = list[0]
+                for (i in 1 until list.size) list[i].recycle()
+                return node
+            }
+        }
+        return findNodeMatchingText(root, listOf("home, tab", "home tab", "home", "feed", "feeds", "হোম"))
+    }
+
+    private fun findYtHomeTabNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val ids = listOf(
+            "com.google.android.youtube:id/pivot_home",
+            "com.google.android.youtube:id/tab_home"
+        )
+        for (id in ids) {
+            val list = root.findAccessibilityNodeInfosByViewId(id)
+            if (!list.isNullOrEmpty()) {
+                val node = list[0]
+                for (i in 1 until list.size) list[i].recycle()
+                return node
+            }
+        }
+        return findNodeMatchingText(root, listOf("home, tab", "home tab", "home", "হোম"))
     }
 
     private fun findHomeTabNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -4569,11 +4624,13 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookHomeFeed(root: AccessibilityNodeInfo): Boolean {
+        // If Reels or Video tab is selected, this is NEVER the Home Newsfeed
+        if (isFacebookReelsOrVideoTabSelected(root)) return false
         if (isFacebookHomeTabSelected(root)) return true
         if (hasAnyNodeId(root, FB_NEWSFEED_IDS)) return true
 
         val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(300))
+        collectText(root, sb, 0, intArrayOf(150))
         val t = sb.toString().lowercase()
         return "what's on your mind" in t || "কী ভাবছেন" in t || "create a post" in t
     }
@@ -4610,18 +4667,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 3. Navigation bar: If the Reels or Video/Watch tab is selected, block immediately!
         if (isFacebookReelsOrVideoTabSelected(root)) return true
 
-        // 4. Content and screen inspection
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(3000))
-        val t = sb.toString().lowercase()
-
-        // 5. Check if user is currently on the Home Newsfeed
+        // 4. Check if user is currently on the Home Newsfeed (fast path)
         val onHomeFeed = isFacebookHomeFeed(root)
 
         if (onHomeFeed) {
             // ON HOME NEWSFEED:
             // Do NOT block on passive preview shelves ("Reels and short videos") or inline video preview posts!
             // Only block if a full-screen vertical swipe Reels player has taken over the screen.
+            val sb = StringBuilder()
+            collectText(root, sb, 0, intArrayOf(200))
+            val t = sb.toString().lowercase()
             val isFullScreenOverlay =
                 "swipe up for next reel" in t || "swipe up for next video" in t ||
                 "remix this reel" in t || "remix reel" in t || "watch more reels" in t
@@ -4629,6 +4684,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // NOT ON HOME FEED (e.g. user navigated to dedicated Reels page, Watch tab, or video viewer):
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(1000))
+        val t = sb.toString().lowercase()
+
         val isReelsPageOrViewer =
             "original audio" in t || "original sound" in t || "reels audio" in t ||
             "use template" in t || "use audio" in t || "remix this reel" in t ||
@@ -4664,19 +4723,22 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         lastRedditEventTime = now
 
-        val root = rootInActiveWindow ?: ev.source ?: return false
+        val root = runCatching { rootInActiveWindow }.getOrNull() ?: ev.source ?: return false
+        try {
+            // 1. Enforce "Show mature content" OFF in Reddit Settings
+            if (enforceRedditMatureContentOff(root, ev, now)) {
+                return true
+            }
 
-        // 1. Enforce "Show mature content" OFF in Reddit Settings
-        if (enforceRedditMatureContentOff(root, ev, now)) {
-            return true
+            // 2. Block all NSFW Content on Reddit (Warning screens, NSFW subreddits, NSFW tagged posts)
+            if (guardRedditNsfwContent(root, ev, now)) {
+                return true
+            }
+
+            return false
+        } finally {
+            runCatching { root.recycle() }
         }
-
-        // 2. Block all NSFW Content on Reddit (Warning screens, NSFW subreddits, NSFW tagged posts)
-        if (guardRedditNsfwContent(root, ev, now)) {
-            return true
-        }
-
-        return false
     }
 
     private fun enforceRedditMatureContentOff(root: AccessibilityNodeInfo, ev: AccessibilityEvent, now: Long): Boolean {
@@ -5184,7 +5246,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             cd?.contains("selected") == true ||
             text?.contains("selected") == true ||
             stateDesc?.contains("selected") == true ||
-            stateDesc?.contains("active") == true
+            stateDesc?.contains("active") == true ||
+            stateDesc?.contains("নির্বাচিত") == true ||
+            cd?.contains("নির্বাচিত") == true
         if (isSelected) {
             if (cd != null && descs.any { cd.contains(it) }) return true
             if (text != null && descs.any { text.contains(it) }) return true

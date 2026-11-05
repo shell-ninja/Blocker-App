@@ -173,7 +173,7 @@ export function PressableScale({
  * Deep obsidian canvas layered with a subtle, low-opacity violet/indigo dot-matrix grid pattern.
  * Hardware-accelerated with zero CPU overhead.
  */
-export function DotMatrixBackground() {
+export const DotMatrixBackground = React.memo(function DotMatrixBackground() {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
@@ -186,16 +186,16 @@ export function DotMatrixBackground() {
       </Svg>
     </View>
   );
-}
+});
 
-export function AppBackground() {
+export const AppBackground = React.memo(function AppBackground() {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: DARK.bg }]} />
       <DotMatrixBackground />
     </View>
   );
-}
+});
 
 export const AmbientBackground = AppBackground;
 
@@ -355,7 +355,7 @@ export function Header({ subtitle }: { subtitle?: string }) {
           style={{
             width: 42,
             height: 42,
-            borderRadius: 14,
+            borderRadius: 13,
             backgroundColor: '#16122C',
             borderColor: '#7C3AED',
             borderWidth: 1.5,
@@ -366,8 +366,13 @@ export function Header({ subtitle }: { subtitle?: string }) {
             shadowRadius: 12,
             shadowOffset: { width: 0, height: 0 },
             elevation: 6,
+            overflow: 'hidden',
           }}>
-          <ShieldCheck size={22} color="#A78BFA" strokeWidth={2.4} />
+          <Image
+            source={{ uri: APP_ICON_DATA_URI }}
+            style={{ width: 34, height: 34, borderRadius: 8 }}
+            resizeMode="contain"
+          />
         </View>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -430,32 +435,6 @@ export function GlowCard({
   onPress?: () => void;
 }) {
   const t = useTheme();
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (!active || tone !== 'ok') {
-      pulse.setValue(1);
-      return;
-    }
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 0.75,
-          duration: 1600,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 1600,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-      ])
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [active, tone]);
 
   const borderColor =
     active || tone === 'ok'
