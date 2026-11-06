@@ -2,6 +2,7 @@ package com.blocker.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,9 +18,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blocker.R
 import com.blocker.ui.theme.*
 
 enum class CardTone {
@@ -414,24 +417,32 @@ fun TopHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(CyberAccentWell)
-                    .border(1.5.dp, CyberAccent, RoundedCornerShape(12.dp)),
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Color(0xFF16122C))
+                    .border(1.5.dp, CyberAccent, RoundedCornerShape(13.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = CyberIcons.Shield,
-                    contentDescription = null,
-                    tint = Color(0xFFA78BFA),
-                    modifier = Modifier.size(20.dp)
+                Image(
+                    painter = painterResource(id = R.mipmap.ic_launcher),
+                    contentDescription = "Blocker Icon",
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
                 )
             }
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Blocker",
+                    text = "Block",
                     color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.4).sp
+                )
+                Text(
+                    text = "er",
+                    color = Color(0xFFA78BFA),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.4).sp

@@ -1,5 +1,6 @@
 package com.blocker.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,9 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blocker.R
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
@@ -49,17 +52,18 @@ fun OnboardingScreen(
         // App Icon & Welcome
         Box(
             modifier = Modifier
-                .size(58.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(CyberAccentWell)
-                .border(1.5.dp, CyberAccent, RoundedCornerShape(18.dp)),
+                .size(68.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF16122C))
+                .border(1.5.dp, CyberAccent, RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = CyberIcons.Shield,
-                contentDescription = null,
-                tint = Color(0xFFA78BFA),
-                modifier = Modifier.size(28.dp)
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "Blocker Logo",
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(14.dp))
             )
         }
 

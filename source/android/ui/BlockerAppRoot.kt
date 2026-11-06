@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.CyberIcons
+import com.blocker.ui.components.TopHeader
 import com.blocker.ui.screens.*
 import com.blocker.ui.theme.*
 
@@ -39,6 +40,7 @@ fun BlockerAppRoot(
     val perms by repo.permissionsState.collectAsState()
     val focus by repo.focusState.collectAsState()
     val study by repo.studyState.collectAsState()
+    val protection by repo.protectionState.collectAsState()
 
     var currentTab by remember { mutableStateOf(NavTab.HOME) }
     var showOnboarding by remember { mutableStateOf(!perms.accessibility) }
@@ -78,17 +80,29 @@ fun BlockerAppRoot(
                     FocusScreen(repo = repo)
                 }
                 else -> {
-                    Crossfade(
-                        targetState = currentTab,
-                        animationSpec = tween(120),
-                        label = "tab_fade"
-                    ) { tab ->
-                        when (tab) {
-                            NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })
-                            NavTab.FOCUS -> FocusScreen(repo = repo)
-                            NavTab.APPS -> AppBlockerScreen(repo = repo)
-                            NavTab.WEB -> BlocklistScreen(repo = repo)
-                            NavTab.SETTINGS -> SettingsScreen(repo = repo)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(CyberBg)
+                    ) {
+                        TopHeader(
+                            isLive = protection.isActive,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            Crossfade(
+                                targetState = currentTab,
+                                animationSpec = tween(120),
+                                label = "tab_fade"
+                            ) { tab ->
+                                when (tab) {
+                                    NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })
+                                    NavTab.FOCUS -> FocusScreen(repo = repo)
+                                    NavTab.APPS -> AppBlockerScreen(repo = repo)
+                                    NavTab.WEB -> BlocklistScreen(repo = repo)
+                                    NavTab.SETTINGS -> SettingsScreen(repo = repo)
+                                }
+                            }
                         }
                     }
                 }

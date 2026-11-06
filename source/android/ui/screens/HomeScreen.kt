@@ -41,13 +41,8 @@ fun HomeScreen(
             .fillMaxSize()
             .background(CyberBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        // Top Header
-        TopHeader(isLive = protection.isActive)
-
-        Spacer(modifier = Modifier.height(10.dp))
-
         // Delay timer banner
         if (protection.pendingUntil > 0L) {
             LockBar(

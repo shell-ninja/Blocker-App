@@ -48,6 +48,11 @@ if assets_src.exists():
     assets_dest = main / "assets"
     shutil.copytree(assets_src, assets_dest, dirs_exist_ok=True)
 
+# 2d. Resources in source/android/res (drawables, etc.)
+res_src = src / "android" / "res"
+if res_src.exists():
+    shutil.copytree(res_src, main / "res", dirs_exist_ok=True)
+
 
 
 # 3. XML resources

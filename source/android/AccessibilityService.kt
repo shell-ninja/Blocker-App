@@ -393,6 +393,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var lastAppInfoKick = 0L
     @Volatile private var lastHideKick = 0L
     @Volatile private var lastBlockerLongPressUp = 0L
+    @Volatile private var lastBlockerExitTime = 0L
+    private var previousEventPkg = ""
     private val appInfoLock = Any()
     private var appInfoCandidatePkg = ""                 // guarded by appInfoLock
     private var appInfoHotUntil = 0L                     // guarded by appInfoLock (uptime ms)
@@ -692,22 +694,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg.isNotEmpty()) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
         val cls = root.className?.toString().orEmpty()
 
-        // ── Device Admin list (any OEM) ──
-        if (DEVICE_ADMIN_LIST_CLASSES.any { cls.contains(it, ignoreCase = true) } ||
-            cls.contains("DeviceAdmin", ignoreCase = true) ||
-            cls.contains("AdminSettings", ignoreCase = true)) {
-            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-            autoCancelDialog(root)
-            pollKick("Device Admin settings are locked while Protection Mode is active.")
-            return
-        }
-        // ── Device Admin detail / deactivate ──
-        if (DEVICE_ADMIN_DETAIL_CLASSES.any { cls.contains(it, ignoreCase = true) } ||
-            cls.contains("DeviceAdminAdd", ignoreCase = true)) {
-            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-            autoCancelDialog(root)
-            pollKick("Device Admin deactivation is locked while Protection Mode is active.")
-            return
+        // ── Device Admin: ONLY block if our admin is ALREADY active AND this is a deactivation attempt! ──
+        if (isOurAdminActive() && !isLegitimatePermissionScreen(root, "")) {
+            val isDeactCls = DEVICE_ADMIN_DETAIL_CLASSES.any { cls.contains(it, ignoreCase = true) } ||
+                cls.contains("DeviceAdminAdd", ignoreCase = true) || cls.contains("DeviceAdmin", ignoreCase = true)
+            if (isDeactCls) {
+                viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                autoCancelDialog(root)
+                pollKick("Device Admin deactivation is locked while Protection Mode is active.")
+                return
+            }
         }
 
         // ── Full text scan ──
@@ -717,15 +713,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         if ("tamper protection" in rawT || "uninstall protected" in rawT || "power off locked" in rawT || "focus mode" in rawT || "নিরাপত্তা সুরক্ষা" in rawT) return
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
 
-        // Device Admin screens by content
-        val hasAdminContent = ADMIN_SCREEN_TITLES.any { it in t } ||
-            "device admin" in t || "device administrator" in t ||
-            "deactivate this device admin" in t || "deactivate this device administrator" in t
-        if (hasAdminContent) {
+        // Device Admin deactivation screens by content
+        val hasAdminContent = isOurAdminActive() && (
+            "deactivate this device admin" in t || "deactivate this device administrator" in t ||
+            ("deactivate" in t && ("admin" in t || "device" in t))
+        )
+        if (hasAdminContent && !isLegitimatePermissionScreen(root, t)) {
             // Set timer so any subsequent package installer uninstall dialog is caught
             viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
             autoCancelDialog(root)
-            pollKick("Device Admin settings are locked while Protection Mode is active.")
+            pollKick("Device Admin deactivation is locked while Protection Mode is active.")
             return
         }
 
@@ -764,11 +761,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (hasDestructiveAction) {
                     viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
                     autoCancelDialog(root)
-                    if (isActualSettingsPkg(rootPkg)) {
-                        kickFromAppInfo()
-                    } else {
-                        pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
-                    }
+                    kickFromAppInfo()
                     return
                 }
             }
@@ -777,17 +770,17 @@ class BlockerAccessibilityService : AccessibilityService() {
         // ── Uninstall attempt in package installer / outside settings ──
         val nowForUninstall = System.currentTimeMillis()
         val hasUninstallRisk = ("do you want to uninstall" in t || "uninstallation" in t || "uninstalling" in t ||
-            (("uninstall" in t || "delete" in t) && ("ok" in t || "cancel" in t))) &&
-            nowForUninstall < viewingBlockerSettingsUntil
+            (("uninstall" in t || "delete" in t) && ("ok" in t || "cancel" in t)))
         if (hasUninstallRisk) {
-            viewingBlockerSettingsUntil = nowForUninstall + 30_000L
-            autoCancelDialog(root)
-            if (isActualSettingsPkg(rootPkg)) {
+            val recentlyBlocker = nowForUninstall < viewingBlockerSettingsUntil ||
+                (SystemClock.uptimeMillis() - lastBlockerExitTime < 30_000L) ||
+                isOurApp
+            if (recentlyBlocker && !isInstallOrUpdateDialog(root = root)) {
+                viewingBlockerSettingsUntil = nowForUninstall + 30_000L
+                autoCancelDialog(root)
                 kickFromAppInfo()
-            } else {
-                pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
+                return
             }
-            return
         }
 
         // If we recently saw Blocker's App Info, block any storage/clear sub-screen too.
@@ -1163,6 +1156,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
+        // If Device Admin is not active yet, any Device Admin setup/list screen is legitimate setup!
+        if (!isOurAdminActive()) {
+            val isAdminSetup = rootCls.contains("deviceadmin") || rootCls.contains("adminsettings") ||
+                "device admin" in t || "device administrator" in t || "admin app" in t || "device policy" in t
+            if (isAdminSetup && "deactivate" !in t) {
+                return true
+            }
+        }
+
         // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen!
         val hasDestructiveAction = "uninstall" in t || "force stop" in t || "clear storage" in t ||
             "clear data" in t || "delete app data" in t || "manage space" in t || "clear app data" in t ||
@@ -1393,10 +1395,13 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isActualSettingsPkg(pkg: String): Boolean {
         val lower = pkg.lowercase()
-        if (lower.contains("installer") || lower.contains("permission") || lower.contains("launcher") ||
-            lower.contains("systemui") || lower.contains("phonemaster") || lower.contains("phonemanager") ||
+        if (lower.contains("installer") || lower.contains("launcher") ||
             lower.contains("xhide") || lower.contains("freezer")) return false
-        return pkg in discoveredSettingsPkgs || lower.contains("settings") || lower.contains("ossettingsext") || lower.contains("scorpio")
+        if (pkg in SETTINGS_PKGS || pkg in discoveredSettingsPkgs) return true
+        return lower.contains("settings") || lower.contains("securitycenter") ||
+            lower.contains("safecenter") || lower.contains("phonemanager") ||
+            lower.contains("phonemaster") || lower.contains("ossettingsext") ||
+            lower.contains("scorpio") || lower.contains("securitycom")
     }
 
     private fun reloadKey(key: String?) {
@@ -1863,12 +1868,18 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
         if (pkg == packageName) {
+            lastBlockerExitTime = 0L
             viewingBlockerSettingsUntil = 0L
             settingsPollActive = false
             outsideSettingsCount = 0
             main.removeCallbacks(settingsPollRunnable)
             return
         }
+        if (pkg != packageName && previousEventPkg == packageName) {
+            lastBlockerExitTime = SystemClock.uptimeMillis()
+        }
+        previousEventPkg = pkg
+
         // The App Info / device-admin guard runs FIRST and never stands aside, not even while Blocker is switching
         // USB debugging off (a 14 s window in which every other Settings guard pauses). It also runs before the
         // neverBlock bail-out: some OEMs host app-info pages inside packages that also answer the HOME intent.
@@ -1935,14 +1946,14 @@ class BlockerAccessibilityService : AccessibilityService() {
             val isAdminListCls   = evCls in DEVICE_ADMIN_LIST_CLASSES || rootCls in DEVICE_ADMIN_LIST_CLASSES ||
                 evCls.contains("DeviceAdmin", ignoreCase = true) || rootCls.contains("DeviceAdmin", ignoreCase = true) ||
                 evCls.contains("AdminSettings", ignoreCase = true) || rootCls.contains("AdminSettings", ignoreCase = true)
-            if (isAdminListTitle || isAdminListCls) {
+            if ((isAdminListTitle || isAdminListCls) && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, winTitle)) {
                 lockOutOfSettings("Device Admin settings are locked while Protection Mode is active."); return
             }
 
             // ── 2. Device Admin detail / deactivate screen (title-based) ───────────
             val isAdminDetailCls = evCls in DEVICE_ADMIN_DETAIL_CLASSES || rootCls in DEVICE_ADMIN_DETAIL_CLASSES ||
                 evCls.contains("DeviceAdminAdd", ignoreCase = true) || rootCls.contains("DeviceAdminAdd", ignoreCase = true)
-            if (isAdminDetailCls && isOurAdminActive()) {
+            if (isAdminDetailCls && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, winTitle)) {
                 lockOutOfSettings("Device Admin deactivation is locked while Protection Mode is active."); return
             }
 
@@ -2897,10 +2908,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // 3. Device Admin deactivation attempt
-        val isAdminDeactivate = ("deactivate" in t && ("admin" in t || "device" in t)) ||
-            "deactivate this device admin" in t || "device administrator" in t
-        if (isAdminDeactivate && (isOurApp || "admin" in t)) {
+        // 3. Device Admin deactivation attempt (strictly requires our admin active and deactivation keyword)
+        val isAdminDeactivate = isOurAdminActive() && (
+            ("deactivate" in t && ("admin" in t || "device" in t)) ||
+            "deactivate this device admin" in t || "deactivate this device administrator" in t
+        ) && (isOurApp || "admin" in t)
+        if (isAdminDeactivate && !isLegitimatePermissionScreen(root, t)) {
             autoCancelDialog(root)
             lockOutOfSettings("Device Admin settings are locked while Protection Mode is active.")
             return true
@@ -2915,13 +2928,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             ("open" in t && ("uninstall" in t || "disable" in t || "permissions" in t || "force stop" in t))
         ) && !("all apps" in t && "force stop" !in t && "storage" !in t)
         if (isAppInfoScreen) {
-            viewingBlockerSettingsUntil = now + 8_000L
+            viewingBlockerSettingsUntil = now + 30_000L
             autoCancelDialog(root)
-            if (isActualSettingsPkg(pkg) || isActualSettingsPkg(rootPkg)) {
-                kickFromAppInfo()
-            } else {
-                lockOutOfSettings("Blocker app settings are locked while Protection Mode is active.")
-            }
+            kickFromAppInfo()
             return true
         }
 
@@ -2938,7 +2947,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val evCls = ev.className?.toString().orEmpty()
         val evText = ev.text.joinToString(" ").lowercase()
 
-        if (shieldOn) {
+        if (shieldOn && isOurAdminActive() && !isLegitimatePermissionScreen(root, evText)) {
             if (cls in DEVICE_ADMIN_LIST_CLASSES) {
                 viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
                 autoCancelDialog(root)
@@ -3137,7 +3146,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     // (e.g. Compose) and only runs on every 6th poll.
 
     private fun shieldEngaged(): Boolean =
-        BlockerStore.active(this) && BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")
+        BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")
 
     @Suppress("DEPRECATION")
     private fun loadAppIdentity() {
@@ -3211,7 +3220,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (stateChange) {
             lastWindowOpenUp = nowUp
             val cls = ev.className?.toString()?.lowercase().orEmpty()
-            if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && ("deviceadminadd" !in cls || isOurAdminActive())) {
+            if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, "")) {
                 pollKick("Device Admin settings are locked while Protection Mode is active.")
                 return
             }
@@ -3240,15 +3249,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
                         "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
                     if (hasDestructiveAction) {
-                        if (isActualSettingsPkg(pkg)) {
-                            kickFromAppInfo()
-                            return
-                        } else {
-                            viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
-                            autoCancelDialog(root)
-                            pollKick("Blocker cannot be uninstalled while Protection Mode is active.")
-                            return
-                        }
+                        viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
+                        autoCancelDialog(root)
+                        kickFromAppInfo()
+                        return
                     }
                 }
             }
@@ -3696,6 +3700,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Case B: Destructive shortcut clicked on launcher (App info, Uninstall, Disable)
         if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
+            val recentlyLeftBlocker = (nowUp - lastBlockerExitTime < 25_000L)
             fun isDestructiveWord(cs: CharSequence?): Boolean {
                 if (cs.isNullOrBlank()) return false
                 val lower = cs.toString().lowercase()
@@ -3714,7 +3719,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             if (isDestructiveShortcut) {
-                val isTarget = recentlyLongPressed || matchesBlockerFast(ev.text.joinToString(" ")) || matchesBlockerFast(ev.contentDescription)
+                val isTarget = recentlyLeftBlocker || recentlyLongPressed || matchesBlockerFast(ev.text.joinToString(" ")) || matchesBlockerFast(ev.contentDescription)
 
                 if (isTarget) {
                     lastBlockerLongPressUp = nowUp

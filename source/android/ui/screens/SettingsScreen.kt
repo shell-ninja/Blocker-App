@@ -1,5 +1,6 @@
 package com.blocker.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +15,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blocker.R
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
@@ -262,6 +265,29 @@ fun SettingsScreen(
                 Text(text = "Version", color = CyberTextSub, fontSize = 12.sp)
                 Text(text = "v1.0.6.7 (Pure Native)", color = CyberAccentGlow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "Blocker Icon",
+                modifier = Modifier
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(5.dp))
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Blocker v1.0.6.7 (build 85)",
+                color = CyberTextSub,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
