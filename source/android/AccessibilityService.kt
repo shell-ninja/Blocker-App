@@ -1,6 +1,7 @@
 package com.blocker
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.NotificationManager
@@ -12,9 +13,12 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.database.ContentObserver
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -76,9 +80,6 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         private val SETTINGS_PKGS = setOf(
             "com.android.settings",
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller",
-            "com.samsung.android.packageinstaller",
             "com.samsung.android.settings",
             "com.miui.securitycenter",
             "com.coloros.safecenter",
@@ -370,6 +371,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private val main = Handler(Looper.getMainLooper())
+    private var powerManager: PowerManager? = null
     private var overlay: View? = null
     private var lastHit = 0L
     private val lastScan = HashMap<String, Long>()
@@ -614,22 +616,21 @@ class BlockerAccessibilityService : AccessibilityService() {
                         val isOurApp = "blocker" in wt || packageName.lowercase() in wt
                         val recentlyActive = System.currentTimeMillis() < viewingBlockerSettingsUntil
 
-                        // Skip installer windows if they are not uninstall attempts
+                        // Skip installer windows if they are not uninstall attempts on Blocker
                         if (!isSettingsPkg(rPkg) && (isInstallerPkg(rPkg) || isInstallOrUpdateDialog(root = r))) {
                             val isUninstall = "uninstall" in wt || "do you want to uninstall" in wt
-                            if (!isUninstall) {
+                            if (!isUninstall || !isOurApp) {
                                 runCatching { r.recycle() }
                                 continue
                             }
                         }
 
-                        // Uninstall dialog: catch by isOurApp OR by timer context (any settings/installer
-                        // window recently associated with Blocker's own admin/app-info screens).
+                        // Uninstall dialog: only catch when targeting Blocker!
                         val isUninstallDialog = "do you want to uninstall" in wt ||
                             ("uninstall" in wt && ("cancel" in wt || "ok" in wt || "app" in wt))
-                        val isUninstall = isUninstallDialog && (isOurApp || recentlyActive)
+                        val isUninstall = isUninstallDialog && isOurApp
                         val isClearStorage = ("delete app data" in wt || "all this app" in wt || "all of this app" in wt ||
-                            ("clear" in wt && ("data" in wt || "storage" in wt))) && (isOurApp || recentlyActive)
+                            ("clear" in wt && ("data" in wt || "storage" in wt))) && isOurApp
                         val isDeactivate = ("deactivate" in wt && ("admin" in wt || "device" in wt)) || "deactivate this device admin" in wt
 
                         if (isUninstall || isClearStorage || isDeactivate) {
@@ -661,10 +662,15 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun pollKick(message: String) {
         val now = System.currentTimeMillis()
         runCatching { autoCancelDialog(rootInActiveWindow) }
+        TamperShieldManager.showInstantShield(this)
         kickToHome()
+        if (Build.VERSION.SDK_INT >= 31) {
+            performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        }
         if (now - lastPollKick < 1000L) return
         lastPollKick = now
         BlockerStore.incr(this, "tamper")
+        OverlayHudManager.show(this, message)
         showOverlay(getTamperHeading(), formatTamperCovenantBody(message), 5000, getTamperSubheading(), getUnderstoodButton())
     }
 
@@ -923,14 +929,21 @@ class BlockerAccessibilityService : AccessibilityService() {
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
         runCatching {
-            val info = serviceInfo
-            if (info != null) {
-                info.notificationTimeout = 0L
-                info.eventTypes = info.eventTypes or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED
-                serviceInfo = info
-            }
-            updateMonitoredPackages()
+            val info = serviceInfo ?: AccessibilityServiceInfo()
+            info.notificationTimeout = 20L
+            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_CLICKED or
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED
+            info.flags = AccessibilityServiceInfo.DEFAULT or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+            info.packageNames = null // Global monitoring across all packages
+            serviceInfo = info
         }
+        OverlayHudManager.init(this)
+        TamperShieldManager.init(this)
         BlockerStore.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
         runCatching {
             val filter = IntentFilter().apply {
@@ -983,26 +996,22 @@ class BlockerAccessibilityService : AccessibilityService() {
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
         }
         preInflatedOverlay = null
+        OverlayHudManager.cleanup()
+        TamperShieldManager.cleanup()
         NativeBlockerBridge.unload()
         super.onDestroy()
     }
 
-    override fun onInterrupt() {}
+    override fun onInterrupt() {
+        OverlayHudManager.hide()
+        TamperShieldManager.hideShield()
+    }
 
     fun updateMonitoredPackages() {
         runCatching {
             val info = serviceInfo ?: return
-            val installed = packageManager.getInstalledPackages(0).map { it.packageName }.toSet()
-            val filtered = installed.filter { pkg ->
-                pkg !in BANKING_PACKAGES &&
-                pkg != "com.bKash.customerapp" &&
-                pkg != "android" &&
-                pkg != "com.android.systemui"
-            }
-            if (filtered.isNotEmpty()) {
-                info.packageNames = filtered.toTypedArray()
-                serviceInfo = info
-            }
+            info.packageNames = null // Global monitoring across all system and OEM packages
+            serviceInfo = info
         }
     }
 
@@ -1142,10 +1151,10 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isLegitimatePermissionScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
         val t = text.lowercase()
-        // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen
-        val hasDestructiveAction = "force stop" in t || "clear storage" in t || "clear data" in t ||
-            "delete app data" in t || "manage space" in t || "clear app data" in t ||
-            "do you want to uninstall" in t || "uninstall this app" in t
+        // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen!
+        val hasDestructiveAction = "uninstall" in t || "force stop" in t || "clear storage" in t ||
+            "clear data" in t || "delete app data" in t || "manage space" in t || "clear app data" in t ||
+            "do you want to uninstall" in t || "uninstall this app" in t || "disable" in t
         if (hasDestructiveAction) {
             return false
         }
@@ -1158,11 +1167,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isDnd = "do not disturb" in t || "notification policy" in t || "zen" in t || "dnd" in t ||
             "device & app notifications" in t || "notification access" in t
         // 2. Battery Optimization / Background Service:
-        val isBattery = "battery" in t || "battery optimization" in t || "optimize battery" in t ||
+        val isBattery = ("battery optimization" in t || "optimize battery" in t ||
             "unrestricted" in t || "high power" in t || "always run in background" in t ||
             "background usage" in t || "background activity" in t || "run in background" in t ||
             "ignore battery" in t || "battery saver" in t || "power consumption" in t ||
-            "background execution" in t || "optimize battery usage" in t || "let app always run" in t
+            "background execution" in t || "optimize battery usage" in t || "let app always run" in t)
         // 3. Install unknown apps:
         val isUnknownApps = "install unknown" in t || "unknown apps" in t || "allow from this source" in t || "install other apps" in t
         // 4. Usage access:
@@ -1484,14 +1493,289 @@ class BlockerAccessibilityService : AccessibilityService() {
             .enabledInputMethodList.map { it.packageName }.toSet()
     }.getOrDefault(emptySet())
 
+    private val directBuffer: ByteBuffer = ByteBuffer.allocateDirect(128 * 1024).order(ByteOrder.nativeOrder())
+    private val queueNodes = ArrayList<AccessibilityNodeInfo>(200)
+    private val passNodes = ArrayList<AccessibilityNodeInfo>(200)
+    private val tmpRect = Rect()
+    @Volatile private var lastNativeEvalTime = 0L
+
+    private fun isBlockedAppTarget(t: String, root: AccessibilityNodeInfo?): Boolean {
+        val lower = t.lowercase()
+        for (appPkg in apps) {
+            val appLower = appPkg.lowercase()
+            if (appLower in lower) return true
+        }
+        return false
+    }
+
+    private var lastTamperEjectionTime = 0L
+
+    private fun evaluateScreenWithNativeEngine(ev: AccessibilityEvent?, pkg: String): Boolean {
+        if (pkg == packageName || pkg in BANKING_PACKAGES || isLauncherPkg(pkg)) return false
+        if (!BlockerStore.active(this)) return false
+
+        // 0-microsecond fast-path filter: Skip 99% of apps that have no native rules
+        val isTargetApp = isSettingsPkg(pkg) || isInstallerPkg(pkg) ||
+            pkg == "com.facebook.katana" || pkg == "com.facebook.lite" ||
+            pkg == "com.instagram.android" || pkg == "com.google.android.youtube" ||
+            pkg == "com.android.systemui" || isClockPkg(pkg)
+        if (!isTargetApp) return false
+
+        val eventType = ev?.eventType ?: 0
+        val now = SystemClock.uptimeMillis()
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            if (now - lastNativeEvalTime < 250L) return false
+            lastNativeEvalTime = now
+        }
+
+        val isShieldActive = shieldEngaged()
+        val isOnboardingArmed = BlockerStore.active(this)
+        val blockFbReels = BlockerStore.granularToggle(this, "block_fb_reels")
+        val blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
+        val blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
+        val blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        val blockDateTime = shouldBlockDateTime()
+        val blockSchedPower = shouldBlockScheduledPower()
+
+        var configFlags = 0
+        if (isShieldActive) configFlags = configFlags or 1
+        if (blockFbReels) configFlags = configFlags or 2
+        if (blockInstaReels) configFlags = configFlags or 4
+        if (blockInstaSearch) configFlags = configFlags or 8
+        if (blockYtShorts) configFlags = configFlags or 16
+        if (isOnboardingArmed) configFlags = configFlags or 32
+        if (blockDateTime) configFlags = configFlags or 64
+        if (blockSchedPower) configFlags = configFlags or 128
+
+        if (configFlags == 0) return false
+
+        queueNodes.clear()
+        passNodes.clear()
+
+        try {
+            val isMultiWindowContext = isSettingsPkg(pkg) || pkg == "com.android.systemui"
+            val wins = if (isMultiWindowContext) runCatching { windows }.getOrNull() else null
+            if (!wins.isNullOrEmpty()) {
+                for (w in wins) {
+                    if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+                    val r = runCatching { w.root }.getOrNull() ?: continue
+                    queueNodes.add(r)
+                }
+            } else {
+                val r = rootInActiveWindow ?: ev?.source
+                if (r != null) queueNodes.add(r)
+            }
+
+            var nodeCount = 0
+            while (queueNodes.isNotEmpty() && nodeCount < 180) {
+                val curr = queueNodes.removeAt(0)
+                passNodes.add(curr)
+                nodeCount++
+                val childCount = curr.childCount
+                for (i in 0 until childCount) {
+                    if (nodeCount + queueNodes.size >= 180) break
+                    val child = curr.getChild(i) ?: continue
+                    queueNodes.add(child)
+                }
+            }
+
+            if (nodeCount == 0) return false
+
+            val dm = resources.displayMetrics
+            val screenWidth = dm.widthPixels.coerceAtLeast(1)
+            val screenHeight = dm.heightPixels.coerceAtLeast(1)
+
+            val clsName = ev?.className?.toString().orEmpty()
+            val selfPkgName = packageName
+            val selfAppLabel = getString(R.string.app_name)
+
+            val pkgBytes = pkg.toByteArray(Charsets.UTF_8)
+            val clsBytes = clsName.toByteArray(Charsets.UTF_8)
+            val selfPkgBytes = selfPkgName.toByteArray(Charsets.UTF_8)
+            val selfLblBytes = selfAppLabel.toByteArray(Charsets.UTF_8)
+
+            directBuffer.clear()
+            directBuffer.putInt(0x424C4B52) // SCREEN_EVAL_MAGIC
+            directBuffer.putShort(nodeCount.toShort())
+            directBuffer.putShort((ev?.eventType ?: 0).toShort())
+            directBuffer.putInt(screenWidth)
+            directBuffer.putInt(screenHeight)
+            directBuffer.putInt(configFlags)
+            directBuffer.putShort(pkgBytes.size.toShort())
+            directBuffer.putShort(clsBytes.size.toShort())
+            directBuffer.putShort(selfPkgBytes.size.toShort())
+            directBuffer.putShort(selfLblBytes.size.toShort())
+
+            directBuffer.put(pkgBytes)
+            directBuffer.put(clsBytes)
+            directBuffer.put(selfPkgBytes)
+            directBuffer.put(selfLblBytes)
+
+            for (i in 0 until nodeCount) {
+                val n = passNodes[i]
+                n.getBoundsInScreen(tmpRect)
+                val left = ((tmpRect.left.toFloat() / screenWidth) * 1000).toInt().coerceIn(0, 1000)
+                val top = ((tmpRect.top.toFloat() / screenHeight) * 1000).toInt().coerceIn(0, 1000)
+                val right = ((tmpRect.right.toFloat() / screenWidth) * 1000).toInt().coerceIn(0, 1000)
+                val bottom = ((tmpRect.bottom.toFloat() / screenHeight) * 1000).toInt().coerceIn(0, 1000)
+
+                var nFlags = 0
+                if (n.isSelected) nFlags = nFlags or 1
+                if (n.isChecked) nFlags = nFlags or 2
+                if (n.isClickable) nFlags = nFlags or 4
+                if (n.isScrollable) nFlags = nFlags or 8
+                if (n.isFocused) nFlags = nFlags or 16
+                if (n.isVisibleToUser) nFlags = nFlags or 32
+                if (Build.VERSION.SDK_INT >= 30 && n.stateDescription?.toString()?.contains("selected", ignoreCase = true) == true) {
+                    nFlags = nFlags or 64
+                }
+
+                val tBytes = n.text?.toString()?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+                val cdBytes = n.contentDescription?.toString()?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+                val idBytes = n.viewIdResourceName?.toString()?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+                val cBytes = n.className?.toString()?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+
+                if (directBuffer.remaining() < 20 + tBytes.size + cdBytes.size + idBytes.size + cBytes.size) {
+                    break
+                }
+
+                directBuffer.putShort(left.toShort())
+                directBuffer.putShort(top.toShort())
+                directBuffer.putShort(right.toShort())
+                directBuffer.putShort(bottom.toShort())
+                directBuffer.putInt(nFlags)
+                directBuffer.putShort(tBytes.size.toShort())
+                directBuffer.putShort(cdBytes.size.toShort())
+                directBuffer.putShort(idBytes.size.toShort())
+                directBuffer.putShort(cBytes.size.toShort())
+
+                directBuffer.put(tBytes)
+                directBuffer.put(cdBytes)
+                directBuffer.put(idBytes)
+                directBuffer.put(cBytes)
+            }
+
+            val verdict = NativeBlockerBridge.evaluateScreenFast(directBuffer, directBuffer.position())
+            val action = (verdict and 0xFF).toInt()
+            val reason = ((verdict shr 8) and 0xFF).toInt()
+            val targetClickIdx = ((verdict shr 16) and 0xFFFF).toInt()
+            val showHud = ((verdict shr 32) and 0xFF).toInt() != 0
+
+            when (action) {
+                3 -> { // ACTION_TAMPER_DETECTED
+                    val nowMs = SystemClock.uptimeMillis()
+                    if (nowMs - lastTamperEjectionTime < 1500L) {
+                        return true // Throttle rapid-fire duplicate tamper events during home transition
+                    }
+                    lastTamperEjectionTime = nowMs
+
+                    if (!isLauncherPkg(pkg)) {
+                        TamperShieldManager.showInstantShield(this)
+                    }
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                    }
+                    runCatching { autoCancelDialog(rootInActiveWindow) }
+                    BlockerStore.incr(this, "tamper")
+                    val msg = getTamperHudMessage(reason)
+                    OverlayHudManager.show(this, msg, reason)
+                    return true
+                }
+                2 -> { // ACTION_BLOCK_REELS
+                    if (targetClickIdx != 0xFFFF && targetClickIdx < passNodes.size) {
+                        passNodes[targetClickIdx].performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    main.postDelayed({ verifyAndEscapeFacebookReels(pkg) }, 220L)
+                    if (showHud) {
+                        OverlayHudManager.show(
+                            this,
+                            if (isBangla()) "ফেসবুক রিলস ব্লক করা হয়েছে" else "Facebook Reels blocked",
+                            6
+                        )
+                    }
+                    return true
+                }
+                4 -> { // ACTION_CLICK_NODE
+                    if (targetClickIdx != 0xFFFF && targetClickIdx < passNodes.size) {
+                        passNodes[targetClickIdx].performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        } finally {
+            for (node in passNodes) {
+                runCatching { node.recycle() }
+            }
+            for (node in queueNodes) {
+                runCatching { node.recycle() }
+            }
+            passNodes.clear()
+            queueNodes.clear()
+        }
+    }
+
+    private fun getTamperHudMessage(reason: Int): String {
+        return if (isBangla()) {
+            when (reason) {
+                2 -> "ব্লকার আনইনস্টল সুরক্ষিত"
+                3 -> "ডেভেলপার অপশন সুরক্ষিত"
+                4 -> "ডিভাইস অ্যাডমিন সুরক্ষিত"
+                9 -> "তারিখ ও সময় সেটিংস সুরক্ষিত"
+                10 -> "অ্যাপ মেনু অ্যাকশন সুরক্ষিত"
+                else -> "ব্লকার সেটিংস সুরক্ষিত"
+            }
+        } else {
+            when (reason) {
+                2 -> "Blocker uninstall is protected"
+                3 -> "Developer options are protected"
+                4 -> "Device admin is protected"
+                9 -> "Date & Time settings are protected"
+                10 -> "Blocker app menu is protected"
+                else -> "Blocker settings are protected"
+            }
+        }
+    }
+
+    private fun verifyAndEscapeFacebookReels(pkg: String) {
+        if (currentFgPkg != pkg) return
+        val r = runCatching { rootInActiveWindow }.getOrNull() ?: return
+        try {
+            val stillInReels = isFacebookVideoOrReels(r, null)
+            if (stillInReels) {
+                val homeTab = findHomeTabNode(r)
+                if (homeTab != null) {
+                    clickNodeOrParent(homeTab)
+                    homeTab.recycle()
+                } else {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                }
+            }
+        } finally {
+            runCatching { r.recycle() }
+        }
+    }
+
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         try {
             val ev = e ?: return
             val pkg = ev.packageName?.toString() ?: return
 
-            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-            if (pm?.isInteractive == false) {
+            if (powerManager == null) {
+                powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            }
+            if (powerManager?.isInteractive == false) {
                 return
+            }
+
+            // --- 0MS TOP-PRIORITY DEFENSE: Intercept Power Menu Dialog immediately across all apps! ---
+            if (checkPowerMenuDialog(ev, pkg)) return
+
+            // Cleanly dismiss shield whenever we are on a launcher screen
+            if (isLauncherPkg(pkg)) {
+                TamperShieldManager.hideShield()
             }
 
             // --- BANKING APPS EXEMPTION (bKash, Nagad, etc.) ---
@@ -1501,6 +1785,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             // --- 0MS TOP-PRIORITY INTERCEPT: Launcher press-and-hold & shortcut protection ---
             if (guardLauncherInstant(ev, pkg)) return
+
+            // --- NATIVE C++20 ZERO-GC ENGINE: Microsecond UI Tree & Tamper Evaluation ---
+            if (evaluateScreenWithNativeEngine(ev, pkg)) return
 
             // INSTANT PRIORITY INTERCEPT: Blocked apps are kicked out immediately before any other checks
             if (BlockerStore.active(this) && pkg in apps) {
@@ -1539,7 +1826,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val throttleMs = when (pkg) {
                     "com.reddit.frontpage" -> 150L
                     in GRANULAR_TARGET_PKGS -> 120L
-                    else -> 75L
+                    else -> 200L
                 }
                 if (now - lastEv < throttleMs) return
             }
@@ -2062,7 +2349,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         try {
             val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(200))
+            collectText(root, sb, 0, intArrayOf(100))
             if (sb.isEmpty()) return
 
             if (NativeBlockerBridge.isEngineReady()) {
@@ -2262,76 +2549,125 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private var lastPowerMenuHit = 0L
+    private fun collectPowerTokens(n: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, budget: IntArray) {
+        if (n == null || depth > 20 || budget[0]-- <= 0) return
+        n.text?.let { sb.append(it).append(' ') }
+        n.contentDescription?.let { sb.append(it).append(' ') }
+        n.viewIdResourceName?.let { sb.append(it).append(' ') }
+        val count = n.childCount
+        for (i in 0 until count) {
+            if (budget[0] <= 0) break
+            val c = n.getChild(i) ?: continue
+            collectPowerTokens(c, sb, depth + 1, budget)
+            runCatching { c.recycle() }
+        }
+    }
 
-    private fun checkPowerMenuDialog(ev: AccessibilityEvent, pkg: String): Boolean {
-        if (!BlockerStore.preventPowerOff(this)) return false
-        if (BlockerStore.guardOpen(this, "power_menu")) return false
-        if (pkg == packageName) return false
-
-        val pkgLower = pkg.lowercase()
-        // Must originate from OS / System UI or dedicated power/globalactions system components
-        val isSystemPkg = pkg == "android" || pkg == "com.android.systemui" ||
-            pkgLower.contains("globalactions") || pkgLower.contains("power") ||
-            pkgLower.contains("systemui") || pkgLower.contains("transsion")
-        if (!isSystemPkg) return false
-
-        // Determine dialog node to inspect. NEVER inspect our own app or non-system nodes.
-        val dialogNode = when {
-            ev.source != null && ev.source?.packageName?.toString()?.lowercase() != packageName.lowercase() -> ev.source
-            rootInActiveWindow != null && rootInActiveWindow?.packageName?.toString()?.lowercase() != packageName.lowercase() -> rootInActiveWindow
-            else -> null
-        } ?: return false
-
-        val nodePkg = dialogNode.packageName?.toString().orEmpty().lowercase()
-        if (nodePkg == packageName.lowercase()) return false
-
-        val isSystemNode = nodePkg == "android" || nodePkg == "com.android.systemui" ||
-            nodePkg.contains("globalactions") || nodePkg.contains("systemui") ||
-            nodePkg.contains("transsion") || nodePkg.contains("power")
-        if (!isSystemNode) return false
-
-        val evCls = ev.className?.toString().orEmpty()
-        val isGlobalActionsCls = evCls.contains("GlobalActions", ignoreCase = true) ||
-            evCls.contains("PowerDialog", ignoreCase = true) ||
-            evCls.contains("ShutdownActivity", ignoreCase = true) ||
-            evCls.contains("RestartActivity", ignoreCase = true)
+    private fun isPowerNodeOrTree(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val cls = node.className?.toString().orEmpty()
+        if (cls.contains("GlobalActions", ignoreCase = true) ||
+            cls.contains("PowerDialog", ignoreCase = true) ||
+            cls.contains("ShutdownActivity", ignoreCase = true) ||
+            cls.contains("RestartActivity", ignoreCase = true) ||
+            cls.contains("PowerActivity", ignoreCase = true) ||
+            cls.contains("PowerMenu", ignoreCase = true) ||
+            cls.contains("PowerUI", ignoreCase = true)) {
+            return true
+        }
 
         val sb = StringBuilder()
-        collectText(dialogNode, sb, 0, intArrayOf(100))
+        collectPowerTokens(node, sb, 0, intArrayOf(120))
         val text = sb.toString().lowercase()
 
         // Absolute safeguard: if this node mentions Blocker or our own settings toggles, do NOT block
-        if ("blocker" in text || "prevent power off" in text || packageName.lowercase() in text) return false
+        if ("prevent power off" in text || (packageName.lowercase() in text && "system" !in text)) return false
 
-        val hasPowerOff = "power off" in text || "shut down" in text || "power down" in text || "turn off" in text
-        val hasRestart = "restart" in text || "reboot" in text
-        val hasEmergencyOrLockdown = "emergency" in text || "lockdown" in text || "safe mode" in text
+        val hasPowerOff = "power off" in text || "shut down" in text || "shutdown" in text ||
+            "power down" in text || "slide down to power off" in text ||
+            "swipe down to power off" in text || "পাওয়ার অফ" in text || "পাওয়ার বন্ধ" in text ||
+            "বন্ধ করুন" in text || "action_power" in text || "btn_power" in text
+        val hasRestart = "restart" in text || "reboot" in text || "slide up to reboot" in text ||
+            "swipe up to restart" in text || "রিস্টার্ট" in text || "পুনরায় চালু" in text ||
+            "action_reboot" in text || "btn_reboot" in text
+        val hasEmergency = "emergency" in text || "lockdown" in text || "safe mode" in text || "জরুরি" in text
 
-        // A power menu contains power actions (e.g. power off AND restart, or power action + emergency/lockdown)
-        val isPowerMenu = isGlobalActionsCls ||
-            (hasPowerOff && hasRestart) ||
-            ((hasPowerOff || hasRestart) && hasEmergencyOrLockdown)
+        return (hasPowerOff && (hasRestart || hasEmergency))
+    }
 
-        if (isPowerMenu) {
-            val now = System.currentTimeMillis()
-            if (now - lastPowerMenuHit < 600L) return true
-            lastPowerMenuHit = now
+    private var lastPowerMenuHit = 0L
 
-            // Immediately dismiss power dialog via back action, collapse panels, and kick
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            collapseNotificationShade()
-            kickToHome()
-            BlockerStore.incr(this, "tamper")
+    private fun checkPowerMenuDialog(ev: AccessibilityEvent?, pkg: String): Boolean {
+        if (!BlockerStore.preventPowerOff(this)) return false
+        if (BlockerStore.guardOpen(this, "power_menu")) return false
+        if (pkg == packageName || isLauncherPkg(pkg)) return false
 
-            showOverlay(
-                if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
-                formatPowerOffLockedBody(),
-                4000,
-                getProtectionActiveSubheading(),
-                getUnderstoodButton()
-            )
-            return true
+        // Check if any interactive window is a power dialog / global actions
+        var detectedPowerNode: AccessibilityNodeInfo? = null
+        val wins = runCatching { windows }.getOrNull()
+        if (!wins.isNullOrEmpty()) {
+            for (w in wins) {
+                if (w.type != AccessibilityWindowInfo.TYPE_SYSTEM) continue
+                val r = runCatching { w.root }.getOrNull() ?: continue
+                if (isPowerNodeOrTree(r)) {
+                    detectedPowerNode = r
+                    break
+                }
+                runCatching { r.recycle() }
+            }
+        }
+
+        // Fallback: check event source only if it belongs to system UI or android framework
+        if (detectedPowerNode == null && (pkg == "android" || pkg == "com.android.systemui")) {
+            val src = ev?.source
+            if (src != null && isPowerNodeOrTree(src)) {
+                detectedPowerNode = src
+            } else {
+                runCatching { src?.recycle() }
+                val root = rootInActiveWindow
+                if (root != null && isPowerNodeOrTree(root)) {
+                    detectedPowerNode = root
+                } else {
+                    runCatching { root?.recycle() }
+                }
+            }
+        }
+
+        if (detectedPowerNode != null) {
+            try {
+                val now = System.currentTimeMillis()
+                if (now - lastPowerMenuHit < 500L) return true
+                lastPowerMenuHit = now
+
+                // 1. INSTANT BLACKOUT SHIELD: Block touches to "Power off" immediately!
+                TamperShieldManager.showInstantShield(this)
+
+                // 2. DISMISS / CANCEL ACTIONS
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                if (Build.VERSION.SDK_INT >= 31) {
+                    performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                }
+                collapseNotificationShade()
+                BlockerStore.incr(this, "tamper")
+
+                // 3. Floating HUD & bilingual dialog overlay
+                OverlayHudManager.show(
+                    this,
+                    if (isBangla()) "পাওয়ার অফ লক করা" else "Powering off is locked",
+                    4
+                )
+                showOverlay(
+                    if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
+                    formatPowerOffLockedBody(),
+                    4000,
+                    getProtectionActiveSubheading(),
+                    getUnderstoodButton()
+                )
+                return true
+            } finally {
+                runCatching { detectedPowerNode.recycle() }
+            }
         }
         return false
     }
@@ -2510,6 +2846,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                 // ALWAYS ALLOW IT! Never block or auto-cancel updates!
                 return false
             }
+            if (!isOurApp && !isBlockedAppTarget(t, root)) {
+                // Scoped identity check: Not targeting Blocker or a protected app, ALLOW uninstalling freely!
+                return false
+            }
         }
 
         // 0. Accessibility Page 2 or Stop Blocker confirmation dialog
@@ -2520,18 +2860,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // 1. Uninstall attempt (package installer or confirmation dialog)
-        // Also catches generic "Do you want to uninstall this app?" from package installer
-        // when we have timer context (i.e. we were just on a Device Admin or App Info screen).
-        // Not gated to isInstallerPkg specifically: the caller already restricted pkg to
-        // settings/installer/android, and some OEMs show this confirmation from com.android.settings
-        // itself rather than a separate installer process.
         val isUninstallDialog = "do you want to uninstall" in t ||
             ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t))
-        val isUninstall = isUninstallDialog && (isOurApp || now < viewingBlockerSettingsUntil)
+        val isUninstall = isUninstallDialog && (isOurApp || isBlockedAppTarget(t, root))
         if (isUninstall) {
-            viewingBlockerSettingsUntil = now + 30_000L
             autoCancelDialog(root)
-            lockOutOfSettings("Blocker cannot be uninstalled while Protection Mode is active.")
+            TamperShieldManager.showInstantShield(this)
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            BlockerStore.incr(this, "tamper")
+            OverlayHudManager.show(this, if (isBangla()) "ব্লকার আনইনস্টল সুরক্ষিত" else "Blocker uninstall is protected", 2)
             return true
         }
 
@@ -2539,10 +2876,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isStorageDanger = "delete app data" in t || "all this app" in t || "all of this app" in t ||
             ("delete" in t && "permanently" in t) ||
             ("clear" in t && ("storage" in t || "data" in t))
-        if (isStorageDanger && (isOurApp || now < viewingBlockerSettingsUntil)) {
-            viewingBlockerSettingsUntil = now + 8_000L
+        if (isStorageDanger && isOurApp) {
             autoCancelDialog(root)
-            lockOutOfSettings("Clearing app storage for Blocker is locked while Protection Mode is active.")
+            TamperShieldManager.showInstantShield(this)
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            BlockerStore.incr(this, "tamper")
+            OverlayHudManager.show(this, if (isBangla()) "অ্যাপ ডেটা মোছা সুরক্ষিত" else "Clearing Blocker storage is protected", 1)
             return true
         }
 
@@ -3342,16 +3681,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Case B: Destructive shortcut clicked on launcher (App info, Uninstall, Delete, Remove)
+        // Case B: Destructive shortcut clicked on launcher (App info, Uninstall, Disable)
         if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 8000L)
+            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
             fun isDestructiveWord(cs: CharSequence?): Boolean {
                 if (cs.isNullOrBlank()) return false
                 val lower = cs.toString().lowercase()
                 return lower.contains("app info") || lower.contains("app details") ||
                     lower.contains("application info") || lower.contains("application details") ||
-                    lower.contains("uninstall") || lower.contains("delete") ||
-                    lower.contains("remove") || lower.contains("disable") ||
+                    lower.contains("uninstall") || lower.contains("disable") ||
                     lower.contains("freeze") || lower.contains("hide")
             }
 
@@ -3364,22 +3702,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             if (isDestructiveShortcut) {
-                var isTarget = recentlyLongPressed
-                if (!isTarget) {
-                    val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-                    if (root != null) {
-                        try {
-                            val sb = StringBuilder()
-                            collectText(root, sb, 0, intArrayOf(20))
-                            val winText = sb.toString().lowercase()
-                            if (winText.contains("blocker") || winText.contains(nameLower)) {
-                                isTarget = true
-                            }
-                        } finally {
-                            runCatching { root.recycle() }
-                        }
-                    }
-                }
+                val isTarget = recentlyLongPressed || matchesBlockerFast(ev.text.joinToString(" ")) || matchesBlockerFast(ev.contentDescription)
 
                 if (isTarget) {
                     lastBlockerLongPressUp = nowUp
@@ -3546,31 +3869,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return true
             }
 
-            // 2B. Destructive popup actions (App info / Uninstall / Delete / Remove / Hide / Freeze / Disable) on Blocker:
+            // 2B. Destructive popup actions (App info / Uninstall / Disable) on Blocker:
             val isDestructiveAction = clickText.contains("app info") || clickText.contains("app details") ||
                 clickText.contains("application info") || clickText.contains("application details") ||
-                clickText.contains("uninstall") || clickText.contains("delete") ||
-                clickText.contains("remove") || clickText.contains("disable") ||
+                clickText.contains("uninstall") || clickText.contains("disable") ||
                 clickText.contains("hide") || clickText.contains("freeze") ||
                 clickText.contains("freezer")
 
             if (isDestructiveAction && isLauncher && shieldEngaged()) {
                 val nowUp = SystemClock.uptimeMillis()
-                val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 6000L)
+                val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
                 val isTarget = isTargetBlocker(ev, name)
-                var popupIsBlocker = false
-                if (!isTarget && !recentlyLongPressed) {
-                    val root = rootInActiveWindow ?: ev.source
-                    if (root != null) {
-                        val sb = StringBuilder()
-                        collectText(root, sb, 0, intArrayOf(30))
-                        val headText = sb.toString().lowercase()
-                        if (isAppNameText(headText, name, appVersionName) || headText.contains("blocker")) {
-                            popupIsBlocker = true
-                        }
-                    }
-                }
-                if (isTarget || recentlyLongPressed || popupIsBlocker) {
+                if (isTarget || recentlyLongPressed) {
                     performGlobalAction(GLOBAL_ACTION_BACK)
                     kickToHome()
                     if (now - lastHideKick > 1000L) {
@@ -3814,9 +4124,13 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun kickFromAppInfo() {
         val now = System.currentTimeMillis()
-        viewingBlockerSettingsUntil = now + 30_000L             // arms the existing uninstall / clear-data dialog catchers
+        viewingBlockerSettingsUntil = now + 30_000L
         runCatching { autoCancelDialog(rootInActiveWindow) }
-        performGlobalAction(GLOBAL_ACTION_BACK)
+        TamperShieldManager.showInstantShield(this)
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        if (Build.VERSION.SDK_INT >= 31) {
+            performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        }
         kickToHome()
 
         if (now - lastAppInfoKick < 400L) return
@@ -4138,9 +4452,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 kickFromAppInfo()
                 return
             }
+            TamperShieldManager.showInstantShield(this)
             runCatching { autoCancelDialog(root) }
             kickToHome()
+            if (Build.VERSION.SDK_INT >= 31) {
+                performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            }
             BlockerStore.incr(this, "tamper")
+            OverlayHudManager.show(this, message)
             showOverlay(getTamperHeading(), formatTamperCovenantBody(message), 5000, getTamperSubheading(), getUnderstoodButton())
         } finally {
             runCatching { root?.recycle() }
@@ -5099,14 +5418,19 @@ class BlockerAccessibilityService : AccessibilityService() {
             "contains adult content" in t || "nsfw subreddit" in t ||
             ("mature (18+)" in t && ("continue" in t || "go back" in t)))
 
-        if (isNsfwWarningScreen) {
+        val hasBlockedContent = "futanari" in t || "redgifs" in t
+
+        if (isNsfwWarningScreen || hasBlockedContent) {
             performGlobalAction(GLOBAL_ACTION_BACK)
+            if (now - lastRedditNsfwHit < 400L) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
             if (now - lastRedditNsfwHit >= 800L) {
                 lastRedditNsfwHit = now
                 BlockerStore.incr(this, "reddit_nsfw")
                 showOverlay(
                     getFearAllahHeading(),
-                    if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও NSFW কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "NSFW and adult content on Reddit is blocked for your protection.",
+                    if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও নিষিদ্ধ কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "Blocked adult and NSFW content on Reddit is restricted for your protection.",
                     4000,
                     getFearAllahSubheading(),
                     getAstaghfirullahButton()
@@ -5126,14 +5450,19 @@ class BlockerAccessibilityService : AccessibilityService() {
                 isNsfwTagString(srcCd) || isNsfwTagString(srcText) ||
                 hasNsfwInNodeHierarchy(ev.source)
 
-            if (isNsfwClick) {
+            val isBlockedClick = isNsfwClick || "futanari" in evCd || "futanari" in evText ||
+                "futanari" in srcCd || "futanari" in srcText ||
+                "redgifs" in evCd || "redgifs" in evText ||
+                "redgifs" in srcCd || "redgifs" in srcText
+
+            if (isBlockedClick) {
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 if (now - lastRedditNsfwHit >= 800L) {
                     lastRedditNsfwHit = now
                     BlockerStore.incr(this, "reddit_nsfw")
                     showOverlay(
                         getFearAllahHeading(),
-                        if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও NSFW কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "NSFW and adult content on Reddit is blocked for your protection.",
+                        if (isBangla()) "রেডিটের প্রাপ্তবয়স্ক ও নিষিদ্ধ কনটেন্ট আপনার সুরক্ষার জন্য ব্লক করা হয়েছে।" else "Blocked adult and NSFW content on Reddit is restricted for your protection.",
                         4000,
                         getFearAllahSubheading(),
                         getAstaghfirullahButton()
@@ -5623,16 +5952,23 @@ class BlockerAccessibilityService : AccessibilityService() {
         preInflatedButton = btn
         preInflatedProgressFill = progressFill
         preInflatedCard = card
+
+        // Pre-attach the container view to WindowManager in advance with View.GONE!
+        runCatching {
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            wm.addView(container, rootLp)
+            isOverlayAttached = true
+        }
     }
 
     private fun showOverlay(
         heading: String,
         body: String,
-        ms: Long = 5000L,
+        ms: Long = 4000L,
         subheading: String? = null,
         buttonText: String = "Astaghfirullah"
     ) {
-        val displayMs = ms.coerceAtLeast(5000L)
+        val displayMs = ms.coerceIn(2500L, 5000L)
         val action = Runnable {
             val container = preInflatedOverlay ?: run {
                 initPreInflatedOverlay()
@@ -5681,24 +6017,38 @@ class BlockerAccessibilityService : AccessibilityService() {
                 setStroke(dp(2), if (isFearAllah) 0x99C084FC.toInt() else 0x66C7AFFF.toInt())
             }
 
-            lp.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-
             if (!isOverlayAttached) {
                 runCatching {
                     wm.addView(container, lp)
                     isOverlayAttached = true
                 }
-            } else {
-                runCatching { wm.updateViewLayout(container, lp) }
             }
 
             container.visibility = View.VISIBLE
             isOverlayVisible = true
 
+            preInflatedCard?.apply {
+                animate().cancel()
+                alpha = 0f
+                scaleX = 0.94f
+                scaleY = 0.94f
+                animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(160L)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                    .start()
+            }
+
             preInflatedProgressFill?.apply {
+                animate().cancel()
                 scaleX = 1f
-                animate().scaleX(0f).setDuration(displayMs).setInterpolator(LinearInterpolator()).start()
+                animate()
+                    .scaleX(0f)
+                    .setDuration(displayMs)
+                    .setInterpolator(LinearInterpolator())
+                    .start()
             }
 
             main.removeCallbacks(hideRunnable)
@@ -5715,16 +6065,19 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun removeOverlay() {
         main.removeCallbacks(hideRunnable)
         val container = preInflatedOverlay ?: return
-        if (isOverlayAttached) {
-            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-            runCatching {
-                wm.removeViewImmediate(container)
-            }.onFailure {
-                runCatching { wm.removeView(container) }
-            }
-            isOverlayAttached = false
-        }
-        container.visibility = View.GONE
+        if (!isOverlayVisible) return
         isOverlayVisible = false
+        preInflatedProgressFill?.animate()?.cancel()
+        preInflatedCard?.animate()
+            ?.alpha(0f)
+            ?.scaleX(0.95f)
+            ?.scaleY(0.95f)
+            ?.setDuration(120L)
+            ?.withEndAction {
+                container.visibility = View.GONE
+            }
+            ?.start() ?: run {
+                container.visibility = View.GONE
+            }
     }
 }

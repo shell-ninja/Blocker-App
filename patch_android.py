@@ -49,18 +49,26 @@ xml_dir = main / "res" / "xml"
 xml_dir.mkdir(parents=True, exist_ok=True)
 write(xml_dir / "accessibility_service_config.xml", """<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewLongClicked|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewLongClicked"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:isAccessibilityTool="true"
-    android:notificationTimeout="0"
+    android:notificationTimeout="20"
     android:description="@string/a11y_desc"/>
 """)
 write(xml_dir / "device_admin.xml", """<?xml version="1.0" encoding="utf-8"?>
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-policies>
-        <force-lock/>
+        <limit-password />
+        <watch-login />
+        <reset-password />
+        <force-lock />
+        <wipe-data />
+        <expire-password />
+        <encrypted-storage />
+        <disable-camera />
+        <disable-keyguard-features />
     </uses-policies>
 </device-admin>
 """)
@@ -286,6 +294,12 @@ if "androidx.core.content.FileProvider" not in t:
     t = t.replace("</application>", provider_xml + "</application>", 1)
     write(mf, t)
 
+# 4c. Set excludeFromRecents on MainActivity so minimizing leaves no card/menu in Recents
+t = read(mf)
+if 'android:name=".MainActivity"' in t and 'android:excludeFromRecents="true"' not in t:
+    t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
+write(mf, t)
+
 # 5. app/build.gradle
 gr = proj / "android" / "app" / "build.gradle"
 g = read(gr)
@@ -347,7 +361,7 @@ if "externalNativeBuild" not in g:
             }
         }
         ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a"
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
         }
 """
     g = re.sub(r"(defaultConfig\s*\{)", r"\1" + cmake_block, g, count=1)
@@ -360,6 +374,7 @@ if "externalNativeBuild" not in g:
     }
 """
     g = re.sub(r"(buildTypes\s*\{)", cmake_root + r"\1", g, count=1)
+g = re.sub(r'abiFilters\s+"armeabi-v7a",\s*"arm64-v8a"(?!,\s*"x86_64")', 'abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"', g)
 write(gr, g)
 
 # 6. Decouple React Native in MainApplication.kt and register native package

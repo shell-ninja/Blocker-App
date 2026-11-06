@@ -1,6 +1,7 @@
 package com.blocker
 
 import java.io.File
+import java.nio.ByteBuffer
 
 object NativeBlockerBridge {
 
@@ -80,6 +81,23 @@ object NativeBlockerBridge {
         }
     }
 
+    // High-speed Native C++20 Screen Evaluator (Zero-Copy direct ByteBuffer)
+    fun evaluateScreenFast(buffer: ByteBuffer, length: Int): Long {
+        return try {
+            nativeEvaluateScreen(buffer, length)
+        } catch (_: Throwable) {
+            0L
+        }
+    }
+
+    fun checkHudRateLimit(reasonId: Int): Boolean {
+        return try {
+            nativeCheckHudRateLimit(reasonId)
+        } catch (_: Throwable) {
+            true
+        }
+    }
+
     // Native JNI bindings
     @JvmStatic
     private external fun nativeInit(filePath: String): Boolean
@@ -104,6 +122,12 @@ object NativeBlockerBridge {
 
     @JvmStatic
     private external fun nativeHashChars(chars: CharArray, len: Int): Long
+
+    @JvmStatic
+    external fun nativeEvaluateScreen(buffer: ByteBuffer, len: Int): Long
+
+    @JvmStatic
+    external fun nativeCheckHudRateLimit(reasonId: Int): Boolean
 
     @JvmStatic
     external fun compileBinary(

@@ -3,8 +3,8 @@
 #
 # Usage:
 #   ./build_apk.sh            # first run: installs tools + SDK if needed, creates the project, builds debug
-#   ./build_apk.sh debug      # (re)build the debug APK (1-minute timers, for testing)
-#   ./build_apk.sh release    # (re)build the release APK (real 1-30 day timers, no back door)
+#   ./build_apk.sh debug      # builds the debug APK only (1-minute timers, for testing)
+#   ./build_apk.sh release    # builds both release APK (real 1-30 day timers) and debug APK (testing)
 #
 # Safe to re-run: it skips any step that's already done and only re-copies your source/blocklists
 # and rebuilds the APK. Installing on your phone is a separate step: ./05_install_on_phone.sh
@@ -12,7 +12,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/env.sh"
 MODE="${1:-debug}"
-[ "$MODE" = debug ] || [ "$MODE" = release ] || [ "$MODE" = release-debug ] || { echo "Usage: ./build_apk.sh [debug|release|release-debug]"; exit 1; }
+[ "$MODE" = debug ] || [ "$MODE" = release ] || { echo "Usage: ./build_apk.sh [debug|release]"; exit 1; }
 PROJ="${BLOCKER_DIR:-$HERE/project}"
 
 LOG_FILE="$HERE/build.log"
@@ -279,6 +279,7 @@ mkdir -p "${APK_DIR}"
 # Store target files in an array for clean, scalable management
 TARGET_APKS=(
     "${APK_DIR}/Blocker-release-${APP_VER}.apk"
+    "${APK_DIR}/Blocker-debug-${APP_VER}.apk"
     "${APK_DIR}/Blocker-release-debug-${APP_VER}.apk"
 )
 
@@ -295,40 +296,35 @@ done
 
 
 if [ "$MODE" = "release" ]; then
+  echo "Building release and debug APKs..."
   ./gradlew assembleRelease "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
   OUT_RELEASE="$APK_DIR/Blocker-release-$APP_VER.apk"
-  OUT_DEBUG="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
+  OUT_DEBUG="$APK_DIR/Blocker-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT_DEBUG"
   OUT="$OUT_RELEASE"
-elif [ "$MODE" = "release-debug" ]; then
-  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
-  cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 else
-  # debug
+  # debug only
+  echo "Building debug APK only..."
   ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  OUT="$APK_DIR/Blocker-release-debug-$APP_VER.apk"
+  OUT="$APK_DIR/Blocker-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 fi
 
 step "Done"
 if [ "$MODE" = "release" ]; then
-  echo "Release APK ready:        $OUT_RELEASE (real 1-30 day timers, no back door)"
-  echo "Release-Debug APK ready:  $OUT_DEBUG (1-minute timers for testing)"
+  echo "Release APK ready: $OUT_RELEASE (real 1-30 day timers, no back door)"
+  echo "Debug APK ready:   $OUT_DEBUG (1-minute timers for testing)"
   echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
   echo
-  echo "To test on your phone first:"
-  echo "  ./05_install_on_phone.sh release"
-  echo "  (automatically installs the release-debug test version)"
-  echo
-  echo "When ready for the final locked-down release:"
-  echo "  ./05_install_on_phone.sh release --final"
+  echo "To install on your phone:"
+  echo "  ./05_install_on_phone.sh debug           # test version (1-minute timers)"
+  echo "  ./05_install_on_phone.sh release --final # production locked release"
 else
-  echo "APK ready: $OUT"
+  echo "Debug APK ready: $OUT (1-minute timers for testing)"
   echo "Version: $(cat "$HERE/VERSION" 2>/dev/null || echo "?") (build $BUILD_NUM)"
-  echo "Copy it to your phone and tap it, or run: ./05_install_on_phone.sh $MODE"
+  echo "Copy it to your phone and tap it, or run: ./05_install_on_phone.sh debug"
 fi
 echo "Build log saved to: $LOG_FILE"
 echo "=== Build finished at $(date '+%Y-%m-%d %H:%M:%S') ==="

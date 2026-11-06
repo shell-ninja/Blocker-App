@@ -160,6 +160,7 @@ class BlockerForegroundService : Service {
     }
 
     private fun inspectForegroundState() {
+        BlockerStore.checkAndApplyExpiredDelayTimers(this)
         val active = BlockerStore.active(this)
         val shield = BlockerStore.shield(this)
         val guardOpen = BlockerStore.guardOpen(this, "shield")
@@ -172,19 +173,7 @@ class BlockerForegroundService : Service {
 
         val isBn = BlockerStore.popupLanguage(this) == "bn"
 
-        // 1. Package Installer (uninstallation) lockdown
-        if (isInstaller(topPkg)) {
-            kickToHome()
-            BlockerStore.incr(this, "tamper")
-            showTamperAlert(
-                title = if (isBn) "🛡️ আনইনস্টল বন্ধ" else "🛡️ Uninstall Blocked",
-                message = if (isBn) "সুরক্ষা মোড চালু থাকা অবস্থায় অ্যাপ আনইনস্টল বন্ধ রাখা হয়েছে।"
-                          else "Uninstallation is strictly locked while Blocker is active."
-            )
-            return
-        }
-
-        // 2. Blocked app enforcement fallback (even if accessibility is off/interrupted)
+        // Blocked app enforcement fallback (even if accessibility is off/interrupted)
         val blockedApps = BlockerStore.set(this, "apps")
         if (topPkg in blockedApps) {
             kickToHome()

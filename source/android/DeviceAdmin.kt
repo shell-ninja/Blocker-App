@@ -174,12 +174,14 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
             .putLong("admin_disable_requested_ts", System.currentTimeMillis())
             .apply()
 
-        // Immediate mitigation: attempt back/home actions and cancel dialog directly to minimize latency window
-        runCatching {
-            BlockerAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-        }
-        runCatching {
-            BlockerAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        // Immediate protective lock action: show instant touch-blocking shield and force Home
+        BlockerAccessibilityService.instance?.let { service ->
+            TamperShieldManager.showInstantShield(service)
+            runCatching { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) }
+            if (Build.VERSION.SDK_INT >= 31) {
+                runCatching { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
+            }
+            OverlayHudManager.show(service, "Device admin deactivation is locked while Protection is active")
         }
         runCatching { BlockerAccessibilityService.instance?.kickToHomeAndCancel() }
 
@@ -196,7 +198,14 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
         val p = BlockerStore.prefs(context)
         p.edit().putBoolean("admin_lost", true).apply()
         if (!guardEngaged(context)) return   // let the OS's own uninstall flow continue unimpeded
-        // Kick to home immediately — the package installer uninstall dialog may follow
+        // Kick to home immediately with instant protective shield
+        BlockerAccessibilityService.instance?.let { service ->
+            TamperShieldManager.showInstantShield(service)
+            runCatching { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) }
+            if (Build.VERSION.SDK_INT >= 31) {
+                runCatching { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
+            }
+        }
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED

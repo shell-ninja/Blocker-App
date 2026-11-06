@@ -27,7 +27,7 @@ if [ -z "$APK" ]; then
   # Determine target mode:
   TARGET_MODE="$MODE"
   if [ "$MODE" = "release" ] && [ "$FLAG" != "--final" ] && [ "$FLAG" != "-f" ]; then
-    TARGET_MODE="release-debug"
+    TARGET_MODE="debug"
   fi
 
   # Check in apk/ directory first, fallback to root
@@ -54,9 +54,16 @@ if [ -z "$APK" ]; then
     APK="$(ls -t "$APK_DIR"/Blocker-"$TARGET_MODE"-*.apk "$HERE"/Blocker-"$TARGET_MODE"-*.apk 2>/dev/null | head -1 || true)"
   fi
 
-  # If release-debug was targeted but not found, fallback to release
+  # If debug was targeted but not found, check legacy release-debug
   if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-    if [ "$TARGET_MODE" = "release-debug" ]; then
+    if [ "$TARGET_MODE" = "debug" ]; then
+      APK="$(ls -t "$APK_DIR"/Blocker-release-debug-*.apk "$HERE"/Blocker-release-debug-*.apk 2>/dev/null | head -1 || true)"
+    fi
+  fi
+
+  # If still not found and in release mode, fallback to release
+  if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+    if [ "$TARGET_MODE" = "debug" ] && [ "$MODE" = "release" ]; then
       APK="$(ls -t "$APK_DIR"/Blocker-release-*.apk "$HERE"/Blocker-release-*.apk 2>/dev/null | head -1 || true)"
       TARGET_MODE="release"
     fi
@@ -68,7 +75,7 @@ if [ -z "$APK" ]; then
   fi
 fi
 
-if [ -n "${MODE:-}" ] && [ "$MODE" = "release" ] && [ "$TARGET_MODE" = "release-debug" ]; then
+if [ -n "${MODE:-}" ] && [ "$MODE" = "release" ] && [ "$TARGET_MODE" = "debug" ]; then
   echo "=== Notice: Installing Test Version ==="
   echo "Installing test APK: $(basename "$APK")"
   echo "This version has identical code and blocklists, but 1-minute timers for testing."

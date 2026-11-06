@@ -279,8 +279,17 @@ export async function refresh() {
     await Native.cancelSettingChange('focus').catch(() => {});
     delete safeLocks.focus;
   }
-  // drop queued actions whose timer no longer exists (cancelled or applied elsewhere)
+  // Auto-apply queued actions whose timer has reached zero!
   const queue = { ...(snap.state.queue ?? {}) };
+  for (const k of LOCK_KEYS) {
+    const l = safeLocks[k];
+    const q = queue[k];
+    if (q?.length && l && (l.ready || (l.pending && (l.remainingMs ?? 0) <= 0))) {
+      confirm(k).catch(() => {});
+    }
+  }
+
+  // drop queued actions whose timer no longer exists (cancelled or applied elsewhere)
   let dirty = false;
   for (const k of LOCK_KEYS) {
     const l = safeLocks[k];

@@ -1,11 +1,12 @@
-cmake_minimum_required(VERSION 3.18.1)
+cmake_minimum_required(VERSION 3.22.1)
 project(blocker_engine LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Optimization for 32-bit armeabi-v7a and 64-bit arm64-v8a
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -flto -fno-exceptions -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections")
+# Aggressive optimizations for maximum throughput, microsecond latency and binary size reduction
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -flto -fvisibility=hidden -fvisibility-inlines-hidden -fno-exceptions -fno-rtti -fdata-sections -ffunction-sections")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -Wl,--exclude-libs,ALL -flto")
 
 if(ANDROID_ABI STREQUAL "armeabi-v7a")

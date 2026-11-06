@@ -5,10 +5,12 @@
 #include <cstdio>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <queue>
 #include <algorithm>
 #include <mutex>
 #include <utility>
+#include <ctime>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -68,6 +70,7 @@ struct _JNIEnv {
     void* GetPrimitiveArrayCritical(jarray, jboolean*) { return nullptr; }
     void ReleasePrimitiveArrayCritical(jarray, void*, jint) {}
     jstring NewStringUTF(const char*) { return nullptr; }
+    void* GetDirectBufferAddress(jobject) { return nullptr; }
 };
 typedef _JNIEnv JNIEnv;
 #endif
@@ -95,7 +98,6 @@ inline int __android_log_print(int, const char*, const char*, ...) { return 0; }
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 
-
 static std::recursive_mutex g_engine_mutex;
 static void* g_mmap_addr = nullptr;
 static size_t g_mmap_size = 0;
@@ -109,6 +111,22 @@ static uint32_t g_root_transitions[256];
 // FNV-1a 64-bit constant primes
 static const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
 static const uint64_t FNV_PRIME = 1099511628211ULL;
+
+// Helper: POSIX CLOCK_MONOTONIC timestamp in milliseconds
+static inline uint64_t get_monotonic_ms() noexcept {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
+// Rate-limiting state for zero-queue HUD and cooldowns
+struct EngineRateLimiter {
+    uint64_t last_hud_ms = 0;
+    uint8_t last_hud_reason = 0;
+    uint64_t last_tamper_ms = 0;
+};
+static EngineRateLimiter g_rate_limiter;
+static std::mutex g_rate_mutex;
 
 static uint16_t compute_ip_checksum(const uint8_t* buf, size_t len) {
     uint32_t sum = 0;
@@ -130,7 +148,58 @@ struct BuildNode {
 };
 
 // -----------------------------------------------------------------------------
-// Exported C Engine API (matches declarations in blocker_engine.h)
+// Fast C++20 Zero-Allocation String Matching Helpers
+// -----------------------------------------------------------------------------
+static inline char to_lower_ascii(char c) noexcept {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+}
+
+static inline bool contains_ci(std::string_view haystack, std::string_view needle) noexcept {
+    if (needle.empty()) return true;
+    if (haystack.size() < needle.size()) return false;
+    const size_t max_i = haystack.size() - needle.size();
+    for (size_t i = 0; i <= max_i; ++i) {
+        bool match = true;
+        for (size_t j = 0; j < needle.size(); ++j) {
+            if (to_lower_ascii(haystack[i + j]) != to_lower_ascii(needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+static inline bool equals_ci(std::string_view a, std::string_view b) noexcept {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (to_lower_ascii(a[i]) != to_lower_ascii(b[i])) return false;
+    }
+    return true;
+}
+
+static inline bool is_alnum_ascii(char c) noexcept {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+// Packed 64-bit verdict helper
+static inline uint64_t pack_verdict(
+    uint8_t action,
+    uint8_t reason,
+    uint16_t click_idx,
+    uint8_t show_hud,
+    uint8_t show_shield
+) noexcept {
+    return ((uint64_t)action) |
+           (((uint64_t)reason) << 8) |
+           (((uint64_t)click_idx) << 16) |
+           (((uint64_t)show_hud) << 32) |
+           (((uint64_t)show_shield) << 40);
+}
+
+// -----------------------------------------------------------------------------
+// Exported C Engine API
 // -----------------------------------------------------------------------------
 extern "C" {
 
@@ -224,7 +293,7 @@ bool engine_is_loaded(void) {
 bool engine_match_domain_hash(uint64_t hash) {
     std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     if (!g_header || g_header->domain_count == 0) return false;
-    
+
     int low = 0;
     int high = (int)g_header->domain_count - 1;
     while (low <= high) {
@@ -235,10 +304,6 @@ bool engine_match_domain_hash(uint64_t hash) {
         else high = mid - 1;
     }
     return false;
-}
-
-static inline bool is_alnum_ascii(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
 }
 
 // Match text using Flat Aho-Corasick Automaton in O(M)
@@ -317,7 +382,7 @@ int engine_match_url(const char* url, size_t len, char* out_rule, size_t max_out
     if (len - host_start >= 4 && memcmp(url + host_start, "www.", 4) == 0) host_start += 4;
 
     size_t host_end = host_start;
-    while (host_end < len && url[host_end] != '/' && url[host_end] != '?' && 
+    while (host_end < len && url[host_end] != '/' && url[host_end] != '?' &&
            url[host_end] != '#' && url[host_end] != ':') {
         host_end++;
     }
@@ -352,6 +417,421 @@ int engine_match_url(const char* url, size_t len, char* out_rule, size_t max_out
 
     // 3. Keyword scan over full URL
     return engine_match_text(url, len, out_rule, max_out_len);
+}
+
+// -----------------------------------------------------------------------------
+// Rate Limiter API (Debounce repeated hits)
+// -----------------------------------------------------------------------------
+bool engine_check_hud_rate_limit(uint8_t reason_id) {
+    std::lock_guard<std::mutex> lock(g_rate_mutex);
+    uint64_t now = get_monotonic_ms();
+    if (g_rate_limiter.last_hud_reason == reason_id && (now - g_rate_limiter.last_hud_ms) < 800ULL) {
+        return false; // Suppress / debounce
+    }
+    g_rate_limiter.last_hud_reason = reason_id;
+    g_rate_limiter.last_hud_ms = now;
+    return true; // Allow HUD
+}
+
+// -----------------------------------------------------------------------------
+// High-Speed C++20 Screen Evaluation & Anti-Tamper Engine
+// -----------------------------------------------------------------------------
+struct InternalNodeView {
+    uint16_t left = 0;
+    uint16_t top = 0;
+    uint16_t right = 0;
+    uint16_t bottom = 0;
+    uint32_t flags = 0;
+    std::string_view text;
+    std::string_view cd;
+    std::string_view id;
+    std::string_view cls;
+    int original_index = 0;
+};
+
+uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
+    if (!buffer || buffer_len < sizeof(ScreenEvalHeader)) {
+        return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+
+    const auto* hdr = reinterpret_cast<const ScreenEvalHeader*>(buffer);
+    if (hdr->magic != SCREEN_EVAL_MAGIC) {
+        return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+
+    size_t offset = sizeof(ScreenEvalHeader);
+    size_t str_bytes = (size_t)hdr->pkg_len + hdr->cls_len + hdr->self_pkg_len + hdr->self_lbl_len;
+    if (offset + str_bytes > buffer_len) {
+        return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+
+    const char* str_base = reinterpret_cast<const char*>(buffer + offset);
+    std::string_view pkg(str_base, hdr->pkg_len);
+    str_base += hdr->pkg_len;
+    std::string_view cls(str_base, hdr->cls_len);
+    str_base += hdr->cls_len;
+    std::string_view self_pkg(str_base, hdr->self_pkg_len);
+    str_base += hdr->self_pkg_len;
+    std::string_view self_lbl(str_base, hdr->self_lbl_len);
+    offset += str_bytes;
+
+    constexpr size_t MAX_NODES = 180;
+    InternalNodeView nodes[MAX_NODES];
+    size_t node_count = 0;
+
+    const size_t total_nodes = std::min((size_t)hdr->node_count, MAX_NODES);
+    for (size_t i = 0; i < total_nodes; ++i) {
+        if (offset + sizeof(SerializedNodeHeader) > buffer_len) break;
+        const auto* nh = reinterpret_cast<const SerializedNodeHeader*>(buffer + offset);
+        offset += sizeof(SerializedNodeHeader);
+
+        size_t node_str_bytes = (size_t)nh->text_len + nh->cd_len + nh->id_len + nh->cls_len;
+        if (offset + node_str_bytes > buffer_len) break;
+
+        const char* ns_base = reinterpret_cast<const char*>(buffer + offset);
+        nodes[node_count].left = nh->left;
+        nodes[node_count].top = nh->top;
+        nodes[node_count].right = nh->right;
+        nodes[node_count].bottom = nh->bottom;
+        nodes[node_count].flags = nh->flags;
+
+        nodes[node_count].text = std::string_view(ns_base, nh->text_len);
+        ns_base += nh->text_len;
+        nodes[node_count].cd = std::string_view(ns_base, nh->cd_len);
+        ns_base += nh->cd_len;
+        nodes[node_count].id = std::string_view(ns_base, nh->id_len);
+        ns_base += nh->id_len;
+        nodes[node_count].cls = std::string_view(ns_base, nh->cls_len);
+
+        nodes[node_count].original_index = (int)i;
+        offset += node_str_bytes;
+        node_count++;
+    }
+
+    const bool is_armed = (hdr->config_flags & CONFIG_FLAG_SHIELD_ACTIVE) &&
+                          (hdr->config_flags & CONFIG_FLAG_ONBOARDING_ARMED);
+    const bool block_fb_reels = (hdr->config_flags & CONFIG_FLAG_BLOCK_FB_REELS) != 0;
+    const bool block_date_time = (hdr->config_flags & CONFIG_FLAG_BLOCK_DATE_TIME) != 0;
+
+    // -------------------------------------------------------------------------
+    // 1. Anti-Tamper & Surgical Scoping (Active Only When Armed)
+    // -------------------------------------------------------------------------
+    if (is_armed) {
+        // A. Recents 3-Dot / App Info Popup & Task Context Menus
+        // NOTE: Launchers (home screens) are never evaluated here; Kotlin handles them via guardLauncherInstant.
+        const bool is_recents_task_menu =
+            (contains_ci(cls, "TaskMenuView") || contains_ci(cls, "TaskMenu") ||
+             contains_ci(cls, "RecentsAppMenu") || contains_ci(cls, "OverviewActionsView")) &&
+            !contains_ci(cls, "Notification") && !contains_ci(cls, "Shade") &&
+            !contains_ci(cls, "Status") && !contains_ci(cls, "Volume");
+
+        if (is_recents_task_menu) {
+            bool has_self_token = false;
+            for (size_t i = 0; i < node_count; ++i) {
+                // Must not be a notification or status bar node
+                std::string_view id = nodes[i].id;
+                if (contains_ci(id, "notification") || contains_ci(id, "status_bar") ||
+                    contains_ci(id, "shade") || contains_ci(id, "qs_")) continue;
+
+                if ((!self_lbl.empty() && (contains_ci(nodes[i].text, self_lbl) || contains_ci(nodes[i].cd, self_lbl))) ||
+                    (!self_pkg.empty() && (contains_ci(nodes[i].text, self_pkg) || contains_ci(nodes[i].cd, self_pkg)))) {
+                    has_self_token = true;
+                    break;
+                }
+            }
+
+            if (has_self_token) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    std::string_view c = nodes[i].cd;
+                    if (contains_ci(t, "app info") || contains_ci(c, "app info") ||
+                        contains_ci(t, "application info") || contains_ci(c, "application info") ||
+                        contains_ci(t, "app details") || contains_ci(c, "app details") ||
+                        contains_ci(t, "split screen") || contains_ci(c, "split screen") ||
+                        contains_ci(t, "pause app") || contains_ci(c, "pause app") ||
+                        contains_ci(t, "floating window") || contains_ci(c, "floating window") ||
+                        contains_ci(t, "uninstall") || contains_ci(c, "uninstall")) {
+                        return pack_verdict(ACTION_TAMPER_DETECTED, REASON_RECENTS_POPUP_TAMPER, 0xFFFF, 0, 1);
+                    }
+                }
+            }
+        }
+
+        // B. PackageInstaller: SURGICAL SCOPING (Allow other apps to be uninstalled freely!)
+        const bool is_installer =
+            contains_ci(pkg, "packageinstaller") || contains_ci(cls, "packageinstaller") ||
+            contains_ci(cls, "UninstallerActivity") || contains_ci(cls, "DeleteStagedFileOnResult") ||
+            contains_ci(cls, "UninstallAppProgress");
+
+        if (is_installer) {
+            bool targets_self = false;
+            bool is_uninstall_prompt = false;
+
+            for (size_t i = 0; i < node_count; ++i) {
+                std::string_view t = nodes[i].text;
+                std::string_view c = nodes[i].cd;
+
+                if ((!self_lbl.empty() && (contains_ci(t, self_lbl) || contains_ci(c, self_lbl))) ||
+                    (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg)))) {
+                    targets_self = true;
+                }
+
+                if (contains_ci(t, "uninstall") || contains_ci(c, "uninstall") ||
+                    contains_ci(t, "do you want to uninstall") || contains_ci(c, "do you want to uninstall") ||
+                    contains_ci(t, "delete") || contains_ci(c, "delete") ||
+                    contains_ci(t, "remove") || contains_ci(c, "remove")) {
+                    is_uninstall_prompt = true;
+                }
+            }
+
+            if (targets_self && is_uninstall_prompt) {
+                return pack_verdict(ACTION_TAMPER_DETECTED, REASON_UNINSTALL_TAMPER, 0xFFFF, 0, 1);
+            }
+
+            // CRITICAL: If not targeting Blocker, return ALLOW immediately so user can uninstall any other app!
+            return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+        }
+
+        // C. Settings / SpaActivity / OEM Security Centers
+        const bool is_settings =
+            contains_ci(pkg, "settings") || contains_ci(pkg, "securitycenter") ||
+            contains_ci(pkg, "safecenter") || contains_ci(pkg, "permissioncontroller") ||
+            contains_ci(pkg, "permissionmanager") || contains_ci(pkg, "phonemaster") ||
+            contains_ci(pkg, "phonemanager") || contains_ci(pkg, "storagemanager") ||
+            contains_ci(pkg, "freezer") || contains_ci(pkg, "lool");
+
+        if (is_settings) {
+            // Check for Developer Options & Debugging
+            bool has_dev_opts =
+                contains_ci(cls, "DevelopmentSettings") ||
+                contains_ci(cls, "DevelopmentSettingsDashboardActivity");
+
+            if (!has_dev_opts) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    if (contains_ci(t, "developer options") || contains_ci(t, "development settings") ||
+                        contains_ci(t, "wireless debugging") || contains_ci(t, "usb debugging")) {
+                        has_dev_opts = true;
+                        break;
+                    }
+                }
+            }
+            if (has_dev_opts) {
+                return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DEV_OPTIONS_TAMPER, 0xFFFF, 0, 1);
+            }
+
+            // Check for Date & Time Clock Tampering
+            if (block_date_time) {
+                bool has_date_time =
+                    contains_ci(cls, "DateTimeSettings") || contains_ci(cls, "ZonePicker");
+                if (!has_date_time) {
+                    for (size_t i = 0; i < node_count; ++i) {
+                        std::string_view t = nodes[i].text;
+                        if (contains_ci(t, "date & time") || contains_ci(t, "automatic date & time") ||
+                            contains_ci(t, "set time automatically") || contains_ci(t, "use network-provided time")) {
+                            has_date_time = true;
+                            break;
+                        }
+                    }
+                }
+                if (has_date_time) {
+                    return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DATE_TIME_TAMPER, 0xFFFF, 0, 1);
+                }
+            }
+
+            // Check for Device Admin Screens
+            bool is_admin_screen =
+                contains_ci(cls, "DeviceAdminAdd") || contains_ci(cls, "DeviceAdminSettings") ||
+                contains_ci(cls, "DeviceAdmin");
+
+            if (is_admin_screen) {
+                bool mentions_self = false;
+                bool is_deactivation_attempt = false;
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    std::string_view c = nodes[i].cd;
+                    if ((!self_lbl.empty() && (contains_ci(t, self_lbl) || contains_ci(c, self_lbl))) ||
+                        (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg)))) {
+                        mentions_self = true;
+                    }
+                    if (contains_ci(t, "deactivate") || contains_ci(c, "deactivate") ||
+                        contains_ci(t, "remove device admin") || contains_ci(c, "remove device admin")) {
+                        is_deactivation_attempt = true;
+                    }
+                }
+                if (mentions_self && is_deactivation_attempt) {
+                    return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DEVICE_ADMIN_TAMPER, 0xFFFF, 0, 1);
+                }
+            }
+
+            // Scoped Check: Does this Settings / App Info screen target Blocker?
+            bool targets_self_in_settings = false;
+            for (size_t i = 0; i < node_count; ++i) {
+                if ((!self_lbl.empty() && (contains_ci(nodes[i].text, self_lbl) || contains_ci(nodes[i].cd, self_lbl))) ||
+                    (!self_pkg.empty() && (contains_ci(nodes[i].text, self_pkg) || contains_ci(nodes[i].cd, self_pkg)))) {
+                    targets_self_in_settings = true;
+                    break;
+                }
+            }
+
+            if (targets_self_in_settings) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    std::string_view c = nodes[i].cd;
+                    if (contains_ci(t, "force stop") || contains_ci(c, "force stop") ||
+                        contains_ci(t, "uninstall") || contains_ci(c, "uninstall") ||
+                        contains_ci(t, "clear storage") || contains_ci(c, "clear storage") ||
+                        contains_ci(t, "clear data") || contains_ci(c, "clear data") ||
+                        contains_ci(t, "storage & cache") || contains_ci(c, "storage & cache") ||
+                        contains_ci(t, "manage space") || contains_ci(c, "manage space") ||
+                        contains_ci(t, "disable") || contains_ci(c, "disable")) {
+                        return pack_verdict(ACTION_TAMPER_DETECTED, REASON_APP_INFO_TAMPER, 0xFFFF, 0, 1);
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Facebook Reels Page & Full-Screen Player Blocker (Litho-Aware)
+    // -------------------------------------------------------------------------
+    if (block_fb_reels && (pkg == "com.facebook.katana" || pkg == "com.facebook.lite")) {
+        // Fast Story Check: Never block Facebook Stories!
+        bool is_story = false;
+        for (size_t i = 0; i < node_count; ++i) {
+            std::string_view t = nodes[i].text;
+            std::string_view c = nodes[i].cd;
+            std::string_view id = nodes[i].id;
+            if (contains_ci(id, "story") || contains_ci(t, "add to story") || contains_ci(c, "add to story") ||
+                contains_ci(t, "reply to") || contains_ci(c, "reply to") ||
+                contains_ci(id, "stories_tray") || contains_ci(id, "story_viewer")) {
+                is_story = true;
+                break;
+            }
+        }
+
+        if (!is_story) {
+            bool reels_detected = false;
+
+            // Signal 1: Dedicated Activity / Fragment Class Signature
+            if (contains_ci(cls, "FbShorts") || contains_ci(cls, "ReelViewer") ||
+                contains_ci(cls, "Reels") || contains_ci(cls, "InspirationViewer") ||
+                contains_ci(cls, "ClipsViewer") || contains_ci(cls, "Warion")) {
+                reels_detected = true;
+            }
+
+            // Signal 2: Selected Navigation Tab State
+            if (!reels_detected) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    const auto& n = nodes[i];
+                    bool in_nav_bar = (n.top < 220 || n.bottom > 880);
+                    if (in_nav_bar) {
+                        bool is_selected = (n.flags & (NODE_FLAG_SELECTED | NODE_FLAG_CHECKED | NODE_FLAG_STATE_DESC_SELECTED)) != 0;
+                        if (is_selected) {
+                            if (contains_ci(n.text, "reels") || contains_ci(n.cd, "reels") ||
+                                contains_ci(n.text, "রিলস") || contains_ci(n.cd, "রিলস") ||
+                                contains_ci(n.cd, "reels, tab") || contains_ci(n.cd, "reels tab") ||
+                                contains_ci(n.cd, "tab reels")) {
+                                reels_detected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Signal 3: Spatial & Structural Litho Geometry Fingerprint (Full-Screen Player)
+            if (!reels_detected) {
+                bool has_full_bleed = false;
+                for (size_t i = 0; i < node_count; ++i) {
+                    uint16_t w = nodes[i].right - nodes[i].left;
+                    uint16_t h = nodes[i].bottom - nodes[i].top;
+                    if (h >= 800 && w >= 950) {
+                        has_full_bleed = true;
+                        break;
+                    }
+                }
+
+                if (has_full_bleed) {
+                    // Right-Edge Vertical Action Rail: >= 3 clickable nodes in right 28%
+                    int rail_hits = 0;
+                    for (size_t i = 0; i < node_count; ++i) {
+                        const auto& n = nodes[i];
+                        if (n.left >= 720 && n.top >= 350 && n.bottom <= 920) {
+                            if (n.flags & NODE_FLAG_CLICKABLE) {
+                                if (contains_ci(n.text, "like") || contains_ci(n.cd, "like") ||
+                                    contains_ci(n.text, "react") || contains_ci(n.cd, "react") ||
+                                    contains_ci(n.text, "comment") || contains_ci(n.cd, "comment") ||
+                                    contains_ci(n.text, "share") || contains_ci(n.cd, "share") ||
+                                    contains_ci(n.text, "send") || contains_ci(n.cd, "send") ||
+                                    contains_ci(n.text, "audio") || contains_ci(n.cd, "audio") ||
+                                    contains_ci(n.text, "follow") || contains_ci(n.cd, "follow") ||
+                                    contains_ci(n.text, "save") || contains_ci(n.cd, "save") ||
+                                    contains_ci(n.text, "more") || contains_ci(n.cd, "more") ||
+                                    contains_ci(n.text, "remix") || contains_ci(n.cd, "remix")) {
+                                    rail_hits++;
+                                }
+                            }
+                        }
+                    }
+
+                    if (rail_hits >= 3) {
+                        reels_detected = true;
+                    }
+
+                    // Top Overlay Header: top < 180 with "Reels", "Create a reel", "For you"
+                    if (!reels_detected) {
+                        for (size_t i = 0; i < node_count; ++i) {
+                            const auto& n = nodes[i];
+                            if (n.top < 180) {
+                                if (contains_ci(n.text, "reels") || contains_ci(n.cd, "reels") ||
+                                    contains_ci(n.text, "create a reel") || contains_ci(n.cd, "create a reel") ||
+                                    contains_ci(n.text, "for you") || contains_ci(n.cd, "for you")) {
+                                    reels_detected = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Signal 4: Inline Newsfeed Reels Carousel triggers
+            if (!reels_detected) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    const auto& n = nodes[i];
+                    if (contains_ci(n.text, "swipe up for next reel") || contains_ci(n.cd, "swipe up for next reel") ||
+                        contains_ci(n.text, "remix this reel") || contains_ci(n.cd, "remix this reel") ||
+                        contains_ci(n.text, "watch more reels") || contains_ci(n.cd, "watch more reels")) {
+                        reels_detected = true;
+                        break;
+                    }
+                }
+            }
+
+            if (reels_detected) {
+                // Find Home / Feed Tab node for zero tab-trap escape
+                uint16_t home_tab_idx = 0xFFFF;
+                for (size_t i = 0; i < node_count; ++i) {
+                    const auto& n = nodes[i];
+                    if (n.flags & NODE_FLAG_CLICKABLE) {
+                        if (contains_ci(n.cd, "home, tab") || contains_ci(n.cd, "home tab") ||
+                            contains_ci(n.cd, "feed") || contains_ci(n.text, "feed") ||
+                            contains_ci(n.cd, "news feed") || contains_ci(n.text, "news feed") ||
+                            contains_ci(n.cd, "হোম") || contains_ci(n.text, "হোম")) {
+                            home_tab_idx = static_cast<uint16_t>(n.original_index);
+                            break;
+                        }
+                    }
+                }
+
+                uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, home_tab_idx, show_hud, 0);
+            }
+        }
+    }
+
+    return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -645,6 +1125,25 @@ Java_com_blocker_NativeBlockerBridge_nativeHashChars(JNIEnv* env, jclass, jcharA
     return (jlong)hash;
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_blocker_NativeBlockerBridge_nativeEvaluateScreen(
+    JNIEnv* env, jclass, jobject jbuffer, jint len) {
+    if (!jbuffer || len < (jint)sizeof(ScreenEvalHeader)) {
+        return (jlong)pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+    const uint8_t* buf = (const uint8_t*)env->GetDirectBufferAddress(jbuffer);
+    if (!buf) {
+        return (jlong)pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+    return (jlong)engine_evaluate_screen(buf, (size_t)len);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_blocker_NativeBlockerBridge_nativeCheckHudRateLimit(
+    JNIEnv*, jclass, jint reason_id) {
+    return engine_check_hud_rate_limit((uint8_t)reason_id) ? JNI_TRUE : JNI_FALSE;
+}
+
 // -----------------------------------------------------------------------------
 // Battery-Friendly Local DNS Sinkhole Loop
 // -----------------------------------------------------------------------------
@@ -665,8 +1164,6 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
     fds[2].fd = upstream_sock;
     fds[2].events = POLLIN;
 
-    // Cache of in-flight DNS query headers for upstream response translation:
-    // map query ID to (client_ip, client_port)
     struct PendingQuery {
         uint16_t id;
         uint32_t client_ip;
@@ -677,7 +1174,7 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
     memset(pending, 0, sizeof(pending));
 
     while (true) {
-        int ret = poll(fds, 3, 2000); // 2s timeout
+        int ret = poll(fds, 3, 2000);
         if (ret < 0) continue;
         if (fds[1].revents & POLLIN) break; // Stop signal
 
@@ -700,7 +1197,6 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
                             uint32_t src_ip = *(uint32_t*)(pkt_buf + 12);
                             uint16_t src_port = *(uint16_t*)udp_ptr;
 
-                            // Parse QNAME
                             char qname[256];
                             size_t qname_idx = 0;
                             size_t ptr = 12;
@@ -725,42 +1221,36 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
                                 qname[qname_idx] = '\0';
                                 char matched_rule[128];
                                 if (engine_match_url(qname, qname_idx, matched_rule, sizeof(matched_rule))) {
-                                    // Synthesize RFC 1035 A-Record Response with 0.0.0.0 in < 0.1ms
                                     uint8_t resp_buf[512];
-                                    size_t q_end = ptr + 4; // Skip QTYPE and QCLASS
+                                    size_t q_end = ptr + 4;
                                     if (q_end <= dns_len && ip_ihl + 8 + q_end + 16 <= sizeof(resp_buf)) {
-                                        // Copy IP & UDP headers
                                         memcpy(resp_buf, pkt_buf, ip_ihl + 8);
 
-                                        // Swap IP src and dst
                                         *(uint32_t*)(resp_buf + 12) = *(uint32_t*)(pkt_buf + 16);
                                         *(uint32_t*)(resp_buf + 16) = src_ip;
 
-                                        // Swap UDP ports
                                         *(uint16_t*)(resp_buf + ip_ihl) = htons(53);
                                         *(uint16_t*)(resp_buf + ip_ihl + 2) = src_port;
 
-                                        // Build DNS Response
                                         uint8_t* r_dns = resp_buf + ip_ihl + 8;
                                         memcpy(r_dns, dns_ptr, q_end);
-                                        r_dns[2] = 0x81; // Response, recursion desired
-                                        r_dns[3] = 0x80; // No error
-                                        r_dns[6] = 0x00; r_dns[7] = 0x01; // Answer count = 1
-                                        r_dns[8] = 0x00; r_dns[9] = 0x00; // NS count = 0
-                                        r_dns[10] = 0x00; r_dns[11] = 0x00; // AR count = 0
+                                        r_dns[2] = 0x81;
+                                        r_dns[3] = 0x80;
+                                        r_dns[6] = 0x00; r_dns[7] = 0x01;
+                                        r_dns[8] = 0x00; r_dns[9] = 0x00;
+                                        r_dns[10] = 0x00; r_dns[11] = 0x00;
 
-                                        // Append Answer
                                         uint8_t* ans = r_dns + q_end;
-                                        ans[0] = 0xC0; ans[1] = 0x0C; // Pointer to QNAME
-                                        ans[2] = 0x00; ans[3] = 0x01; // Type A
-                                        ans[4] = 0x00; ans[5] = 0x01; // Class IN
-                                        ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3C; // TTL 60s
-                                        ans[10] = 0x00; ans[11] = 0x04; // RDLength = 4
-                                        ans[12] = 0x00; ans[13] = 0x00; ans[14] = 0x00; ans[15] = 0x00; // 0.0.0.0
+                                        ans[0] = 0xC0; ans[1] = 0x0C;
+                                        ans[2] = 0x00; ans[3] = 0x01;
+                                        ans[4] = 0x00; ans[5] = 0x01;
+                                        ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3C;
+                                        ans[10] = 0x00; ans[11] = 0x04;
+                                        ans[12] = 0x00; ans[13] = 0x00; ans[14] = 0x00; ans[15] = 0x00;
 
                                         size_t total_payload = 8 + q_end + 16;
                                         *(uint16_t*)(resp_buf + ip_ihl + 4) = htons((uint16_t)total_payload);
-                                        *(uint16_t*)(resp_buf + ip_ihl + 6) = 0; // Checksum 0
+                                        *(uint16_t*)(resp_buf + ip_ihl + 6) = 0;
 
                                         size_t total_ip_len = ip_ihl + total_payload;
                                         *(uint16_t*)(resp_buf + 2) = htons((uint16_t)total_ip_len);
@@ -770,7 +1260,6 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
                                         write(tun_fd, resp_buf, total_ip_len);
                                     }
                                 } else {
-                                    // Forward query to upstream DNS
                                     pending[pending_idx].id = qid;
                                     pending[pending_idx].client_ip = src_ip;
                                     pending[pending_idx].client_port = src_port;
@@ -799,15 +1288,14 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
                         size_t total_len = ip_ihl + total_payload;
 
                         memset(out_pkt, 0, ip_ihl);
-                        out_pkt[0] = 0x45; // IPv4, IHL 5
-                        out_pkt[8] = 64;   // TTL
-                        out_pkt[9] = 17;   // UDP
+                        out_pkt[0] = 0x45;
+                        out_pkt[8] = 64;
+                        out_pkt[9] = 17;
                         *(uint16_t*)(out_pkt + 2) = htons((uint16_t)total_len);
                         inet_pton(AF_INET, "10.255.255.1", out_pkt + 12);
                         *(uint32_t*)(out_pkt + 16) = pending[p].client_ip;
                         *(uint16_t*)(out_pkt + 10) = htons(compute_ip_checksum(out_pkt, ip_ihl));
 
-                        // UDP Header
                         *(uint16_t*)(out_pkt + ip_ihl) = htons(53);
                         *(uint16_t*)(out_pkt + ip_ihl + 2) = pending[p].client_port;
                         *(uint16_t*)(out_pkt + ip_ihl + 4) = htons((uint16_t)total_payload);
@@ -816,7 +1304,7 @@ void dns_sinkhole_poll_loop(int tun_fd, const char* upstream_dns_ip, int stop_pi
                         memcpy(out_pkt + ip_ihl + 8, up_resp, up_len);
                         write(tun_fd, out_pkt, total_len);
 
-                        pending[p].client_ip = 0; // Clear slot
+                        pending[p].client_ip = 0;
                         break;
                     }
                 }

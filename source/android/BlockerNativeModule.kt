@@ -238,13 +238,51 @@ object BlockerStore {
         return true
     }
 
+    fun checkAndApplyExpiredDelayTimers(c: Context) {
+        val now = SecureTime.now(c)
+        val p = prefs(c)
+        var changed = false
+        val editor = p.edit()
+
+        val pendingProtection = p.getLong("pending_protection", 0L)
+        if (pendingProtection != 0L && now >= pendingProtection) {
+            editor.putBoolean("active", false)
+            editor.remove("pending_protection")
+            editor.remove("open_protection")
+            changed = true
+        }
+
+        val pendingShield = p.getLong("pending_shield", 0L)
+        if (pendingShield != 0L && now >= pendingShield) {
+            editor.putBoolean("shield", false)
+            editor.remove("pending_shield")
+            editor.remove("open_shield")
+            changed = true
+        }
+
+        val pendingPower = p.getLong("pending_power_menu", 0L)
+        if (pendingPower != 0L && now >= pendingPower) {
+            editor.putBoolean("prevent_power_off", false)
+            editor.remove("pending_power_menu")
+            editor.remove("open_power_menu")
+            changed = true
+        }
+
+        if (changed) {
+            editor.apply()
+            updateIntegrityHmac(c)
+        }
+    }
+
     fun active(c: Context): Boolean {
         verifyIntegrity(c)
+        checkAndApplyExpiredDelayTimers(c)
         return prefs(c).getBoolean("active", false)
     }
 
     fun shield(c: Context): Boolean {
         verifyIntegrity(c)
+        checkAndApplyExpiredDelayTimers(c)
         return prefs(c).getBoolean("shield", true)
     }
 
@@ -258,6 +296,7 @@ object BlockerStore {
 
     fun preventPowerOff(c: Context): Boolean {
         verifyIntegrity(c)
+        checkAndApplyExpiredDelayTimers(c)
         return prefs(c).getBoolean("prevent_power_off", false)
     }
 

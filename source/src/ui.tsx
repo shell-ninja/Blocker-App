@@ -1056,6 +1056,12 @@ export function LockBar({ lockKey }: { lockKey: LockKey }) {
     (lock.open ?? false) ||
     (lock.pending && remaining === 0 && (lock.remainingMs ?? 0) === 0);
 
+  useEffect(() => {
+    if (ready && queued.length > 0) {
+      confirm(lockKey).catch(() => {});
+    }
+  }, [ready, queued.length, lockKey]);
+
   const color = ready ? t.ok : t.warn;
   const soft = ready ? t.okSoft : t.warnSoft;
   const border = ready ? t.okBorder : t.warnBorder;
