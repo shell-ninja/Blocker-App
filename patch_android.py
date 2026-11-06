@@ -16,19 +16,25 @@ def read(p): return p.read_text(encoding="utf-8")
 def write(p, t): p.write_text(t, encoding="utf-8")
 
 
-# 1. JS side
-shutil.copy(src / "App.tsx", proj / "App.tsx")
-shutil.copytree(src / "src", proj / "src", dirs_exist_ok=True)
+# 1. JS side (legacy RN support, skipped in Pure Kotlin)
+if (src / "App.tsx").exists():
+    shutil.copy(src / "App.tsx", proj / "App.tsx")
+if (src / "src").exists():
+    shutil.copytree(src / "src", proj / "src", dirs_exist_ok=True)
 
 # 2. Kotlin files (use whatever package the generated project has)
 app_kt = next(main.glob("java/**/MainApplication.kt"), None)
 if app_kt is None:
-    sys.exit("ERROR: MainApplication.kt not found. Was the project created with React Native 0.73?")
+    sys.exit("ERROR: MainApplication.kt not found.")
 pkg = re.search(r"^package\s+([\w.]+)", read(app_kt), re.M).group(1)
 for kt in (src / "android").glob("*.kt"):
     write(app_kt.parent / kt.name, re.sub(r"^package\s+[\w.]+", f"package {pkg}", read(kt), count=1, flags=re.M))
 for ks in (src / "android").glob("*.keystore"):
     shutil.copy(ks, proj / "android" / "app" / ks.name)
+for sub in ["data", "ui"]:
+    subdir = src / "android" / sub
+    if subdir.exists():
+        shutil.copytree(subdir, app_kt.parent / sub, dirs_exist_ok=True)
 
 # 2b. Native C++ engine (CMake + C++ sources)
 cpp_src = src / "android" / "cpp"
@@ -307,7 +313,7 @@ if "core-ktx" not in g:
     g, n = re.subn(r"dependencies\s*\{", 'dependencies {\n    implementation("androidx.core:core-ktx:1.12.0")', g, count=1)
     if not n:
         warnings.append("Could not add core-ktx to android/app/build.gradle (add: implementation(\"androidx.core:core-ktx:1.12.0\"))")
-if "debuggableVariants = []" not in g:
+if "react {" in g and "debuggableVariants = []" not in g:
     g, n = re.subn(r"^react\s*\{", "react {\n    debuggableVariants = []", g, count=1, flags=re.M)
     if not n:
         warnings.append("Could not bundle JS into debug builds (add 'debuggableVariants = []' inside the react { } block)")
@@ -396,7 +402,7 @@ if "NativeBlockerBridge.load" not in a:
         count=1
     )
 
-if "BlockerPackage()" not in a:
+if "PackageList" in a and "BlockerPackage()" not in a:
     a, n = re.subn(r"//\s*add\(MyReactNativePackage\(\)\)", "add(BlockerPackage())", a, count=1)
     if n:
         write(app_kt, a)

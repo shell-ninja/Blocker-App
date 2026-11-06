@@ -1,19 +1,43 @@
 package com.blocker
 
 import android.os.Bundle
-import com.facebook.react.ReactActivity
-import com.facebook.react.ReactActivityDelegate
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
-import com.facebook.react.defaults.DefaultReactActivityDelegate
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
+import com.blocker.data.BlockerRepository
+import com.blocker.ui.BlockerAppRoot
+import com.blocker.ui.theme.BlockerTheme
+import com.blocker.ui.theme.CyberBg
 
-class MainActivity : ReactActivity() {
+class MainActivity : ComponentActivity() {
 
-    override fun getMainComponentName(): String = "Blocker"
-
-    override fun createReactActivityDelegate(): ReactActivityDelegate =
-        DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+    private lateinit var repo: BlockerRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        repo = BlockerRepository(this)
+
+        setContent {
+            BlockerTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = CyberBg
+                ) {
+                    BlockerAppRoot(repo = repo)
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::repo.isInitialized) {
+            repo.refreshAll()
+        }
     }
 }

@@ -919,7 +919,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         BlockerForegroundService.start(this)
         runCatching {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            nm?.cancel(BlockerNativeModule.NOTIFICATION_ID_BANKING_MODE)
+            nm?.cancel(BlockerStore.NOTIFICATION_ID_BANKING_MODE)
             BlockerStore.setBankingMode(this, false)
         }
         DeviceOwnerHelper.enforceDisallowSafeBoot(this)
@@ -5827,7 +5827,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val accentDeep = 0xFF7C3AED.toInt()
 
         val container = FrameLayout(svc).apply {
-            setBackgroundColor(0xFF070512.toInt())
+            setBackgroundColor(0xCC070512.toInt())
             setOnClickListener { removeOverlay() }
         }
 

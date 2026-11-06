@@ -36,6 +36,18 @@ object NativeBlockerBridge {
     }
 
     // Zero-allocation text normalization and checking
+    fun isUrlBlocked(url: String): Boolean {
+        if (!isLoaded || url.isEmpty()) return false
+        val chars = url.toCharArray()
+        return matchUrlFast(chars, chars.size)
+    }
+
+    fun isTextBlocked(text: String): Boolean {
+        if (!isLoaded || text.isEmpty()) return false
+        val chars = text.toCharArray()
+        return matchTextFast(chars, chars.size)
+    }
+
     fun matchUrlFast(charArray: CharArray, length: Int): Boolean {
         if (!isLoaded || length <= 0) return false
         return try {

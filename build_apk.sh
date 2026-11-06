@@ -251,17 +251,11 @@ fi
 # ---------- 5. Copy in Blocker's code and native modules, icon, manifest entries ----------
 step "Copying source into the project"
 python3 "$HERE/patch_android.py" "$PROJ" "$HERE/source" || {
-  echo "The patch script printed warnings above \u2014 follow them, then re-run ./build_apk.sh $MODE."
+  echo "The patch script printed warnings above — follow them, then re-run ./build_apk.sh $MODE."
   exit 1
 }
 
-# ---------- 6. JS dependencies (icons) ----------
-if [ ! -d "$PROJ/node_modules/lucide-react-native" ] || [ ! -d "$PROJ/node_modules/react-native-svg" ]; then
-  step "Installing JS dependencies"
-  ( cd "$PROJ" && npm install --no-audit --no-fund lucide-react-native@0.462.0 react-native-svg@15.8.0 )
-fi
-
-# ---------- 7. Build ----------
+# ---------- 6. Build ----------
 step "Building the $MODE APK"
 setup_gradle_wrapper_if_needed
 cd "$PROJ/android"
@@ -297,8 +291,8 @@ done
 
 if [ "$MODE" = "release" ]; then
   echo "Building release and debug APKs..."
-  ./gradlew assembleRelease "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
-  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  ./gradlew assembleRelease
+  ./gradlew assembleDebug
   OUT_RELEASE="$APK_DIR/Blocker-release-$APP_VER.apk"
   OUT_DEBUG="$APK_DIR/Blocker-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
@@ -307,7 +301,7 @@ if [ "$MODE" = "release" ]; then
 else
   # debug only
   echo "Building debug APK only..."
-  ./gradlew assembleDebug "-PreactNativeArchitectures=${ARCH:-arm64-v8a}"
+  ./gradlew assembleDebug
   OUT="$APK_DIR/Blocker-debug-$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
 fi
