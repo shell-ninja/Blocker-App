@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -17,13 +16,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.blocker.FocusSchedule
 import com.blocker.data.BlockerRepository
-import com.blocker.ui.components.CyberCard
-import com.blocker.ui.components.CyberSwitch
-import com.blocker.ui.components.GlowButton
-import com.blocker.ui.components.SectionHeader
-import com.blocker.ui.components.StatusBadge
+import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 
 @Composable
@@ -45,15 +39,15 @@ fun FocusScreen(
             .fillMaxSize()
             .background(CyberBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(
-            title = "Focus & Study Lockout",
-            subtitle = "Strict Pomodoro lockout, daily curfews, and distraction shielding",
-            icon = "🎯"
+            title = "Focus & study",
+            icon = CyberIcons.Focus,
+            subtitle = "Pomodoro phone lockout, daily schedules, and distraction shielding"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Active Study Lockout Card (if active)
         if (study.active) {
@@ -62,18 +56,20 @@ fun FocusScreen(
             val secs = remSec % 60L
             val timeStr = String.format("%02d:%02d", mins, secs)
 
-            CyberCard(
+            GlowCard(
                 modifier = Modifier.fillMaxWidth(),
-                isGlowing = true,
-                glowColor = if (study.isBreak) CyberOkGlow else CyberAccentGlow
+                active = true,
+                tone = if (study.isBreak) CardTone.OK else CardTone.ACCENT
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    StatusBadge(
-                        text = if (study.isBreak) "BREAK TIME" else "DEEP STUDY LOCKOUT",
-                        isActive = study.isBreak
+                    StatusPillBadge(
+                        label = if (study.isBreak) "Break Time" else "Deep Study Lockout",
+                        tone = if (study.isBreak) BadgeTone.OK else BadgeTone.ACCENT,
+                        breathing = true,
+                        icon = if (study.isBreak) CyberIcons.Check else CyberIcons.Lock
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -81,17 +77,17 @@ fun FocusScreen(
                     Text(
                         text = timeStr,
                         color = Color.White,
-                        fontSize = 46.sp,
+                        fontSize = 48.sp,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = (-1).sp
                     )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
                         text = "Round ${study.currentRound} of ${study.totalRounds}",
                         color = CyberTextSub,
-                        fontSize = 14.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold
                     )
 
@@ -99,35 +95,37 @@ fun FocusScreen(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (study.isBreak) {
-                            GlowButton(
-                                text = "Skip Break",
+                            Btn(
+                                label = "Skip Break",
+                                icon = CyberIcons.Play,
                                 onClick = { repo.skipStudyBreak() },
-                                isEmerald = true
+                                kind = BtnKind.PRIMARY
                             )
                         }
-                        GlowButton(
-                            text = "End Session",
+                        Btn(
+                            label = "End Session",
+                            icon = CyberIcons.Stop,
                             onClick = { repo.endStudySession() },
-                            modifier = Modifier
+                            kind = BtnKind.SECONDARY
                         )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         } else {
             // Study Mode Configurator
-            CyberCard(modifier = Modifier.fillMaxWidth()) {
+            GlowCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "Start Pomodoro Lockout",
-                    color = CyberText,
+                    color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = "Aggressively locks distracting phone access and silences notifications.",
                     color = CyberTextSub,
-                    fontSize = 12.5.sp
+                    fontSize = 12.sp
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -140,11 +138,11 @@ fun FocusScreen(
                         val isSel = studyFocusMins == m
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(if (isSel) CyberAccentSoft else CyberCardSurface)
-                                .border(1.dp, if (isSel) CyberAccent else CyberCardBorder, RoundedCornerShape(8.dp))
+                                .border(1.dp, if (isSel) CyberAccent else CyberCardBorder, RoundedCornerShape(10.dp))
                                 .clickable { studyFocusMins = m }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = "${m}m",
@@ -166,11 +164,11 @@ fun FocusScreen(
                         val isSel = studyBreakMins == m
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(if (isSel) CyberOkSoft else CyberCardSurface)
-                                .border(1.dp, if (isSel) CyberOk else CyberCardBorder, RoundedCornerShape(8.dp))
+                                .border(1.dp, if (isSel) CyberOk else CyberCardBorder, RoundedCornerShape(10.dp))
                                 .clickable { studyBreakMins = m }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = "${m}m",
@@ -184,42 +182,45 @@ fun FocusScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                GlowButton(
-                    text = "Launch Study Lockout",
+                Btn(
+                    label = "Launch Study Lockout",
+                    icon = CyberIcons.Play,
                     onClick = {
                         repo.startStudySession(studyFocusMins, studyBreakMins, studyRounds)
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // Quick Focus Mode
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                     Text(
                         text = "Quick Focus Countdown",
-                        color = CyberText,
+                        color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = if (focus.active) "Active: ${focus.remainingMs / 60000L}m left" else "Block non-essential apps for a set period",
                         color = if (focus.active) CyberAccentGlow else CyberTextSub,
-                        fontSize = 12.5.sp
+                        fontSize = 12.sp
                     )
                 }
 
                 if (focus.active) {
-                    GlowButton(
-                        text = "Stop",
-                        onClick = { repo.endQuickFocus() }
+                    Btn(
+                        label = "Stop",
+                        icon = CyberIcons.Stop,
+                        onClick = { repo.endQuickFocus() },
+                        kind = BtnKind.SECONDARY
                     )
                 }
             }
@@ -236,27 +237,27 @@ fun FocusScreen(
                                 .clickable { repo.startQuickFocus(mins) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Text(text = label, color = CyberText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = label, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Whitelist / Allowed Apps in Focus Mode
         SectionHeader(
             title = "Allowed Essential Apps",
-            subtitle = "Apps permitted during Focus and Study modes (e.g. Phone, Notes)",
-            icon = "✅"
+            icon = CyberIcons.ShieldCheck,
+            subtitle = "Apps permitted during Focus and Study modes (e.g. Phone, Maps)"
         )
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             val userApps = remember(apps) { apps.filter { !it.isSystem }.take(8) }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 userApps.forEach { app ->
                     val isAllowed = focus.allowedApps.contains(app.packageName)
                     Row(
@@ -264,10 +265,10 @@ fun FocusScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             AppIconView(drawable = app.icon, modifier = Modifier.size(32.dp))
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(text = app.label, color = CyberText, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                            Text(text = app.label, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                         }
                         CyberSwitch(
                             checked = isAllowed,

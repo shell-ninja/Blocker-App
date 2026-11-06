@@ -76,10 +76,12 @@ object OverlayHudManager {
             elevation = dp(8).toFloat()
         }
 
-        val iconTv = TextView(context).apply {
-            text = "🛡️"
-            textSize = 16f
-            setPadding(0, 0, dp(8), 0)
+        val iconIv = android.widget.ImageView(context).apply {
+            setImageResource(R.drawable.ic_shield_cyber)
+            setColorFilter(0xFFA78BFA.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply {
+                setMargins(0, 0, dp(8), 0)
+            }
         }
 
         val messageTv = TextView(context).apply {
@@ -91,7 +93,7 @@ object OverlayHudManager {
             maxLines = 2
         }
 
-        pillLayout.addView(iconTv)
+        pillLayout.addView(iconIv)
         pillLayout.addView(messageTv)
 
         val pillParams = FrameLayout.LayoutParams(

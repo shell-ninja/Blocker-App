@@ -23,9 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.data.AppItem
 import com.blocker.data.BlockerRepository
-import com.blocker.ui.components.CyberCard
-import com.blocker.ui.components.CyberSwitch
-import com.blocker.ui.components.SectionHeader
+import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 
 @Composable
@@ -60,12 +58,12 @@ fun AppBlockerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(CyberBg)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(
-            title = "App Blocker",
-            subtitle = "Lock distracting applications completely or set strict daily limits",
-            icon = "📱"
+            title = "Apps & packages",
+            icon = CyberIcons.Apps,
+            subtitle = "Prevent launches of distracting or addictive applications"
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -75,14 +73,22 @@ fun AppBlockerScreen(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             placeholder = { Text("Search installed apps...", color = CyberTextSub, fontSize = 13.5.sp) },
+            leadingIcon = {
+                Icon(
+                    imageVector = CyberIcons.Search,
+                    contentDescription = null,
+                    tint = CyberTextSub,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = CyberCard,
                 unfocusedContainerColor = CyberCard,
-                focusedTextColor = CyberText,
-                unfocusedTextColor = CyberText,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
                 focusedBorderColor = CyberAccent,
                 unfocusedBorderColor = CyberCardBorder
             )
@@ -147,7 +153,7 @@ fun AppBlockerScreen(
             title = {
                 Text(
                     text = "Daily Limit: ${app.label}",
-                    color = CyberText,
+                    color = Color.White,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -183,7 +189,12 @@ fun AppBlockerScreen(
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
                             )
                             if (isCurrent) {
-                                Text(text = "✓", color = CyberAccentGlow, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = CyberIcons.Check,
+                                    contentDescription = null,
+                                    tint = CyberAccentGlow,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }
@@ -191,7 +202,7 @@ fun AppBlockerScreen(
             },
             confirmButton = {
                 TextButton(onClick = { selectedAppForLimit = null }) {
-                    Text("Close", color = CyberAccent)
+                    Text("Close", color = CyberAccent, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -217,7 +228,7 @@ private fun AppRow(
         // App Icon
         AppIconView(
             drawable = app.icon,
-            modifier = Modifier.size(44.dp)
+            modifier = Modifier.size(42.dp)
         )
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -226,14 +237,14 @@ private fun AppRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = app.label,
-                color = CyberText,
+                color = Color.White,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val usageMins = app.todayUsageMs / 60_000L
@@ -263,7 +274,12 @@ private fun AppRow(
                 .clickable(onClick = onLimitClick)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            Text(text = "⏱️", fontSize = 12.sp)
+            Icon(
+                imageVector = CyberIcons.Clock,
+                contentDescription = null,
+                tint = CyberTextSub,
+                modifier = Modifier.size(15.dp)
+            )
         }
 
         Spacer(modifier = Modifier.width(10.dp))
@@ -288,7 +304,12 @@ fun AppIconView(
                 .background(CyberCardSurface),
             contentAlignment = Alignment.Center
         ) {
-            Text(text = "📱", fontSize = 18.sp)
+            Icon(
+                imageVector = CyberIcons.Apps,
+                contentDescription = null,
+                tint = CyberTextSub,
+                modifier = Modifier.size(20.dp)
+            )
         }
         return
     }

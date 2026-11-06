@@ -662,6 +662,8 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 if (mentions_self && is_deactivation_attempt) {
                     return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DEVICE_ADMIN_TAMPER, 0xFFFF, 0, 1);
                 }
+                // Legitimate admin activation or list screen: allow user to turn ON device admin
+                return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
             }
 
             // Scoped Check: Does this Settings / App Info screen target Blocker?

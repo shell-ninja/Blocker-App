@@ -1,6 +1,5 @@
 package com.blocker.ui.screens
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,235 +25,311 @@ import com.blocker.ui.theme.*
 @Composable
 fun HomeScreen(
     repo: BlockerRepository,
-    onNavigateToFocus: () -> Unit,
+    onNavigateToFocus: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val protection by repo.protectionState.collectAsState()
+    val perms by repo.permissionsState.collectAsState()
     val stats by repo.statsState.collectAsState()
     val scrollState = rememberScrollState()
 
-    // Pulsing shield animation when active
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (protection.isActive) 1.05f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "shield_pulse"
-    )
+    val isHealthy = perms.allGranted
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(CyberBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        // App Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(CyberAccentWell)
-                        .border(1.dp, CyberAccentSoft, RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "🛡️", fontSize = 18.sp)
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Row {
-                    Text(
-                        text = "Block",
-                        color = CyberText,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "er",
-                        color = CyberAccent,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-            }
+        // Top Header
+        TopHeader(isLive = protection.isActive)
 
-            StatusBadge(
-                text = if (protection.isActive) "PROTECTED" else "STANDBY",
-                isActive = protection.isActive
-            )
-        }
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Delay timer warning banner if pending
+        // Delay timer banner
         if (protection.pendingUntil > 0L) {
             LockBar(
                 pendingUntil = protection.pendingUntil,
                 onCancel = { repo.cancelProtectionRequest() },
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 14.dp)
             )
         }
 
-        // Hero Shield Card
-        val heroBorderColor = if (protection.isActive) CyberOk else CyberAccent
-        val heroBgBrush = if (protection.isActive) {
-            Brush.verticalGradient(listOf(CyberOkWell, CyberCard))
-        } else {
-            Brush.verticalGradient(listOf(CyberAccentWell, CyberCard))
-        }
-
-        CyberCard(
-            modifier = Modifier.fillMaxWidth(),
-            isGlowing = protection.isActive,
-            glowColor = heroBorderColor
+        // Primary Hero Bento Card: "Protection Active" / "Protection Paused"
+        GlowCard(
+            active = protection.isActive,
+            tone = if (protection.isActive) CardTone.OK else CardTone.DEFAULT,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Pulsing Shield Icon
-                Box(
-                    modifier = Modifier
-                        .size(110.dp)
-                        .scale(pulseScale)
-                        .clip(CircleShape)
-                        .background(if (protection.isActive) CyberOkSoft else CyberAccentSoft)
-                        .border(
-                            2.dp,
-                            if (protection.isActive) CyberOk else CyberAccent,
-                            CircleShape
-                        )
-                        .clickable {
-                            repo.toggleProtection(!protection.isActive)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (protection.isActive) "🛡️" else "🔒",
-                        fontSize = 48.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = if (protection.isActive) "Protection is Active" else "Protection is Paused",
-                    color = CyberText,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = if (protection.isActive) {
-                        "All filters, apps and anti-tamper shields are armed."
-                    } else {
-                        "Tap the shield or toggle below to arm full defense."
-                    },
-                    color = CyberTextSub,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                GlowButton(
-                    text = if (protection.isActive) "Disarm Defense" else "Arm Full Defense",
-                    onClick = { repo.toggleProtection(!protection.isActive) },
-                    isEmerald = !protection.isActive,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Live Shield Stats Bento
-        SectionHeader(
-            title = "Defense Metrics",
-            subtitle = "Real-time threat intercepts and telemetry",
-            icon = "📊"
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Tamper Stat
-            CyberCard(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(text = "🛡️ Ejections", color = CyberTextSub, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "${stats.tamperCount}",
-                    color = CyberAccentGlow,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(text = "Tamper attempts", color = CyberTextMuted, fontSize = 11.sp)
-            }
-
-            // NSFW Stat
-            CyberCard(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(text = "🚫 Blocked", color = CyberTextSub, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "${stats.nsfwCount}",
-                    color = CyberOkGlow,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(text = "Explicit web matches", color = CyberTextMuted, fontSize = 11.sp)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Quick Shields Section
-        SectionHeader(
-            title = "Active Shields",
-            subtitle = "Granular security rules enforced by the C++ engine",
-            icon = "⚡"
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Facebook Reels
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 10.dp)
+                ) {
+                    // Luminous circular icon well
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (protection.isActive) CyberOkWell else Color(0xFF161A2B))
+                            .border(
+                                1.5.dp,
+                                if (protection.isActive) CyberOk.copy(alpha = 0.5f) else CyberCardBorder,
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (protection.isActive) CyberIcons.Check else CyberIcons.Shield,
+                            contentDescription = null,
+                            tint = if (protection.isActive) CyberOkGlow else CyberTextSub,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column {
+                        Text(
+                            text = if (protection.isActive) "Protection Active" else "Protection Paused",
+                            color = Color.White,
+                            fontSize = 18.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            text = if (protection.isActive) {
+                                "Domain blocklists, keywords & limits enforced"
+                            } else {
+                                "Distraction protection is paused"
+                            },
+                            color = CyberTextSub,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
+                CyberSwitch(
+                    checked = protection.isActive,
+                    onCheckedChange = { repo.toggleProtection(it) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Secondary Hero Bento Card: "Anti-Tamper Fortress"
+        GlowCard(
+            modifier = Modifier.fillMaxWidth(),
+            tone = CardTone.DEFAULT
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = CyberIcons.Lock,
+                        contentDescription = null,
+                        tint = CyberOkGlow,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Block Facebook Reels",
-                        color = CyberText,
-                        fontSize = 15.sp,
+                        text = "Anti-Tamper Fortress",
+                        color = Color.White,
+                        fontSize = 16.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp
+                    )
+                }
+
+                StatusPillBadge(
+                    label = "Airtight Lock",
+                    tone = BadgeTone.OK,
+                    breathing = protection.isShieldActive,
+                    small = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Device Administrator, launcher shield, and watchdog active. Uninstallation is strictly locked.",
+                color = CyberTextSub,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Btn(
+                label = "Anti-Uninstall Shield Active",
+                icon = CyberIcons.ShieldCheck,
+                kind = BtnKind.SECONDARY,
+                onClick = {},
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 2x2 Bento Stat Cards Grid
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            BentoStatCard(
+                value = stats.nsfwCount,
+                label = "Sites redirected",
+                icon = CyberIcons.Web,
+                modifier = Modifier.weight(1f)
+            )
+
+            BentoStatCard(
+                value = stats.appBlockCount,
+                label = "Apps blocked",
+                icon = CyberIcons.Apps,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            BentoStatCard(
+                value = stats.reelsCount,
+                label = "Screen closes",
+                icon = CyberIcons.EyeOff,
+                modifier = Modifier.weight(1f)
+            )
+
+            BentoStatCard(
+                value = stats.tamperCount,
+                label = "Bypass attempts",
+                icon = CyberIcons.Lock,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // System Health Bento Card
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = CyberIcons.Shield,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "System Health",
+                        color = Color.White,
+                        fontSize = 16.5.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                StatusPillBadge(
+                    label = if (isHealthy) "Healthy" else "Attention",
+                    tone = if (isHealthy) BadgeTone.OK else BadgeTone.WARN,
+                    small = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            val healthItems = listOf(
+                Triple("Accessibility service", perms.accessibility, "accessibility"),
+                Triple("Device admin (uninstall guard)", perms.deviceAdmin, "deviceAdmin"),
+                Triple("Usage access", perms.usageAccess, "usageAccess"),
+                Triple("Display over other apps", perms.overlay, "overlay")
+            )
+
+            healthItems.forEachIndexed { idx, (label, ok, kind) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = !ok) { repo.openPermissionSettings(context, kind) }
+                        .padding(vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Instantly skips addictive short-form video reels",
-                        color = CyberTextSub,
-                        fontSize = 12.5.sp
+                        text = label,
+                        color = if (ok) CyberTextSub else CyberText,
+                        fontSize = 13.sp
                     )
+                    StatusPillBadge(
+                        label = if (ok) "On" else "Fix",
+                        tone = if (ok) BadgeTone.OK else BadgeTone.DANGER,
+                        small = true
+                    )
+                }
+                if (idx < healthItems.size - 1) {
+                    Divider(color = CyberCardBorder.copy(alpha = 0.5f), thickness = 0.8.dp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Granular Defense Switches
+        SectionHeader(
+            title = "Granular Rules",
+            subtitle = "Zero-GC microsecond filters enforced by native engine",
+            icon = CyberIcons.ShieldCheck
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Facebook Reels
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Icon(
+                        imageVector = CyberIcons.Movie,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Block Facebook Reels",
+                            color = Color.White,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Instantly skips addictive short-form video reels",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
                 CyberSwitch(
                     checked = protection.blockFacebookReels,
@@ -264,27 +338,36 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Prevent Power Off
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Prevent Power Off",
-                        color = CyberText,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Icon(
+                        imageVector = CyberIcons.Power,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        text = "Blocks power menu tampering while protected",
-                        color = CyberTextSub,
-                        fontSize = 12.5.sp
-                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Prevent Power Off",
+                            color = Color.White,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Blocks power menu tampering while protected",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
                 CyberSwitch(
                     checked = protection.preventPowerOff,
@@ -293,27 +376,36 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Banking Mode
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Banking Mode",
-                        color = CyberText,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Icon(
+                        imageVector = CyberIcons.Bank,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        text = "Suspends overlays automatically inside banking apps",
-                        color = CyberTextSub,
-                        fontSize = 12.5.sp
-                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Banking Mode",
+                            color = Color.White,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Suspends overlays automatically inside banking apps",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
                 CyberSwitch(
                     checked = protection.isBankingMode,

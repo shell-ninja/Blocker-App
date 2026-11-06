@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Blocker</string>
+    <string name="a11y_desc">Blocks adult sites and selected apps, scans the screen for blocked keywords, and protects Blocker settings from tampering.</string>
+</resources>

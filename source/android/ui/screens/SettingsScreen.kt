@@ -1,10 +1,5 @@
 package com.blocker.ui.screens
 
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,13 +17,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.blocker.MyDeviceAdminReceiver
 import com.blocker.data.BlockerRepository
-import com.blocker.ui.components.CyberCard
-import com.blocker.ui.components.CyberSwitch
-import com.blocker.ui.components.GlowButton
-import com.blocker.ui.components.SectionHeader
-import com.blocker.ui.components.StatusBadge
+import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 
 @Composable
@@ -46,29 +36,29 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(CyberBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(
-            title = "Security & Anti-Tamper",
-            subtitle = "Strict covenant locks, delay protection, and hardware defense",
-            icon = "⚙️"
+            title = "Settings & security",
+            icon = CyberIcons.Settings,
+            subtitle = "Strict covenant locks, delay protection, and hardware defense"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Delay Timer Setting
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Protection Delay Period",
-                color = CyberText,
+                color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Disarming protection or removing restrictions requires waiting this timer.",
                 color = CyberTextSub,
-                fontSize = 12.5.sp
+                fontSize = 12.sp
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -100,36 +90,45 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Device Admin & System Shields
         SectionHeader(
             title = "Hardware & Admin Protection",
-            subtitle = "Low-level system enforcement preventing circumvention",
-            icon = "🛡️"
+            icon = CyberIcons.ShieldCheck,
+            subtitle = "Low-level system enforcement preventing circumvention"
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Prevent Power Off
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Prevent Power Off",
-                        color = CyberText,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Bold
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Icon(
+                        imageVector = CyberIcons.Power,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        text = "Blocks device power down attempts while protected",
-                        color = CyberTextSub,
-                        fontSize = 12.sp
-                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Prevent Power Off",
+                            color = Color.White,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Blocks device power down attempts while protected",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
                 CyberSwitch(
                     checked = protection.preventPowerOff,
@@ -138,64 +137,63 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Device Admin Status
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Device Administrator",
-                        color = CyberText,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Bold
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Icon(
+                        imageVector = CyberIcons.ShieldCheck,
+                        contentDescription = null,
+                        tint = if (perms.deviceAdmin) CyberOkGlow else CyberWarn,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        text = if (perms.deviceAdmin) "Armed • Uninstall lock active" else "Not activated",
-                        color = if (perms.deviceAdmin) CyberOkGlow else CyberWarn,
-                        fontSize = 12.sp
-                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Device Administrator",
+                            color = Color.White,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (perms.deviceAdmin) "Armed • Uninstall lock active" else "Not activated",
+                            color = if (perms.deviceAdmin) CyberOkGlow else CyberWarn,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
                 if (!perms.deviceAdmin) {
-                    GlowButton(
-                        text = "Activate",
+                    Btn(
+                        label = "Activate",
+                        icon = CyberIcons.ShieldCheck,
                         onClick = {
-                            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                                putExtra(
-                                    DevicePolicyManager.EXTRA_DEVICE_ADMIN,
-                                    ComponentName(context, MyDeviceAdminReceiver::class.java)
-                                )
-                                putExtra(
-                                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                                    "Blocker uses Device Administrator to prevent unauthorized removal while protection is active."
-                                )
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
+                            repo.openPermissionSettings(context, "deviceAdmin")
                         }
                     )
                 } else {
-                    StatusBadge(text = "ARMED", isActive = true)
+                    StatusPillBadge(label = "Armed", tone = BadgeTone.OK, icon = CyberIcons.Check, small = true)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Language & Localization
         SectionHeader(
             title = "Localization",
-            subtitle = "Tamper warning alerts and religious covenant verses language",
-            icon = "🌐"
+            icon = CyberIcons.Web,
+            subtitle = "Tamper warning alerts and religious covenant verses language"
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -239,25 +237,25 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Architecture & Native Info
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Engine Architecture",
-                color = CyberText,
+                color = Color.White,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(text = "UI Framework", color = CyberTextSub, fontSize = 12.sp)
-                Text(text = "100% Pure Jetpack Compose", color = CyberText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(text = "100% Pure Jetpack Compose", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(text = "Core Engine", color = CyberTextSub, fontSize = 12.sp)
-                Text(text = "C++20 NDK (Zero-GC)", color = CyberText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(text = "C++20 NDK (Zero-GC)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

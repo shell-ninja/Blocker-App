@@ -178,7 +178,7 @@ class BlockerForegroundService : Service {
         if (topPkg in blockedApps) {
             kickToHome()
             showTamperAlert(
-                title = if (isBn) "🔒 অ্যাপটি বন্ধ রাখা হয়েছে" else "🔒 App Blocked",
+                title = if (isBn) "অ্যাপটি বন্ধ রাখা হয়েছে" else "App Blocked",
                 message = if (isBn) "মনোযোগ ধরে রাখতে এই অ্যাপটি বন্ধ করা হয়েছে।"
                           else "This app is restricted to help maintain focus."
             )

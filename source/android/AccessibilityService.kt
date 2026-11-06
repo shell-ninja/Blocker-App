@@ -39,6 +39,7 @@ import android.view.animation.LinearInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -608,7 +609,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         val winText = StringBuilder()
                         collectText(r, winText, 0, intArrayOf(150))
                         val rawWt = winText.toString().lowercase()
-                        if ("🔐" in rawWt || "tamper protection" in rawWt || "focus mode" in rawWt) {
+                        if ("tamper protection" in rawWt || "uninstall protected" in rawWt || "power off locked" in rawWt || "focus mode" in rawWt || "নিরাপত্তা সুরক্ষা" in rawWt) {
                             runCatching { r.recycle() }
                             continue
                         }
@@ -713,7 +714,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(2500))
         val rawT = sb.toString().lowercase()
-        if ("🔐" in rawT || "tamper protection" in rawT || "focus mode" in rawT) return
+        if ("tamper protection" in rawT || "uninstall protected" in rawT || "power off locked" in rawT || "focus mode" in rawT || "নিরাপত্তা সুরক্ষা" in rawT) return
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
 
         // Device Admin screens by content
@@ -1151,6 +1152,17 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isLegitimatePermissionScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
         val t = text.lowercase()
+        val rootCls = root?.className?.toString()?.lowercase().orEmpty()
+
+        // 0. Legitimate Device Admin Activation Screen (must exempt before destructive checks)
+        val isDeviceAdminActivation = (rootCls.contains("deviceadminadd") ||
+            (("device admin" in t || "device administrator" in t || "admin app" in t) &&
+             ("activate" in t || "turn on" in t || "enable" in t))) &&
+            "deactivate" !in t
+        if (isDeviceAdminActivation) {
+            return true
+        }
+
         // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen!
         val hasDestructiveAction = "uninstall" in t || "force stop" in t || "clear storage" in t ||
             "clear data" in t || "delete app data" in t || "manage space" in t || "clear app data" in t ||
@@ -2658,7 +2670,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     4
                 )
                 showOverlay(
-                    if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
+                    if (isBangla()) "পাওয়ার অফ লক করা" else "Power Off Locked",
                     formatPowerOffLockedBody(),
                     4000,
                     getProtectionActiveSubheading(),
@@ -2785,7 +2797,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             BlockerStore.incr(this, "tamper")
 
             showOverlay(
-                if (isBangla()) "🔐 পাওয়ার অফ লক করা" else "🔐 Power Off Locked",
+                if (isBangla()) "পাওয়ার অফ লক করা" else "Power Off Locked",
                 if (isBangla()) "আপনার সুরক্ষার জন্য স্বয়ংক্রিয় পাওয়ার অফ বাতিল করা হয়েছে।\n\nঅবিচল থাকুন।" else "Scheduled power off was cancelled for your protection.\n\nRemain steadfast.",
                 5000,
                 getProtectionActiveSubheading(),
@@ -2829,7 +2841,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(250))
         val rawT = sb.toString().lowercase()
-        if ("🔐" in rawT || "tamper protection" in rawT || "focus mode" in rawT) return false
+        if ("tamper protection" in rawT || "uninstall protected" in rawT || "power off locked" in rawT || "focus mode" in rawT || "নিরাপত্তা সুরক্ষা" in rawT) return false
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
 
         val isOurApp = "blocker" in t || packageName.lowercase() in t
@@ -2984,7 +2996,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(800))
         val rawT = sb.toString().lowercase()
-        if ("🔐" in rawT || "tamper protection" in rawT || "focus mode" in rawT) return
+        if ("tamper protection" in rawT || "uninstall protected" in rawT || "power off locked" in rawT || "focus mode" in rawT || "নিরাপত্তা সুরক্ষা" in rawT) return
         // Strip Blocker's own device-admin explanation text before matching: it legitimately contains
         // "blocker" + "uninstalled" together, which would otherwise look identical to a real attempt.
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
@@ -3669,7 +3681,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     BlockerStore.incr(this, "tamper")
                     main.post {
                         showOverlay(
-                            if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                            if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
                             formatLauncherPressHoldBody(),
                             5000,
                             getProtectionActiveSubheading(),
@@ -3719,7 +3731,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         BlockerStore.incr(this, "tamper")
                         main.post {
                             showOverlay(
-                                if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                                if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
                                 if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো ও আনইনস্টল শর্টকাট লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info and uninstallation shortcuts are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
                                 5000,
                                 getProtectionActiveSubheading(),
@@ -3832,7 +3844,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     lastHideKick = now
                     BlockerStore.incr(this, "tamper")
                     showOverlay(
-                        if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                        if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
                         formatLauncherPressHoldBody(),
                         5000,
                         getProtectionActiveSubheading(),
@@ -3887,7 +3899,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         lastHideKick = now
                         BlockerStore.incr(this, "tamper")
                         showOverlay(
-                            if (isBangla()) "🔐 আনইনস্টল সুরক্ষা" else "🔐 Uninstall Protected",
+                            if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
                             if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো ও আনইনস্টল শর্টকাট লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info and uninstallation shortcuts are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
                             5000,
                             getProtectionActiveSubheading(),
@@ -5618,7 +5630,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isBangla()) "আপনার আখিরাত ধ্বংস করবেন না" else "Do not destroy your Akhirah"
 
     private fun getTamperHeading(): String =
-        if (isBangla()) "🔐 নিরাপত্তা সুরক্ষা" else "🔐 Tamper Protection"
+        if (isBangla()) "নিরাপত্তা সুরক্ষা" else "Tamper Protection"
 
     private fun getTamperSubheading(): String =
         if (isBangla()) "আল্লাহকে ভয় করুন এবং অবিচল থাকুন" else "Fear Allah and remain steadfast"
@@ -5809,7 +5821,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private var preInflatedOverlay: FrameLayout? = null
     private var preInflatedOverlayLp: WindowManager.LayoutParams? = null
-    private var preInflatedBadgeText: TextView? = null
+    private var preInflatedBadgeIcon: ImageView? = null
     private var preInflatedBadgeLayout: LinearLayout? = null
     private var preInflatedHeading: TextView? = null
     private var preInflatedSubheading: TextView? = null
@@ -5839,12 +5851,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 setStroke(dp(1), 0x88EF4444.toInt())
             }
         }
-        val badgeTv = TextView(svc).apply {
-            text = "🛡️"
-            textSize = 20f
-            gravity = Gravity.CENTER
+        val badgeIv = ImageView(svc).apply {
+            setImageResource(R.drawable.ic_shield_cyber)
+            setColorFilter(0xFFFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
         }
-        badge.addView(badgeTv)
+        badge.addView(badgeIv)
+        preInflatedBadgeIcon = badgeIv
 
         val headingTv = TextView(svc).apply {
             text = "Fear Allah"
@@ -5944,7 +5957,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         preInflatedOverlay = container
         preInflatedOverlayLp = rootLp
-        preInflatedBadgeText = badgeTv
+        preInflatedBadgeIcon = badgeIv
         preInflatedBadgeLayout = badge
         preInflatedHeading = headingTv
         preInflatedSubheading = subheadingTv
@@ -5978,7 +5991,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             val wm = getSystemService(WINDOW_SERVICE) as WindowManager
             val isFearAllah = heading == "Fear Allah" || heading == "আল্লাহকে ভয় করুন"
 
-            preInflatedBadgeText?.text = if (isFearAllah) "🛡️" else "🔒"
+            preInflatedBadgeIcon?.apply {
+                setImageResource(if (isFearAllah) R.drawable.ic_shield_cyber else R.drawable.ic_lock_cyber)
+                setColorFilter(if (isFearAllah) 0xFFEF4444.toInt() else 0xFFA78BFA.toInt())
+            }
             preInflatedBadgeLayout?.background = GradientDrawable().apply {
                 setColor(if (isFearAllah) 0x33DC2626.toInt() else 0x33A78BFA)
                 cornerRadius = dp(22).toFloat()

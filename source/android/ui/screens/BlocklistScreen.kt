@@ -18,9 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.NativeBlockerBridge
 import com.blocker.data.BlockerRepository
-import com.blocker.ui.components.CyberCard
-import com.blocker.ui.components.GlowButton
-import com.blocker.ui.components.SectionHeader
+import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 
 @Composable
@@ -42,25 +40,72 @@ fun BlocklistScreen(
             .fillMaxSize()
             .background(CyberBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(
-            title = "Web & Domain Filters",
-            subtitle = "Custom websites, domain patterns and restricted keyword phrases",
-            icon = "🌐"
+            title = "Web & keywords",
+            icon = CyberIcons.Web,
+            subtitle = "Custom websites, domain patterns and restricted keyword phrases"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Categories: Default block list
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(CyberAccentWell)
+                            .border(1.dp, CyberAccent.copy(alpha = 0.4f), RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFFC084FC),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Text(
+                            text = "Default block list",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "9,357 sites, 62 keywords and 4 web endings active",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+
+                StatusPillBadge(label = "Active", tone = BadgeTone.OK, small = true)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Custom Domain Adder
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Add Custom Blocked Website",
-                color = CyberText,
+                color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Enter domain name (e.g. example.com or badsite.org)",
                 color = CyberTextSub,
@@ -82,15 +127,16 @@ fun BlocklistScreen(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = CyberCardSurface,
                         unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = CyberText,
-                        unfocusedTextColor = CyberText,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
                         focusedBorderColor = CyberAccent,
                         unfocusedBorderColor = CyberCardBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                GlowButton(
-                    text = "Add",
+                Btn(
+                    label = "Add",
+                    icon = CyberIcons.Add,
                     onClick = {
                         if (domainInput.isNotBlank()) {
                             repo.addDomain(domainInput.trim())
@@ -120,15 +166,14 @@ fun BlocklistScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = dom, color = CyberText, fontSize = 13.sp)
-                            Text(
-                                text = "✕",
-                                color = CyberDanger,
-                                fontWeight = FontWeight.Bold,
+                            Text(text = dom, color = Color.White, fontSize = 13.sp)
+                            Icon(
+                                imageVector = CyberIcons.Delete,
+                                contentDescription = null,
+                                tint = CyberDanger,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
+                                    .size(18.dp)
                                     .clickable { repo.removeDomain(dom) }
-                                    .padding(4.dp)
                             )
                         }
                     }
@@ -136,17 +181,17 @@ fun BlocklistScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Custom Keyword Adder
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Add Custom Restricted Keyword",
-                color = CyberText,
+                color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Restricts matching web pages, search terms, and URL paths",
                 color = CyberTextSub,
@@ -168,15 +213,16 @@ fun BlocklistScreen(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = CyberCardSurface,
                         unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = CyberText,
-                        unfocusedTextColor = CyberText,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
                         focusedBorderColor = CyberAccent,
                         unfocusedBorderColor = CyberCardBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                GlowButton(
-                    text = "Add",
+                Btn(
+                    label = "Add",
+                    icon = CyberIcons.Add,
                     onClick = {
                         if (keywordInput.isNotBlank()) {
                             repo.addKeyword(keywordInput.trim())
@@ -206,15 +252,14 @@ fun BlocklistScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = kw, color = CyberText, fontSize = 13.sp)
-                            Text(
-                                text = "✕",
-                                color = CyberDanger,
-                                fontWeight = FontWeight.Bold,
+                            Text(text = kw, color = Color.White, fontSize = 13.sp)
+                            Icon(
+                                imageVector = CyberIcons.Delete,
+                                contentDescription = null,
+                                tint = CyberDanger,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
+                                    .size(18.dp)
                                     .clickable { repo.removeKeyword(kw) }
-                                    .padding(4.dp)
                             )
                         }
                     }
@@ -222,17 +267,17 @@ fun BlocklistScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // URL Verification Sandbox
-        CyberCard(modifier = Modifier.fillMaxWidth()) {
+        GlowCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Block Engine Simulator",
-                color = CyberText,
+                color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Test a URL against the binary C++ engine and custom rules",
                 color = CyberTextSub,
@@ -257,15 +302,16 @@ fun BlocklistScreen(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = CyberCardSurface,
                         unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = CyberText,
-                        unfocusedTextColor = CyberText,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
                         focusedBorderColor = CyberAccent,
                         unfocusedBorderColor = CyberCardBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                GlowButton(
-                    text = "Test",
+                Btn(
+                    label = "Test",
+                    icon = CyberIcons.Search,
                     onClick = {
                         if (testInput.isNotBlank()) {
                             val isBlocked = NativeBlockerBridge.isUrlBlocked(testInput.trim())
@@ -287,12 +333,21 @@ fun BlocklistScreen(
                         .padding(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = if (isBlk) "⛔ $testInput is BLOCKED" else "✅ $testInput is ALLOWED",
-                        color = if (isBlk) CyberDanger else CyberOkGlow,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (isBlk) CyberIcons.Ban else CyberIcons.Check,
+                            contentDescription = null,
+                            tint = if (isBlk) CyberDanger else CyberOkGlow,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isBlk) "$testInput is BLOCKED" else "$testInput is ALLOWED",
+                            color = if (isBlk) CyberDanger else CyberOkGlow,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp
+                        )
+                    }
                 }
             }
         }

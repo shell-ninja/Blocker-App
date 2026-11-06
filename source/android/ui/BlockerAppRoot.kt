@@ -14,19 +14,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.data.BlockerRepository
+import com.blocker.ui.components.CyberIcons
 import com.blocker.ui.screens.*
 import com.blocker.ui.theme.*
 
-enum class NavTab(val label: String, val icon: String) {
-    HOME("Home", "🛡️"),
-    FOCUS("Focus", "🎯"),
-    APPS("Apps", "📱"),
-    WEB("Web", "🌐"),
-    SETTINGS("Settings", "⚙️")
+enum class NavTab(val label: String, val icon: ImageVector) {
+    HOME("Home", CyberIcons.Home),
+    FOCUS("Focus", CyberIcons.Focus),
+    APPS("Apps", CyberIcons.Apps),
+    WEB("Web", CyberIcons.Web),
+    SETTINGS("Settings", CyberIcons.Settings)
 }
 
 @Composable
@@ -101,14 +103,12 @@ fun CyberBottomNav(
     onTabSelected: (NavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(CyberBgAlt)
-            .border(1.dp, CyberCardBorder, shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(CyberBg)
+            .border(width = 1.dp, color = CyberCardBorder)
+            .padding(top = 8.dp, bottom = 10.dp, start = 8.dp, end = 8.dp),
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -116,21 +116,35 @@ fun CyberBottomNav(
             val isSelected = selectedTab == tab
             Column(
                 modifier = Modifier
+                    .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onTabSelected(tab) }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                    .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = tab.icon,
-                    fontSize = 20.sp
-                )
-                Spacer(modifier = Modifier.height(3.dp))
+                Box(
+                    modifier = Modifier
+                        .size(width = 48.dp, height = 30.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(
+                            if (isSelected) CyberAccent.copy(alpha = 0.22f)
+                            else Color.Transparent
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (isSelected) CyberAccentGlow else CyberTextSub,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = tab.label,
                     color = if (isSelected) CyberAccentGlow else CyberTextSub,
                     fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
         }

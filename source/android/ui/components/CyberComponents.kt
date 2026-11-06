@@ -1,8 +1,7 @@
 package com.blocker.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,33 +9,58 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.ui.theme.*
 
+enum class CardTone {
+    DEFAULT, OK, ACCENT, DANGER
+}
+
+enum class BadgeTone {
+    OK, WARN, DANGER, ACCENT, IDLE
+}
+
+enum class BtnKind {
+    PRIMARY, SECONDARY, GHOST, DANGER
+}
+
+/**
+ * 3D Bento Squircle Card Surface
+ * Dark slate-navy surface (#0E1322 / #0E1726), 18dp corner radius.
+ * Active cards support luminous emerald highlight.
+ */
 @Composable
-fun CyberCard(
+fun GlowCard(
     modifier: Modifier = Modifier,
-    isGlowing: Boolean = false,
-    glowColor: Color = CyberCardBorderGlow,
+    active: Boolean = false,
+    tone: CardTone = CardTone.DEFAULT,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
-    val borderModifier = if (isGlowing) {
-        Modifier.border(1.5.dp, glowColor, shape)
-    } else {
-        Modifier.border(1.dp, CyberCardBorder, shape)
+    val shape = RoundedCornerShape(18.dp)
+
+    val bg = when {
+        active || tone == CardTone.OK -> Color(0xFF0E1726)
+        tone == CardTone.ACCENT -> Color(0xFF131126)
+        tone == CardTone.DANGER -> Color(0xFF180E14)
+        else -> CyberCard
+    }
+
+    val borderColor = when {
+        active || tone == CardTone.OK -> CyberOk.copy(alpha = 0.55f)
+        tone == CardTone.ACCENT -> CyberAccent.copy(alpha = 0.55f)
+        tone == CardTone.DANGER -> CyberDanger.copy(alpha = 0.55f)
+        else -> CyberCardBorder
     }
 
     val clickModifier = if (onClick != null) {
@@ -48,14 +72,231 @@ fun CyberCard(
     Column(
         modifier = modifier
             .clip(shape)
-            .background(CyberCard)
-            .then(borderModifier)
+            .background(bg)
+            .border(1.dp, borderColor, shape)
             .then(clickModifier)
             .padding(18.dp),
         content = content
     )
 }
 
+/**
+ * Luminous Status Pill Badge
+ * Supports breathing glow animation on active states (e.g. 'Fortress Live', 'Airtight Lock', 'Healthy').
+ */
+@Composable
+fun StatusPillBadge(
+    label: String,
+    modifier: Modifier = Modifier,
+    tone: BadgeTone = BadgeTone.OK,
+    icon: ImageVector? = null,
+    breathing: Boolean = false,
+    small: Boolean = false
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "badge_pulse")
+    val alphaAnim by if (breathing) {
+        infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.60f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse_alpha"
+        )
+    } else {
+        remember { mutableStateOf(1f) }
+    }
+
+    val (bg, border, textClr) = when (tone) {
+        BadgeTone.OK -> Triple(CyberOkSoft, CyberOk.copy(alpha = 0.6f), CyberOkGlow)
+        BadgeTone.WARN -> Triple(CyberWarnSoft, CyberWarn.copy(alpha = 0.6f), CyberWarn)
+        BadgeTone.DANGER -> Triple(CyberDangerSoft, CyberDanger.copy(alpha = 0.6f), CyberDanger)
+        BadgeTone.ACCENT -> Triple(CyberAccentSoft, CyberAccent.copy(alpha = 0.6f), CyberAccentGlow)
+        BadgeTone.IDLE -> Triple(CyberCardSurface, CyberCardBorder, CyberTextSub)
+    }
+
+    val shape = RoundedCornerShape(14.dp)
+    val padH = if (small) 8.dp else 12.dp
+    val padV = if (small) 3.dp else 5.dp
+    val fontSz = if (small) 10.5.sp else 12.sp
+
+    Row(
+        modifier = modifier
+            .alpha(alphaAnim)
+            .clip(shape)
+            .background(bg)
+            .border(1.dp, border, shape)
+            .padding(horizontal = padH, vertical = padV),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = textClr,
+                modifier = Modifier.size(if (small) 11.dp else 13.dp)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(if (small) 5.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(textClr)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+
+        Text(
+            text = label,
+            color = textClr,
+            fontSize = fontSz,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.3.sp
+        )
+    }
+}
+
+/**
+ * 2x2 Bento Stat Card Component
+ * Crisp tabular white number, purple squircle icon well in top right,
+ * and cool muted slate-gray label.
+ */
+@Composable
+fun BentoStatCard(
+    value: Int,
+    label: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    val shape = RoundedCornerShape(18.dp)
+    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(CyberCard)
+            .border(1.dp, CyberCardBorder, shape)
+            .then(clickModifier)
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = "$value",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.5).sp
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(CyberAccentWell)
+                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color(0xFFC084FC),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = label,
+            color = CyberTextSub,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+/**
+ * Modern Action Button (Primary gradient, Secondary outline, Ghost)
+ */
+@Composable
+fun Btn(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    kind: BtnKind = BtnKind.PRIMARY,
+    enabled: Boolean = true
+) {
+    val shape = RoundedCornerShape(14.dp)
+
+    val (bgBrush, borderColor, textClr) = when (kind) {
+        BtnKind.PRIMARY -> Triple(
+            Brush.horizontalGradient(listOf(CyberAccent, CyberAccentGlow)),
+            null,
+            Color.White
+        )
+        BtnKind.SECONDARY -> Triple(
+            Brush.horizontalGradient(listOf(CyberCardSurface, CyberCardSurface)),
+            CyberCardBorder,
+            Color.White
+        )
+        BtnKind.GHOST -> Triple(
+            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)),
+            CyberCardBorder,
+            CyberTextSub
+        )
+        BtnKind.DANGER -> Triple(
+            Brush.horizontalGradient(listOf(CyberDanger, Color(0xFFB91C1C))),
+            null,
+            Color.White
+        )
+    }
+
+    val borderModifier = if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(if (enabled) bgBrush else Brush.horizontalGradient(listOf(CyberCardSurface, CyberCardSurface)))
+            .then(borderModifier)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (enabled) textClr else CyberTextSub,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(
+                text = label,
+                color = if (enabled) textClr else CyberTextSub,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/**
+ * CyberSwitch with smooth spring animation and sleek violet track
+ */
 @Composable
 fun CyberSwitch(
     checked: Boolean,
@@ -79,95 +320,9 @@ fun CyberSwitch(
     )
 }
 
-@Composable
-fun GlowButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    isEmerald: Boolean = false,
-    enabled: Boolean = true,
-    icon: ImageVector? = null
-) {
-    val brush = if (isEmerald) {
-        Brush.horizontalGradient(listOf(CyberOk, Color(0xFF059669)))
-    } else {
-        Brush.horizontalGradient(listOf(CyberAccent, CyberAccentGlow))
-    }
-
-    val shape = RoundedCornerShape(14.dp)
-
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(if (enabled) brush else Brush.horizontalGradient(listOf(CyberCardSurface, CyberCardSurface)))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (enabled) Color.White else CyberTextSub,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(
-                text = text,
-                color = if (enabled) Color.White else CyberTextSub,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-fun StatusBadge(
-    text: String,
-    isActive: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val targetBg = if (isActive) CyberOkSoft else CyberWarnSoft
-    val targetBorder = if (isActive) CyberOk else CyberWarn
-    val targetText = if (isActive) CyberOkGlow else CyberWarn
-
-    val bg by animateColorAsState(targetBg, tween(200, easing = FastOutSlowInEasing), label = "bg")
-    val border by animateColorAsState(targetBorder, tween(200, easing = FastOutSlowInEasing), label = "border")
-    val textColor by animateColorAsState(targetText, tween(200, easing = FastOutSlowInEasing), label = "text")
-
-    val shape = RoundedCornerShape(12.dp)
-
-    Row(
-        modifier = modifier
-            .clip(shape)
-            .background(bg)
-            .border(1.dp, border, shape)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(border)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = text,
-            color = textColor,
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp
-        )
-    }
-}
-
+/**
+ * Countdown delay lock bar
+ */
 @Composable
 fun LockBar(
     pendingUntil: Long,
@@ -196,8 +351,8 @@ fun LockBar(
             .fillMaxWidth()
             .clip(shape)
             .background(CyberAccentWell)
-            .border(1.dp, CyberAccentSoft, shape)
-            .padding(16.dp)
+            .border(1.dp, CyberAccent.copy(alpha = 0.45f), shape)
+            .padding(14.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -205,19 +360,24 @@ fun LockBar(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(34.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(CyberAccentSoft),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "🔒", fontSize = 16.sp)
+                Icon(
+                    imageVector = CyberIcons.Lock,
+                    contentDescription = null,
+                    tint = CyberAccentGlow,
+                    modifier = Modifier.size(18.dp)
+                )
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Unlock timer active",
                     color = CyberText,
-                    fontSize = 14.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
@@ -236,34 +396,101 @@ fun LockBar(
     }
 }
 
+/**
+ * Top App Header matching the React Native design
+ */
+@Composable
+fun TopHeader(
+    isLive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CyberAccentWell)
+                    .border(1.5.dp, CyberAccent, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = CyberIcons.Shield,
+                    contentDescription = null,
+                    tint = Color(0xFFA78BFA),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Blocker",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.4).sp
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(start = 5.dp, bottom = 8.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (isLive) CyberOk else CyberTextSub)
+                )
+            }
+        }
+
+        StatusPillBadge(
+            label = if (isLive) "Fortress Live" else "Protection Paused",
+            tone = if (isLive) BadgeTone.OK else BadgeTone.IDLE,
+            breathing = isLive,
+            icon = if (isLive) CyberIcons.Check else null
+        )
+    }
+}
+
+/**
+ * Section Header Title
+ */
 @Composable
 fun SectionHeader(
     title: String,
+    icon: ImageVector? = null,
     subtitle: String? = null,
-    icon: String? = null,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
-                Text(text = icon, fontSize = 18.sp)
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color(0xFFA78BFA),
+                    modifier = Modifier.size(19.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(
                 text = title,
                 color = CyberText,
-                fontSize = 18.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.3).sp
             )
         }
         if (subtitle != null) {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = subtitle,
                 color = CyberTextSub,
-                fontSize = 13.sp,
-                lineHeight = 18.sp
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp
             )
         }
     }

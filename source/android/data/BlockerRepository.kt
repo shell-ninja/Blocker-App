@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
+import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
 import com.blocker.FocusSchedule
 import com.blocker.MyDeviceAdminReceiver
@@ -48,7 +49,7 @@ data class PermissionsState(
     val batteryOptimizationsIgnored: Boolean = false
 ) {
     val allGranted: Boolean
-        get() = accessibility && deviceAdmin && usageAccess && overlay && batteryOptimizationsIgnored
+        get() = accessibility && deviceAdmin && usageAccess && overlay
 }
 
 data class FocusState(
@@ -184,8 +185,9 @@ class BlockerRepository(private val context: Context) {
 
         // Device Admin
         val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-        val adminComponent = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
-        val adm = dpm?.isAdminActive(adminComponent) == true
+        val blockerAdmin = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
+        val myAdmin = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
+        val adm = dpm?.isAdminActive(blockerAdmin) == true || dpm?.isAdminActive(myAdmin) == true
 
         // Usage Access
         val appOps = appContext.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
@@ -504,5 +506,44 @@ class BlockerRepository(private val context: Context) {
         }
         BlockerStore.prefs(appContext).edit().putStringSet("focus_apps", current).apply()
         refreshFocusAndStudy()
+    }
+
+    fun openPermissionSettings(context: Context, kind: String) {
+        val pkg = appContext.packageName
+        val tries: List<Intent> = when (kind) {
+            "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            "overlay" -> listOf(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$pkg")),
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+            )
+            "usageAccess" -> listOf(
+                Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).putExtra("package", pkg),
+                Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            )
+            "battery" -> listOf(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg")),
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
+            )
+            "deviceAdmin" -> {
+                val adminComponent = ComponentName(appContext, com.blocker.BlockerDeviceAdminReceiver::class.java)
+                listOf(
+                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled while protection is active."),
+                    Intent(Settings.ACTION_SECURITY_SETTINGS),
+                    Intent(Settings.ACTION_SETTINGS)
+                )
+            }
+            else -> emptyList()
+        }
+
+        for (intent in tries) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                break
+            } catch (_: Throwable) {}
+        }
     }
 }
