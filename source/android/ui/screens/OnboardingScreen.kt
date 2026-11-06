@@ -226,19 +226,7 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 1. Accessibility Service
-                PermissionItemCard(
-                    title = "Accessibility service",
-                    icon = CyberIcons.Eye,
-                    why = "Reads the browser address bar and detects blocked apps in 0ms.",
-                    how = "Installed apps → Blocker → turn on.",
-                    isGranted = perms.accessibility,
-                    onGrant = { repo.openPermissionSettings(context, "accessibility") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 2. Device Administrator
+                // 1. Device Administrator (First so user can enable before accessibility)
                 PermissionItemCard(
                     title = "Device admin",
                     icon = CyberIcons.ShieldCheck,
@@ -250,7 +238,7 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 3. Usage Access
+                // 2. Usage Access
                 PermissionItemCard(
                     title = "Usage access",
                     icon = CyberIcons.Apps,
@@ -262,7 +250,7 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 4. Display Over Other Apps
+                // 3. Display Over Other Apps
                 PermissionItemCard(
                     title = "Display over other apps",
                     icon = CyberIcons.Layers,
@@ -274,7 +262,19 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Optional Background Battery Optimization
+                // 4. Accessibility Service (At the very end, just before battery optimization)
+                PermissionItemCard(
+                    title = "Accessibility service",
+                    icon = CyberIcons.Eye,
+                    why = "Reads the browser address bar and detects blocked apps in 0ms.",
+                    how = "Installed apps → Blocker → turn on.",
+                    isGranted = perms.accessibility,
+                    onGrant = { repo.openPermissionSettings(context, "accessibility") }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 5. Optional Background Battery Optimization
                 PermissionItemCard(
                     title = "Background execution",
                     icon = CyberIcons.Battery,

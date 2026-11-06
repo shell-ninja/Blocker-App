@@ -81,6 +81,13 @@ data class AppItem(
     val icon: Drawable? = null
 )
 
+data class DistractionShieldState(
+    val blockYtShorts: Boolean = false,
+    val blockInstaReels: Boolean = false,
+    val blockInstaSearch: Boolean = false,
+    val blockFbReels: Boolean = true
+)
+
 data class StatsState(
     val tamperCount: Int = 0,
     val nsfwCount: Int = 0,
@@ -104,6 +111,9 @@ class BlockerRepository(private val context: Context) {
 
     private val _studyState = MutableStateFlow(StudyState())
     val studyState: StateFlow<StudyState> = _studyState.asStateFlow()
+
+    private val _distractionShield = MutableStateFlow(DistractionShieldState())
+    val distractionShield: StateFlow<DistractionShieldState> = _distractionShield.asStateFlow()
 
     private val _installedApps = MutableStateFlow<List<AppItem>>(emptyList())
     val installedApps: StateFlow<List<AppItem>> = _installedApps.asStateFlow()
@@ -141,6 +151,7 @@ class BlockerRepository(private val context: Context) {
             refreshProtection()
             refreshPermissions()
             refreshFocusAndStudy()
+            refreshDistractionShield()
             refreshBlocklists()
             refreshStats()
             refreshInstalledApps()
@@ -173,6 +184,7 @@ class BlockerRepository(private val context: Context) {
             isAutoPauseBanking = autoPause,
             blockFacebookReels = reels
         )
+        refreshDistractionShield()
     }
 
     fun refreshPermissions() {
@@ -491,6 +503,48 @@ class BlockerRepository(private val context: Context) {
         BlockerStore.prefs(appContext).edit().putLong("focus_until", 0L).apply()
         refreshFocusAndStudy()
     }
+
+    fun refreshDistractionShield() {
+        _distractionShield.value = DistractionShieldState(
+            blockYtShorts = BlockerStore.granularToggle(appContext, "block_yt_shorts"),
+            blockInstaReels = BlockerStore.granularToggle(appContext, "block_insta_reels"),
+            blockInstaSearch = BlockerStore.granularToggle(appContext, "block_insta_search"),
+            blockFbReels = BlockerStore.granularToggle(appContext, "block_fb_reels")
+        )
+    }
+
+    fun toggleDistraction(key: String, enabled: Boolean) {
+        BlockerStore.prefs(appContext).edit().putBoolean(key, enabled).apply()
+        refreshDistractionShield()
+    }
+
+    fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet()) {
+        val current = _focusState.value.schedules.toMutableList()
+        val id = "sched_" + System.currentTimeMillis()
+        current.add(FocusSchedule(id = id, label = label, startMin = startMin, endMin = endMin, enabled = true, allowedApps = allowedApps))
+        saveSchedules(current)
+    }
+
+    fun updateSchedule(id: String, label: String, startMin: Int, endMin: Int, enabled: Boolean, allowedApps: Set<String>) {
+        val current = _focusState.value.schedules.map {
+            if (it.id == id) it.copy(label = label, startMin = startMin, endMin = endMin, enabled = enabled, allowedApps = allowedApps) else it
+        }
+        saveSchedules(current)
+    }
+
+    fun toggleScheduleEnabled(id: String, enabled: Boolean) {
+        val current = _focusState.value.schedules.map {
+            if (it.id == id) it.copy(enabled = enabled) else it
+        }
+        saveSchedules(current)
+    }
+
+    fun deleteSchedule(id: String) {
+        val current = _focusState.value.schedules.filter { it.id != id }
+        saveSchedules(current)
+    }
+
+    fun isScheduleActiveNow(s: FocusSchedule): Boolean = BlockerStore.scheduleIsActiveNow(s, appContext)
 
     fun saveSchedules(list: List<FocusSchedule>) {
         BlockerStore.putSchedules(appContext, list)

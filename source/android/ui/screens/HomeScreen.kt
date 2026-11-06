@@ -253,10 +253,10 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             val healthItems = listOf(
-                Triple("Accessibility service", perms.accessibility, "accessibility"),
                 Triple("Device admin (uninstall guard)", perms.deviceAdmin, "deviceAdmin"),
                 Triple("Usage access", perms.usageAccess, "usageAccess"),
-                Triple("Display over other apps", perms.overlay, "overlay")
+                Triple("Display over other apps", perms.overlay, "overlay"),
+                Triple("Accessibility service", perms.accessibility, "accessibility")
             )
 
             healthItems.forEachIndexed { idx, (label, ok, kind) ->

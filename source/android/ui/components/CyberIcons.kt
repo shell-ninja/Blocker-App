@@ -36,5 +36,8 @@ object CyberIcons {
     val Bank: ImageVector = Icons.Rounded.AccountBalance
     val Movie: ImageVector = Icons.Rounded.Movie
     val ChevronRight: ImageVector = Icons.Rounded.ChevronRight
+    val ExpandMore: ImageVector = Icons.Rounded.ExpandMore
+    val ExpandLess: ImageVector = Icons.Rounded.ExpandLess
+    val Book: ImageVector = Icons.Rounded.MenuBook
     val Guide: ImageVector = Icons.Rounded.Explore
 }
