@@ -572,7 +572,8 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 std::string_view c = nodes[i].cd;
 
                 if ((!self_lbl.empty() && (contains_ci(t, self_lbl) || contains_ci(c, self_lbl))) ||
-                    (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg)))) {
+                    (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg))) ||
+                    contains_ci(t, "blocker") || contains_ci(c, "blocker")) {
                     targets_self = true;
                 }
 
