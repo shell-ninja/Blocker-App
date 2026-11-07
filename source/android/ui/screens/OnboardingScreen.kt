@@ -44,7 +44,7 @@ fun OnboardingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberBg)
+            .background(CyberMeshBackground)
             .verticalScroll(scrollState)
             .padding(horizontal = 20.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally

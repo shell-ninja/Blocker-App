@@ -38,6 +38,8 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
+import java.security.MessageDigest
+import java.util.UUID
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
@@ -45,6 +47,17 @@ import java.util.concurrent.Executors
 
 /** Keywords this app used to ship. They are dropped from saved lists without the delay timer. */
 private val RETIRED_KEYWORDS = setOf("usb debugging", "oem unlocking", "oem unlock", "bare")
+
+data class PasswordRuleCheck(
+    val minLength: Boolean,
+    val hasUpper: Boolean,
+    val hasLower: Boolean,
+    val hasDigit: Boolean,
+    val hasSpecial: Boolean
+) {
+    val isValid: Boolean get() = minLength && hasUpper && hasLower && hasDigit && hasSpecial
+    val score: Int get() = listOf(minLength, hasUpper, hasLower, hasDigit, hasSpecial).count { it }
+}
 
 /** One recurring daily focus window, e.g. "Bedtime" 22:00 to 06:00, with optional per-schedule unblocked apps. */
 data class FocusSchedule(
@@ -308,11 +321,54 @@ object BlockerStore {
         prefs(c).edit().putString("popup_language", if (lang == "bn") "bn" else "en").apply()
     }
 
-    fun delayDays(c: Context) = prefs(c).getInt("delay_days", 1)
-    // Debug builds shorten every "day" to one minute so the timers can be tested quickly.
+    fun delayDays(c: Context): Int = 1
+    // Fixed 24-hour waiting period. Debug builds shorten 24 hours to one minute so timers can be tested quickly.
     fun delayMs(c: Context): Long {
         val debug = (c.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        return delayDays(c) * (if (debug) 60_000L else DAY_MS)
+        return if (debug) 60_000L else DAY_MS
+    }
+
+    // --- Parental Security & App Lock ---
+    fun validatePasswordStrength(pass: String): PasswordRuleCheck = PasswordRuleCheck(
+        minLength = pass.length >= 8,
+        hasUpper = pass.any { it.isUpperCase() },
+        hasLower = pass.any { it.isLowerCase() },
+        hasDigit = pass.any { it.isDigit() },
+        hasSpecial = pass.any { !it.isLetterOrDigit() }
+    )
+
+    fun isParentLockEnabled(c: Context): Boolean = prefs(c).getBoolean("parent_lock_enabled", false)
+
+    fun setParentLockEnabled(c: Context, enabled: Boolean) {
+        prefs(c).edit().putBoolean("parent_lock_enabled", enabled).apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun hasParentPassword(c: Context): Boolean = !prefs(c).getString("parent_lock_hash", "").isNullOrEmpty()
+
+    fun setParentPassword(c: Context, rawPass: String) {
+        val salt = UUID.randomUUID().toString()
+        val hash = sha256("$salt:$rawPass")
+        prefs(c).edit()
+            .putString("parent_lock_salt", salt)
+            .putString("parent_lock_hash", hash)
+            .putBoolean("parent_lock_enabled", true)
+            .apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun verifyParentPassword(c: Context, rawPass: String): Boolean {
+        val salt = prefs(c).getString("parent_lock_salt", "") ?: ""
+        val storedHash = prefs(c).getString("parent_lock_hash", "") ?: ""
+        if (salt.isEmpty() || storedHash.isEmpty()) return false
+        val hash = sha256("$salt:$rawPass")
+        return hash == storedHash
+    }
+
+    private fun sha256(input: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val bytes = md.digest(input.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
     }
     fun set(c: Context, key: String): Set<String> = prefs(c).getStringSet(key, emptySet())?.toSet() ?: emptySet()
     fun putSet(c: Context, key: String, v: Set<String>) {

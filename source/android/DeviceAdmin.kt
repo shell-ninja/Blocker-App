@@ -49,12 +49,17 @@ object DeviceOwnerHelper {
                     ComponentName(context, MyDeviceAdminReceiver::class.java),
                     ComponentName(context, BlockerDeviceAdminReceiver::class.java)
                 )
+                val guardOn = BlockerStore.active(context) && BlockerStore.shield(context) && !BlockerStore.guardOpen(context, "shield")
                 for (admin in candidates) {
                     try {
-                        dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                        if (guardOn) {
+                            dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                        } else {
+                            dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                        }
                     } catch (_: Exception) {}
                     try {
-                        dpm.setUninstallBlocked(admin, context.packageName, true)
+                        dpm.setUninstallBlocked(admin, context.packageName, guardOn)
                     } catch (_: Exception) {}
                     // Freeze / hide scheduled power-off packages so RTC hardware alarms cannot trigger
                     val scheduledPowerPackages = listOf(
@@ -64,11 +69,21 @@ object DeviceOwnerHelper {
                     )
                     for (p in scheduledPowerPackages) {
                         try {
-                            dpm.setApplicationHidden(admin, p, true)
+                            dpm.setApplicationHidden(admin, p, guardOn)
                         } catch (_: Exception) {}
                     }
                     break
                 }
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun updateUninstallBlocked(context: Context, blocked: Boolean) {
+        try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+            if (dpm.isDeviceOwnerApp(context.packageName)) {
+                val admin = getAdminComponent(context)
+                dpm.setUninstallBlocked(admin, context.packageName, blocked)
             }
         } catch (_: Exception) {}
     }

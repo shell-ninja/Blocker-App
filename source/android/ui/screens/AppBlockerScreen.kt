@@ -57,7 +57,7 @@ fun AppBlockerScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberBg)
+            .background(CyberMeshBackground)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(

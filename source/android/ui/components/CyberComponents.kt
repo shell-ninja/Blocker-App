@@ -50,20 +50,20 @@ fun GlowCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(20.dp)
 
-    val bg = when {
-        active || tone == CardTone.OK -> Color(0xFF0E1726)
-        tone == CardTone.ACCENT -> Color(0xFF131126)
-        tone == CardTone.DANGER -> Color(0xFF180E14)
-        else -> CyberCard
+    val bgBrush = when {
+        active || tone == CardTone.OK -> Brush.verticalGradient(listOf(Color(0xFF0F2231), Color(0xFF09141F)))
+        tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(Color(0xFF1B1336), Color(0xFF0E0B1A)))
+        tone == CardTone.DANGER -> Brush.verticalGradient(listOf(Color(0xFF26101B), Color(0xFF14080F)))
+        else -> Brush.verticalGradient(listOf(CyberCardTop, CyberCardBottom))
     }
 
-    val borderColor = when {
-        active || tone == CardTone.OK -> CyberOk.copy(alpha = 0.55f)
-        tone == CardTone.ACCENT -> CyberAccent.copy(alpha = 0.55f)
-        tone == CardTone.DANGER -> CyberDanger.copy(alpha = 0.55f)
-        else -> CyberCardBorder
+    val borderBrush = when {
+        active || tone == CardTone.OK -> Brush.verticalGradient(listOf(CyberOk.copy(alpha = 0.7f), CyberOk.copy(alpha = 0.25f)))
+        tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(CyberAccent.copy(alpha = 0.75f), CyberAccent.copy(alpha = 0.25f)))
+        tone == CardTone.DANGER -> Brush.verticalGradient(listOf(CyberDanger.copy(alpha = 0.7f), CyberDanger.copy(alpha = 0.25f)))
+        else -> Brush.verticalGradient(listOf(CyberCardBorderGlow.copy(alpha = 0.45f), CyberCardBorder))
     }
 
     val clickModifier = if (onClick != null) {
@@ -75,8 +75,8 @@ fun GlowCard(
     Column(
         modifier = modifier
             .clip(shape)
-            .background(bg)
-            .border(1.dp, borderColor, shape)
+            .background(bgBrush)
+            .border(1.dp, borderBrush, shape)
             .then(clickModifier)
             .padding(18.dp),
         content = content
@@ -410,40 +410,43 @@ fun TopHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF0F1528), Color(0xFF0A0E1A))))
+            .border(1.dp, Brush.horizontalGradient(listOf(Color(0x457C3AED), Color(0x157C3AED))), RoundedCornerShape(22.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF16122C))
-                    .border(1.5.dp, CyberAccent, RoundedCornerShape(13.dp)),
+                    .border(1.5.dp, CyberAccent, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
                     painter = painterResource(id = R.mipmap.ic_launcher),
                     contentDescription = "Blocker Icon",
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(11.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Block",
                     color = Color.White,
-                    fontSize = 22.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.4).sp
                 )
                 Text(
                     text = "er",
                     color = Color(0xFFA78BFA),
-                    fontSize = 22.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.4).sp
                 )

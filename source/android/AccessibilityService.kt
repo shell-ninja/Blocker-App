@@ -663,6 +663,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** Direct kick used by the poll loop — auto-cancels any dialog and forces Home immediately. */
     private fun pollKick(message: String) {
+        if (!shieldEngaged() && !shouldBlockDateTime() && !shouldBlockScheduledPower()) return
         val now = System.currentTimeMillis()
         runCatching { autoCancelDialog(rootInActiveWindow) }
         TamperShieldManager.showInstantShield(this)
@@ -685,6 +686,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val rootPkg = root.packageName?.toString().orEmpty()
         if (rootPkg == packageName) return
         if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg) && rootPkg != "android") return
+        if (!shieldEngaged() && !shouldBlockDateTime() && !shouldBlockScheduledPower()) return
 
         // If an install or update dialog is in foreground, allow it:
         if (isInstallOrUpdateDialog(root = root)) return
@@ -695,7 +697,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val cls = root.className?.toString().orEmpty()
 
         // ── Device Admin: ONLY block if our admin is ALREADY active AND this is a deactivation attempt! ──
-        if (isOurAdminActive() && !isLegitimatePermissionScreen(root, "")) {
+        if (shieldEngaged() && isOurAdminActive() && !isLegitimatePermissionScreen(root, "")) {
             val isDeactCls = DEVICE_ADMIN_DETAIL_CLASSES.any { cls.contains(it, ignoreCase = true) } ||
                 cls.contains("DeviceAdminAdd", ignoreCase = true) || cls.contains("DeviceAdmin", ignoreCase = true)
             if (isDeactCls) {
@@ -714,7 +716,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
 
         // Device Admin deactivation screens by content
-        val hasAdminContent = isOurAdminActive() && (
+        val hasAdminContent = shieldEngaged() && isOurAdminActive() && (
             "deactivate this device admin" in t || "deactivate this device administrator" in t ||
             ("deactivate" in t && ("admin" in t || "device" in t))
         )
@@ -730,7 +732,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasDevTitle = "developer options" in t || "development settings" in t || "developer mode" in t
         val hasDevMarker = "wireless debugging" in t ||
             "logger buffer" in t || "stay awake" in t || "desktop backup password" in t
-        if (hasDevTitle || hasDevMarker) {
+        if (shieldEngaged() && (hasDevTitle || hasDevMarker)) {
             if (adbFixActive()) return // allow automated USB debugging fix
             pollKick("Developer options are locked while Protection Mode is active.")
             return
@@ -753,7 +755,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Blocker-specific: kick the instant ANY settings screen mentions our app with destructive actions,
         // EXCEPT legitimate permission grant screens (DND access, unknown apps, usage access, battery optimization).
-        if (isOurApp) {
+        if (isOurApp && shieldEngaged()) {
             if (!isLegitimatePermissionScreen(root, t) && !isInstallOrUpdateDialog(root = root)) {
                 val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
                     "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t ||
@@ -771,7 +773,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val nowForUninstall = System.currentTimeMillis()
         val hasUninstallRisk = ("do you want to uninstall" in t || "uninstallation" in t || "uninstalling" in t ||
             (("uninstall" in t || "delete" in t) && ("ok" in t || "cancel" in t)))
-        if (hasUninstallRisk) {
+        if (hasUninstallRisk && shieldEngaged()) {
             val recentlyBlocker = nowForUninstall < viewingBlockerSettingsUntil ||
                 (SystemClock.uptimeMillis() - lastBlockerExitTime < 30_000L) ||
                 isOurApp
@@ -3146,7 +3148,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     // (e.g. Compose) and only runs on every 6th poll.
 
     private fun shieldEngaged(): Boolean =
-        BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")
+        BlockerStore.active(this) && BlockerStore.shield(this) && !BlockerStore.guardOpen(this, "shield")
 
     @Suppress("DEPRECATION")
     private fun loadAppIdentity() {
@@ -4140,6 +4142,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun kickFromAppInfo() {
+        if (!shieldEngaged()) return
         val now = System.currentTimeMillis()
         viewingBlockerSettingsUntil = now + 30_000L
         runCatching { autoCancelDialog(rootInActiveWindow) }
@@ -4198,6 +4201,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun kickFromA11yDetails() {
+        if (!shieldEngaged()) return
         val now = System.currentTimeMillis()
         viewingBlockerSettingsUntil = now + 30_000L
         runCatching { autoCancelDialog(rootInActiveWindow) }

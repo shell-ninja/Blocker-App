@@ -15,6 +15,7 @@ import android.os.Process
 import android.provider.Settings
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
+import com.blocker.DeviceOwnerHelper
 import com.blocker.FocusSchedule
 import com.blocker.MyDeviceAdminReceiver
 import com.blocker.SecureTime
@@ -88,6 +89,12 @@ data class DistractionShieldState(
     val blockFbReels: Boolean = true
 )
 
+data class SecurityLockState(
+    val isParentLockEnabled: Boolean = false,
+    val hasPasswordSet: Boolean = false,
+    val isAppUnlocked: Boolean = false
+)
+
 data class StatsState(
     val tamperCount: Int = 0,
     val nsfwCount: Int = 0,
@@ -114,6 +121,9 @@ class BlockerRepository(private val context: Context) {
 
     private val _distractionShield = MutableStateFlow(DistractionShieldState())
     val distractionShield: StateFlow<DistractionShieldState> = _distractionShield.asStateFlow()
+
+    private val _securityLockState = MutableStateFlow(SecurityLockState())
+    val securityLockState: StateFlow<SecurityLockState> = _securityLockState.asStateFlow()
 
     private val _installedApps = MutableStateFlow<List<AppItem>>(emptyList())
     val installedApps: StateFlow<List<AppItem>> = _installedApps.asStateFlow()
@@ -152,6 +162,7 @@ class BlockerRepository(private val context: Context) {
             refreshPermissions()
             refreshFocusAndStudy()
             refreshDistractionShield()
+            refreshSecurityLock()
             refreshBlocklists()
             refreshStats()
             refreshInstalledApps()
@@ -349,6 +360,7 @@ class BlockerRepository(private val context: Context) {
         val p = BlockerStore.prefs(appContext)
         val now = SecureTime.now(appContext)
         if (enable) {
+            DeviceOwnerHelper.updateUninstallBlocked(appContext, true)
             p.edit()
                 .putBoolean("active", true)
                 .remove("pending_protection")
@@ -360,6 +372,7 @@ class BlockerRepository(private val context: Context) {
             // Check if open window is active
             val openUntil = p.getLong("open_protection", 0L)
             if (now < openUntil) {
+                DeviceOwnerHelper.updateUninstallBlocked(appContext, false)
                 p.edit()
                     .putBoolean("active", false)
                     .remove("pending_protection")
@@ -368,7 +381,7 @@ class BlockerRepository(private val context: Context) {
                 BlockerStore.updateIntegrityHmac(appContext)
                 refreshProtection()
             } else {
-                // Request countdown timer
+                // Request countdown timer (strictly 24 hours)
                 val delayMs = BlockerStore.delayMs(appContext)
                 p.edit()
                     .putLong("pending_protection", now + delayMs)
@@ -390,11 +403,73 @@ class BlockerRepository(private val context: Context) {
         refreshProtection()
     }
 
-    fun setDelayDays(days: Int) {
-        val d = days.coerceIn(1, 30)
-        BlockerStore.prefs(appContext).edit().putInt("delay_days", d).apply()
+    fun setDelayDays(days: Int = 1) {
+        // Enforce strict 24-hour waiting timer
+        BlockerStore.prefs(appContext).edit().putInt("delay_days", 1).apply()
         BlockerStore.updateIntegrityHmac(appContext)
         refreshProtection()
+    }
+
+    // --- Parental Security & App Lock Actions ---
+
+    fun refreshSecurityLock() {
+        val enabled = BlockerStore.isParentLockEnabled(appContext)
+        val hasPass = BlockerStore.hasParentPassword(appContext)
+        _securityLockState.value = _securityLockState.value.copy(
+            isParentLockEnabled = enabled && hasPass,
+            hasPasswordSet = hasPass
+        )
+    }
+
+    fun unlockAppWithPassword(password: String): Boolean {
+        if (!_securityLockState.value.isParentLockEnabled) {
+            _securityLockState.value = _securityLockState.value.copy(isAppUnlocked = true)
+            return true
+        }
+        val ok = BlockerStore.verifyParentPassword(appContext, password)
+        if (ok) {
+            _securityLockState.value = _securityLockState.value.copy(isAppUnlocked = true)
+        }
+        return ok
+    }
+
+    fun lockApp() {
+        _securityLockState.value = _securityLockState.value.copy(isAppUnlocked = false)
+    }
+
+    fun setParentPassword(password: String): Boolean {
+        val check = BlockerStore.validatePasswordStrength(password)
+        if (!check.isValid) return false
+        BlockerStore.setParentPassword(appContext, password)
+        refreshSecurityLock()
+        _securityLockState.value = _securityLockState.value.copy(isAppUnlocked = true)
+        return true
+    }
+
+    fun setParentLockEnabled(enabled: Boolean, currentPassword: String): Boolean {
+        if (!enabled) {
+            if (BlockerStore.hasParentPassword(appContext)) {
+                if (!BlockerStore.verifyParentPassword(appContext, currentPassword)) {
+                    return false
+                }
+            }
+        }
+        BlockerStore.setParentLockEnabled(appContext, enabled)
+        refreshSecurityLock()
+        return true
+    }
+
+    fun changeParentPassword(currentPassword: String, newPassword: String): Boolean {
+        if (BlockerStore.hasParentPassword(appContext)) {
+            if (!BlockerStore.verifyParentPassword(appContext, currentPassword)) {
+                return false
+            }
+        }
+        val check = BlockerStore.validatePasswordStrength(newPassword)
+        if (!check.isValid) return false
+        BlockerStore.setParentPassword(appContext, newPassword)
+        refreshSecurityLock()
+        return true
     }
 
     fun setPreventPowerOff(enable: Boolean) {

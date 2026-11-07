@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -41,23 +42,26 @@ fun BlockerAppRoot(
     val focus by repo.focusState.collectAsState()
     val study by repo.studyState.collectAsState()
     val protection by repo.protectionState.collectAsState()
+    val securityLock by repo.securityLockState.collectAsState()
 
     var currentTab by remember { mutableStateOf(NavTab.HOME) }
     var showOnboarding by remember { mutableStateOf(!perms.accessibility) }
+    val isAppLocked = securityLock.isParentLockEnabled && !securityLock.isAppUnlocked
 
-    // Intercept back button during study/focus lock
-    BackHandler(enabled = study.active || focus.active) {
-        // Prevent exiting or backing out during active phone lockout
+    // Intercept back button during study/focus lock or app lock
+    BackHandler(enabled = study.active || focus.active || isAppLocked) {
+        // Prevent exiting or backing out during active phone lockout or parental lock
     }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = CyberBg,
+        containerColor = Color.Transparent,
         bottomBar = {
-            if (!showOnboarding && !study.active) {
+            if (!showOnboarding && !study.active && !isAppLocked) {
                 CyberBottomNav(
                     selectedTab = currentTab,
-                    onTabSelected = { currentTab = it }
+                    onTabSelected = { currentTab = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
         }
@@ -65,10 +69,13 @@ fun BlockerAppRoot(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(CyberMeshBackground)
                 .padding(innerPadding)
-                .background(CyberBg)
         ) {
             when {
+                isAppLocked -> {
+                    ParentLockScreen(repo = repo)
+                }
                 showOnboarding -> {
                     OnboardingScreen(
                         repo = repo,
@@ -83,11 +90,10 @@ fun BlockerAppRoot(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(CyberBg)
                     ) {
                         TopHeader(
                             isLive = protection.isActive,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                         Box(modifier = Modifier.weight(1f)) {
                             Crossfade(
@@ -117,12 +123,30 @@ fun CyberBottomNav(
     onTabSelected: (NavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val navShape = RoundedCornerShape(24.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(CyberBg)
-            .border(width = 1.dp, color = CyberCardBorder)
-            .padding(top = 8.dp, bottom = 10.dp, start = 8.dp, end = 8.dp),
+            .clip(navShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF0F1528),
+                        Color(0xFF090D1A)
+                    )
+                )
+            )
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0x407C3AED),
+                        Color(0x187C3AED)
+                    )
+                ),
+                navShape
+            )
+            .padding(horizontal = 6.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -131,17 +155,17 @@ fun CyberBottomNav(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .clickable { onTabSelected(tab) }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
                     modifier = Modifier
-                        .size(width = 48.dp, height = 30.dp)
-                        .clip(RoundedCornerShape(15.dp))
+                        .size(width = 46.dp, height = 28.dp)
+                        .clip(RoundedCornerShape(14.dp))
                         .background(
-                            if (isSelected) CyberAccent.copy(alpha = 0.22f)
+                            if (isSelected) CyberAccent.copy(alpha = 0.28f)
                             else Color.Transparent
                         ),
                     contentAlignment = Alignment.Center
@@ -149,14 +173,14 @@ fun CyberBottomNav(
                     Icon(
                         imageVector = tab.icon,
                         contentDescription = tab.label,
-                        tint = if (isSelected) CyberAccentGlow else CyberTextSub,
+                        tint = if (isSelected) Color(0xFFC084FC) else CyberTextSub,
                         modifier = Modifier.size(20.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = tab.label,
-                    color = if (isSelected) CyberAccentGlow else CyberTextSub,
+                    color = if (isSelected) Color.White else CyberTextSub,
                     fontSize = 11.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
