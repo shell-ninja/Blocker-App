@@ -163,7 +163,7 @@ class BlockerForegroundService : Service {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
         val active = BlockerStore.active(this)
         val shield = BlockerStore.shield(this)
-        val guardOpen = BlockerStore.guardOpen(this, "shield")
+        val guardOpen = BlockerStore.guardOpen(this, "shield") || BlockerStore.guardOpen(this, "protection")
 
         // If protection is not engaged or user deliberately passed delay timer, skip
         if (!active || !shield || guardOpen) return

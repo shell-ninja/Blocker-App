@@ -16,6 +16,10 @@ import androidx.core.app.NotificationCompat
  * Helper to manage Device Owner operations, Safe Boot restriction, and deactivation.
  */
 object DeviceOwnerHelper {
+    fun guardEngaged(context: Context): Boolean =
+        BlockerStore.active(context) && BlockerStore.shield(context) &&
+        !BlockerStore.guardOpen(context, "protection") && !BlockerStore.guardOpen(context, "shield")
+
     fun getAdminComponent(context: Context): ComponentName {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
         val myAdmin = ComponentName(context, MyDeviceAdminReceiver::class.java)
@@ -49,7 +53,7 @@ object DeviceOwnerHelper {
                     ComponentName(context, MyDeviceAdminReceiver::class.java),
                     ComponentName(context, BlockerDeviceAdminReceiver::class.java)
                 )
-                val guardOn = BlockerStore.active(context) && BlockerStore.shield(context) && !BlockerStore.guardOpen(context, "shield")
+                val guardOn = guardEngaged(context)
                 for (admin in candidates) {
                     try {
                         if (guardOn) {
@@ -174,8 +178,7 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
 
     // Both Protection and the Uninstall & settings shield must be on for any kick/cancel action here —
     // this is what lets the app be uninstalled normally once the user has deliberately turned both off.
-    private fun guardEngaged(context: Context): Boolean =
-        BlockerStore.active(context) && BlockerStore.shield(context) && !BlockerStore.guardOpen(context, "shield")
+    private fun guardEngaged(context: Context): Boolean = DeviceOwnerHelper.guardEngaged(context)
 
     // Shown in the system's deactivation confirmation dialog. Android does not allow vetoing here.
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
