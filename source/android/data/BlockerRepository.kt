@@ -798,13 +798,13 @@ class BlockerRepository(private val context: Context) {
                 listOf(
                     Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                         .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin1)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enforces active protection and anti-tamper safeguards."),
+                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled."),
                     Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                         .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin2)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enforces active protection and anti-tamper safeguards."),
-                    Intent("android.settings.DEVICE_ADMIN_SETTINGS"),
+                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled."),
                     Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.DeviceAdminSettings")),
                     Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$DeviceAdminSettingsActivity")),
+                    Intent("android.settings.DEVICE_ADMIN_SETTINGS"),
                     Intent().setComponent(ComponentName("com.samsung.android.settings.security", "com.samsung.android.settings.security.DeviceAdminSettings")),
                     Intent(Settings.ACTION_SECURITY_SETTINGS),
                     Intent(Settings.ACTION_SETTINGS)
@@ -823,10 +823,10 @@ class BlockerRepository(private val context: Context) {
         MainActivity.isLaunchingExternal = true
         for (intent in tries) {
             try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (act != null) {
                     act.startActivity(intent)
                 } else {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 }
                 break

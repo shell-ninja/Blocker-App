@@ -770,7 +770,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // EXCEPT legitimate permission grant screens (DND access, unknown apps, usage access, battery optimization).
         if (isOurApp && shieldEngaged()) {
             if (!isLegitimatePermissionScreen(root, t) && !isInstallOrUpdateDialog(root = root)) {
-                val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+                val hasDestructiveAction = "force stop" in t || ("uninstall" in t && ("open" in t || "disable" in t || "storage" in t || "permissions" in t)) || "disable" in t ||
                     "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t ||
                     "delete app data" in t || "clear app data" in t
                 if (hasDestructiveAction) {
@@ -1206,7 +1206,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             "display over other apps" in t || "appear on top" in t || "draw over other apps" in t ||
             "accessibility" in t || "অ্যাক্সেসিবিলিটি" in t ||
             "device admin" in t || "device administrator" in t || "admin apps" in t || "admin app" in t ||
-            "device policy" in t || "ডিভাইস অ্যাডমিন" in t || "ডিভাইস প্রশাসক" in t
+            "device policy" in t || "ডিভাইস অ্যাডমিন" in t || "ডিভাইস প্রশাসক" in t ||
+            "security" in t || "privacy & security" in t || "security and privacy" in t || "more security" in t
     }
 
     private fun isLegitimatePermissionScreen(text: String): Boolean {
@@ -2155,7 +2156,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val isDevAdmin = isDeviceAdminScreenOrSetup(rootForScan, rootCls, txt)
                 if (isOurApp && !isDevAdmin) {
                     if (!isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
-                        val hasDestructiveAction = "force stop" in txt || "uninstall" in txt || "disable" in txt ||
+                        val hasDestructiveAction = "force stop" in txt || ("uninstall" in txt && ("open" in txt || "disable" in txt || "storage" in txt || "permissions" in txt)) || "disable" in txt ||
                             "clear storage" in txt || "clear data" in txt || "manage space" in txt || "storage & cache" in txt
                         if (hasDestructiveAction) {
                             viewingBlockerSettingsUntil = now + 30_000L
@@ -2171,7 +2172,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
             } else if (titleMatchesBlocker && !isInstallOrUpdateDialog(ev, null)) {
                 if (!isLegitimatePermissionScreen(null, winTitle)) {
-                    val hasDestructiveAction = "force stop" in winTitle || "uninstall" in winTitle || "disable" in winTitle
+                    val hasDestructiveAction = "force stop" in winTitle || ("uninstall" in winTitle && ("open" in winTitle || "disable" in winTitle || "storage" in winTitle)) || "disable" in winTitle
                     if (hasDestructiveAction) {
                         viewingBlockerSettingsUntil = now + 30_000L
                         if (isActualSettingsPkg(pkg)) {
@@ -3487,9 +3488,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isLegitimatePermissionScreen(root, t) || isInstallOrUpdateDialog(ev, root)) return false
 
         // Check if screen has App Info destructive elements:
-        val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+        val hasDestructiveAction = "force stop" in t || ("uninstall" in t && ("open" in t || "disable" in t || "storage" in t || "permissions" in t)) || "disable" in t ||
             "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t ||
-            "delete app data" in t || "clear app data" in t || "মুছুন" in t || "আনইনস্টল" in t || "জোরপূর্বক থামান" in t
+            "delete app data" in t || "clear app data" in t || "মুছুন" in t || ("আনইনস্টল" in t && ("খুলুন" in t || "নিষ্ক্রিয়" in t || "স্টোরেজ" in t)) || "জোরপূর্বক থামান" in t
 
         if (!hasDestructiveAction) return false
 

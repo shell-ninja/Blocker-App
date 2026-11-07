@@ -643,7 +643,32 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
             // Check for Device Admin Screens
             bool is_admin_screen =
                 contains_ci(cls, "DeviceAdminAdd") || contains_ci(cls, "DeviceAdminSettings") ||
-                contains_ci(cls, "DeviceAdmin");
+                contains_ci(cls, "DeviceAdmin") || contains_ci(cls, "AdminSettings") ||
+                contains_ci(cls, "DevicePolicy") || contains_ci(cls, "DeviceAdminUI");
+
+            if (!is_admin_screen) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    std::string_view c = nodes[i].cd;
+                    if (contains_ci(t, "device admin") || contains_ci(c, "device admin") ||
+                        contains_ci(t, "device administrator") || contains_ci(c, "device administrator") ||
+                        contains_ci(t, "admin app") || contains_ci(c, "admin app") ||
+                        contains_ci(t, "admin apps") || contains_ci(c, "admin apps") ||
+                        contains_ci(t, "device policy") || contains_ci(c, "device policy") ||
+                        contains_ci(t, "activate this device admin") || contains_ci(c, "activate this device admin") ||
+                        contains_ci(t, "activate device admin") || contains_ci(c, "activate device admin") ||
+                        contains_ci(t, "activate admin app") || contains_ci(c, "activate admin app") ||
+                        contains_ci(t, "ডিভাইস অ্যাডমিন") || contains_ci(c, "ডিভাইস অ্যাডমিন") ||
+                        contains_ci(t, "ডিভাইস প্রশাসক") || contains_ci(c, "ডিভাইস প্রশাসক") ||
+                        ((contains_ci(t, "activate") || contains_ci(c, "activate") ||
+                          contains_ci(t, "সক্রিয়") || contains_ci(t, "সক্রিয়")) &&
+                         (contains_ci(t, "admin") || contains_ci(c, "admin") ||
+                          contains_ci(t, "অ্যাডমিন") || contains_ci(c, "অ্যাডমিন")))) {
+                        is_admin_screen = true;
+                        break;
+                    }
+                }
+            }
 
             if (is_admin_screen) {
                 // If our device admin is NOT active, it CANNOT be a deactivation attempt!
@@ -680,7 +705,7 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                     return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
                 }
 
-                if (mentions_self && (has_deactivate_action || (!has_activate_word && contains_ci(cls, "DeviceAdminAdd")))) {
+                if (mentions_self && has_deactivate_action) {
                     return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DEVICE_ADMIN_TAMPER, 0xFFFF, 0, 1);
                 }
                 // Legitimate admin activation or list screen: allow user to turn ON device admin
@@ -698,18 +723,31 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
             }
 
             if (targets_self_in_settings) {
+                bool has_force_stop = false;
+                bool has_uninstall = false;
+                bool has_open_or_disable = false;
+                bool has_storage_clear = false;
+
                 for (size_t i = 0; i < node_count; ++i) {
                     std::string_view t = nodes[i].text;
                     std::string_view c = nodes[i].cd;
                     if (contains_ci(t, "force stop") || contains_ci(c, "force stop") ||
-                        contains_ci(t, "uninstall") || contains_ci(c, "uninstall") ||
-                        contains_ci(t, "clear storage") || contains_ci(c, "clear storage") ||
+                        contains_ci(t, "জোরপূর্বক থামান")) has_force_stop = true;
+                    if (contains_ci(t, "uninstall") || contains_ci(c, "uninstall") ||
+                        contains_ci(t, "আনইনস্টল")) has_uninstall = true;
+                    if (contains_ci(t, "open") || contains_ci(c, "open") ||
+                        contains_ci(t, "disable") || contains_ci(c, "disable") ||
+                        contains_ci(t, "খুলুন")) has_open_or_disable = true;
+                    if (contains_ci(t, "clear storage") || contains_ci(c, "clear storage") ||
                         contains_ci(t, "clear data") || contains_ci(c, "clear data") ||
-                        contains_ci(t, "storage & cache") || contains_ci(c, "storage & cache") ||
                         contains_ci(t, "manage space") || contains_ci(c, "manage space") ||
-                        contains_ci(t, "disable") || contains_ci(c, "disable")) {
-                        return pack_verdict(ACTION_TAMPER_DETECTED, REASON_APP_INFO_TAMPER, 0xFFFF, 0, 1);
-                    }
+                        contains_ci(t, "storage & cache") || contains_ci(c, "storage & cache") ||
+                        contains_ci(t, "delete app data") || contains_ci(c, "delete app data") ||
+                        contains_ci(t, "মুছুন")) has_storage_clear = true;
+                }
+
+                if (has_force_stop || (has_uninstall && has_open_or_disable) || has_storage_clear) {
+                    return pack_verdict(ACTION_TAMPER_DETECTED, REASON_APP_INFO_TAMPER, 0xFFFF, 0, 1);
                 }
             }
         }
