@@ -43,10 +43,12 @@ fun HomeScreen(
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        // Delay timer banner
-        if (protection.pendingUntil > 0L) {
+        // Delay timer / confirmation banner
+        if (protection.pendingUntil > 0L || protection.guardOpenUntil > 0L) {
             LockBar(
                 pendingUntil = protection.pendingUntil,
+                guardOpenUntil = protection.guardOpenUntil,
+                onConfirm = { repo.confirmProtectionOff() },
                 onCancel = { repo.cancelProtectionRequest() },
                 modifier = Modifier.padding(bottom = 14.dp)
             )

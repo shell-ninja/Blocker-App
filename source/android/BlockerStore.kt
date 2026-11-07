@@ -180,6 +180,8 @@ object SecureTime {
 
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
+    const val APP_VERSION = "1.0.6.7"
+    const val BUILD_NUMBER = 92
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
     const val GUARD_WINDOW_MS = 10 * 60_000L
@@ -256,24 +258,39 @@ object BlockerStore {
 
         val pendingProtection = p.getLong("pending_protection", 0L)
         if (pendingProtection != 0L && now >= pendingProtection) {
-            editor.putBoolean("active", false)
             editor.remove("pending_protection")
+            editor.putLong("open_protection", now + GUARD_WINDOW_MS)
+            changed = true
+        }
+
+        val openProtection = p.getLong("open_protection", 0L)
+        if (openProtection != 0L && now >= openProtection) {
             editor.remove("open_protection")
             changed = true
         }
 
         val pendingShield = p.getLong("pending_shield", 0L)
         if (pendingShield != 0L && now >= pendingShield) {
-            editor.putBoolean("shield", false)
             editor.remove("pending_shield")
+            editor.putLong("open_shield", now + GUARD_WINDOW_MS)
+            changed = true
+        }
+
+        val openShield = p.getLong("open_shield", 0L)
+        if (openShield != 0L && now >= openShield) {
             editor.remove("open_shield")
             changed = true
         }
 
         val pendingPower = p.getLong("pending_power_menu", 0L)
         if (pendingPower != 0L && now >= pendingPower) {
-            editor.putBoolean("prevent_power_off", false)
             editor.remove("pending_power_menu")
+            editor.putLong("open_power_menu", now + GUARD_WINDOW_MS)
+            changed = true
+        }
+
+        val openPower = p.getLong("open_power_menu", 0L)
+        if (openPower != 0L && now >= openPower) {
             editor.remove("open_power_menu")
             changed = true
         }

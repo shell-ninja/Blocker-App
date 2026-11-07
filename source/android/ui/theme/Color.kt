@@ -35,12 +35,15 @@ val CyberOk = Color(0xFF10B981)
 val CyberOkGlow = Color(0xFF00E676)
 val CyberOkSoft = Color(0x2410B981)
 val CyberOkWell = Color(0xFF07241A)
+val CyberOkBorder = Color(0x6610B981)
 
 val CyberWarn = Color(0xFFF59E0B)
 val CyberWarnSoft = Color(0x24F59E0B)
+val CyberWarnBorder = Color(0x66F59E0B)
 
 val CyberDanger = Color(0xFFEF4444)
 val CyberDangerSoft = Color(0x24EF4444)
+val CyberDangerBorder = Color(0x66EF4444)
 
 val CyberText = Color(0xFFFFFFFF)
 val CyberTextSub = Color(0xFF8B97B0)

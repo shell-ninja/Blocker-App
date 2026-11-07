@@ -4589,9 +4589,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
                 "com.facebook.katana", "com.facebook.lite" -> {
-                    if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels")) {
+                    if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")) {
                         if (isFacebookVideoOrReels(root, ev)) {
-                            exitSubFeature(pkg, "Facebook Reels & Video")
+                            exitSubFeature(pkg, "Facebook Reels")
                             return true
                         }
                     }
@@ -4896,21 +4896,18 @@ class BlockerAccessibilityService : AccessibilityService() {
         val srcCd = src?.contentDescription?.toString().orEmpty().lowercase().trim()
         val srcText = src?.text?.toString().orEmpty().lowercase().trim()
         val srcId = src?.viewIdResourceName?.toString().orEmpty().lowercase()
-        val srcCls = src?.className?.toString().orEmpty().lowercase()
 
         fun isReelOrVideoAction(s: String): Boolean {
             if (s.isEmpty()) return false
             val lower = s.trim().lowercase()
             return lower == "reels" || lower == "reel" || lower == "shorts" ||
-                   lower == "video" || lower == "watch" || lower == "videos" ||
                    lower == "facebook reels" || lower == "fb shorts" ||
-                   lower == "রিলস" || lower == "রিল" || lower == "ভিডিও" || lower == "ওয়াচ" ||
+                   lower == "রিলস" || lower == "রিল" ||
                    lower.startsWith("reels, tab") || lower.startsWith("video, tab") ||
                    lower.startsWith("watch, tab") || lower.startsWith("reels tab") ||
                    lower.startsWith("video tab") || lower.startsWith("watch tab") ||
-                   lower == "play video" || lower == "watch video" || lower == "view reel" ||
-                   lower == "watch reel" || lower == "reels and short videos" ||
-                   lower == "ভিডিও চালান" || lower == "রিল দেখুন"
+                   lower == "view reel" || lower == "watch reel" || lower == "reels and short videos" ||
+                   lower == "রিল দেখুন"
         }
 
         fun isReelOrVideoId(id: String): Boolean {
@@ -4920,10 +4917,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                    lower.contains("video_tab") || lower.contains("tab_video") ||
                    lower.contains("watch_tab") || lower.contains("tab_watch") ||
                    lower.contains("fb_shorts_tab") || lower.contains("fb_shorts_container") ||
-                   lower.contains("fb_shorts_recycler_view") || lower.contains("reels_recycler_view") ||
                    lower.contains("fb_shorts_root") || lower.contains("reels_page_container") ||
-                   lower.contains("rich_video_player") || lower.contains("video_player_view") ||
-                   lower.contains("video_play_button") || lower.contains("video_container")
+                   lower.contains("reels_viewer")
         }
 
         // 1. Direct event text / contentDescription / id
@@ -4934,11 +4929,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // 2. Check parent chain (e.g. clicked card inside Reels carousel or video container)
+        // 2. Check parent chain (e.g. clicked card inside Reels carousel)
         if (src != null) {
             var parent = src.parent
             var depth = 0
-            while (parent != null && depth < 4) {
+            while (parent != null && depth < 3) {
                 val pId = parent.viewIdResourceName?.toString().orEmpty().lowercase()
                 val pCd = parent.contentDescription?.toString().orEmpty().lowercase().trim()
                 if (isReelOrVideoId(pId) || isReelOrVideoAction(pCd)) {
@@ -4968,14 +4963,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 4. Click on video player surface directly (excluding stories)
-        if ((ev.className?.toString().orEmpty().contains("Video") || ev.className?.toString().orEmpty().contains("Player") ||
-             srcCls.contains("video") || srcCls.contains("player")) &&
-            !srcCls.contains("story") && !evCd.contains("story")) {
-            runCatching { src?.recycle() }
-            return true
-        }
-
         runCatching { src?.recycle() }
         return false
     }
@@ -4990,7 +4977,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         for (id in homeTabIds) {
             if (isTabSelectedById(root, id)) return true
         }
-        return scanSelectedTab(root, listOf("home, tab", "home tab", "news feed", "feeds", "হোম"))
+        return scanSelectedTab(root, listOf("home, tab", "home tab", "news feed", "feeds", "হোম", "home"))
     }
 
     private fun isFacebookReelsOrVideoTabSelected(root: AccessibilityNodeInfo): Boolean {
@@ -5014,22 +5001,24 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (hasAnyNodeId(root, FB_NEWSFEED_IDS)) return true
 
         val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(150))
+        collectText(root, sb, 0, intArrayOf(250))
         val t = sb.toString().lowercase()
-        return "what's on your mind" in t || "কী ভাবছেন" in t || "create a post" in t
+        return "what's on your mind" in t || "কী ভাবছেন" in t || "create a post" in t ||
+               "stories" in t || "স্টোরিজ" in t || ("like" in t && "comment" in t) ||
+               ("news feed" in t || "feeds" in t)
     }
 
     private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        // Fast story whitelist: NEVER block Facebook Stories
+        if (isFacebookStory(root, ev)) {
+            return false
+        }
+
         // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards FIRST
         if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (isFacebookVideoOrReelClick(ev)) {
                 return true
             }
-        }
-
-        // Fast story whitelist: NEVER block Facebook Stories
-        if (isFacebookStory(root, ev)) {
-            return false
         }
 
         // 1. Full-screen Video or Reels player IDs (ONLY dedicated full-screen viewer containers)
@@ -5045,7 +5034,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             evCls.contains("warionactivity") || rootCls.contains("warionactivity") ||
             evCls.contains("channelactivity") || rootCls.contains("channelactivity") ||
             evCls.contains("fullscreenvideoactivity") || rootCls.contains("fullscreenvideoactivity") ||
-            evCls.contains("unifiedvideovieweractivity") || rootCls.contains("unifiedvideovieweractivity")
+            evCls.contains("unifiedvideovieweractivity") || rootCls.contains("unifiedvideovieweractivity") ||
+            evCls.contains("watchandgo") || rootCls.contains("watchandgo") ||
+            evCls.contains("reelwatch") || rootCls.contains("reelwatch")
         if (isDedicatedVideoActivity) return true
 
         // 3. Navigation bar: If the Reels or Video/Watch tab is selected, block immediately!
@@ -5054,36 +5045,28 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 4. Check if user is currently on the Home Newsfeed (fast path)
         val onHomeFeed = isFacebookHomeFeed(root)
 
-        if (onHomeFeed) {
-            // ON HOME NEWSFEED:
-            // Do NOT block on passive preview shelves ("Reels and short videos") or inline video preview posts!
-            // Only block if a full-screen vertical swipe Reels player has taken over the screen.
-            val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(200))
-            val t = sb.toString().lowercase()
-            val isFullScreenOverlay =
-                "swipe up for next reel" in t || "swipe up for next video" in t ||
-                "remix this reel" in t || "remix reel" in t || "watch more reels" in t
-            return isFullScreenOverlay
-        }
-
-        // NOT ON HOME FEED (e.g. user navigated to dedicated Reels page, Watch tab, or video viewer):
         val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(1000))
+        collectText(root, sb, 0, intArrayOf(300))
         val t = sb.toString().lowercase()
 
-        val isReelsPageOrViewer =
-            "original audio" in t || "original sound" in t || "reels audio" in t ||
-            "use template" in t || "use audio" in t || "remix this reel" in t ||
-            "remix reel" in t || "watch more reels" in t || "swipe up for next reel" in t ||
-            "swipe up for next video" in t || "fbshorts" in t || "fb shorts" in t ||
-            t.startsWith("reels") || t.startsWith("reel") || t.startsWith("রিলস") ||
-            ("reels" in t && ("create reel" in t || "my reels" in t || "audio by" in t || "use template" in t || ("like" in t && "comment" in t && "share" in t && "follow" in t))) ||
-            ("reels" in t && ("remix" in t || "original audio" in t || "audio" in t || "sound" in t)) ||
-            ("রিলস" in t && ("অরিজিনাল" in t || "অডিও" in t || "টেমপ্লেট" in t || "অনুসরণ" in t || "তৈরি করুন" in t)) ||
-            ("watch" in t && ("for you" in t || "following" in t || "live" in t || "suggested videos" in t))
+        // Full-screen vertical swipe Reels overlay indicators
+        val isFullScreenOverlay =
+            "swipe up for next reel" in t || "swipe up for next video" in t ||
+            "remix this reel" in t || "remix reel" in t || "watch more reels" in t
+        if (isFullScreenOverlay) return true
 
-        return isReelsPageOrViewer
+        if (onHomeFeed) {
+            // ON HOME NEWSFEED:
+            // Never block standard feed posts, image carousels, or passive shelves
+            return false
+        }
+
+        // NOT ON HOME FEED: Only block if in a dedicated Reels viewer page
+        val isDedicatedReelsViewer =
+            ("fbshorts" in t || "fb shorts" in t || "reels audio" in t) ||
+            (("reels" in t || "রিলস" in t) && ("audio by" in t || "use template" in t || "remix this reel" in t || "use audio" in t))
+
+        return isDedicatedReelsViewer
     }
 
     // -------------------------------------------------------------------------

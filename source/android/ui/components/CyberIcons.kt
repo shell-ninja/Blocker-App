@@ -46,4 +46,9 @@ object CyberIcons {
     val Wifi: ImageVector = Icons.Rounded.Wifi
     val WifiOff: ImageVector = Icons.Rounded.WifiOff
     val Cellular: ImageVector = Icons.Rounded.SignalCellularAlt
+
+    val Code: ImageVector = Icons.Rounded.Code
+    val Download: ImageVector = Icons.Rounded.Download
+    val Refresh: ImageVector = Icons.Rounded.Refresh
+    val OpenInNew: ImageVector = Icons.Rounded.OpenInNew
 }

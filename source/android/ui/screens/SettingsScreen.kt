@@ -1,5 +1,7 @@
 package com.blocker.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -41,11 +44,15 @@ fun SettingsScreen(
 ) {
     val protection by repo.protectionState.collectAsState()
     val securityLock by repo.securityLockState.collectAsState()
+    val updateState by repo.updateState.collectAsState()
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
 
     var showSetPasswordDialog by remember { mutableStateOf(false) }
     var showDisablePasswordDialog by remember { mutableStateOf(false) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var showUpdateModal by remember { mutableStateOf(false) }
+    var cacheStats by remember { mutableStateOf(repo.getCacheStats()) }
 
     Column(
         modifier = modifier
@@ -322,33 +329,262 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 5. Engine Architecture & Footer
+        // 5. App Updates Card (Full feature restored from previous versions)
         GlowCard(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "Engine Architecture",
-                color = Color.White,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(CyberAccentSoft),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Download,
+                            contentDescription = null,
+                            tint = CyberAccentGlow,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "App Updates",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Direct GitHub release delivery & in-app updater",
+                            color = CyberTextSub,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+
+                if (updateState.hasUpdate) {
+                    StatusPillBadge(
+                        label = "New update",
+                        tone = BadgeTone.WARN,
+                        breathing = true
+                    )
+                } else if (updateState.release != null) {
+                    StatusPillBadge(
+                        label = "Up to date",
+                        tone = BadgeTone.OK,
+                        icon = CyberIcons.Check
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Installed Version
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Installed Version", color = CyberTextSub, fontSize = 12.5.sp)
+                Text(
+                    text = "v${BlockerStore.APP_VERSION} (build ${BlockerStore.BUILD_NUMBER})",
+                    color = Color.White,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "UI Framework", color = CyberTextSub, fontSize = 12.sp)
-                Text(text = "100% Pure Jetpack Compose", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+            // Latest GitHub Release
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Latest GitHub Release", color = CyberTextSub, fontSize = 12.5.sp)
+                val relText = when {
+                    updateState.checking -> "Checking..."
+                    updateState.release != null -> updateState.release!!.tagName
+                    else -> "Not checked yet"
+                }
+                Text(
+                    text = relText,
+                    color = if (updateState.hasUpdate) CyberWarn else CyberAccentGlow,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "Core Engine", color = CyberTextSub, fontSize = 12.sp)
-                Text(text = "C++20 NDK (Zero-GC)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Download Cache
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Download Cache", color = CyberTextSub, fontSize = 12.5.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val cacheMb = if (cacheStats.second > 0L) {
+                        String.format("%.1f MB (%d file%s)", cacheStats.second / (1024f * 1024f), cacheStats.first, if (cacheStats.first > 1) "s" else "")
+                    } else {
+                        "Clean (0 MB)"
+                    }
+                    Text(text = cacheMb, color = CyberTextSub, fontSize = 12.sp)
+                    if (cacheStats.first > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CyberDangerSoft)
+                                .border(1.dp, CyberDangerBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    repo.clearUpdateCache()
+                                    cacheStats = repo.getCacheStats()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(text = "Clear", color = CyberDanger, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "Version", color = CyberTextSub, fontSize = 12.sp)
-                Text(text = "v1.0.6.7 (Pure Native)", color = CyberAccentGlow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+            if (updateState.error != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = updateState.error!!,
+                    color = CyberDanger,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (updateState.hasUpdate) {
+                    Btn(
+                        label = "View & Install",
+                        icon = CyberIcons.Download,
+                        onClick = { showUpdateModal = true },
+                        kind = BtnKind.PRIMARY,
+                        modifier = Modifier.weight(1.3f)
+                    )
+                    Btn(
+                        label = if (updateState.checking) "Checking..." else "Check Again",
+                        icon = CyberIcons.Refresh,
+                        enabled = !updateState.checking,
+                        onClick = { repo.checkForUpdates(true) },
+                        kind = BtnKind.GHOST,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Btn(
+                        label = if (updateState.checking) "Checking..." else "Check Updates",
+                        icon = if (updateState.checking) CyberIcons.Refresh else CyberIcons.Clock,
+                        enabled = !updateState.checking,
+                        onClick = { repo.checkForUpdates(true) },
+                        kind = BtnKind.PRIMARY,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (updateState.release != null) {
+                        Btn(
+                            label = "Release Notes",
+                            icon = CyberIcons.Book,
+                            onClick = { showUpdateModal = true },
+                            kind = BtnKind.GHOST,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // Source Code Button
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CyberCardSurface)
+                .border(1.dp, CyberAccent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                .clickable {
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/shell-ninja/Blocker-App"))
+                        context.startActivity(intent)
+                    }
+                }
+                .padding(vertical = 12.dp, horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(imageVector = CyberIcons.Code, contentDescription = null, tint = CyberAccentGlow, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "Source Code", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(imageVector = CyberIcons.OpenInNew, contentDescription = null, tint = CyberTextSub, modifier = Modifier.size(14.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Shell Ninja Author Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable {
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/shell-ninja"))
+                        context.startActivity(intent)
+                    }
+                }
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.shell_ninja_logo),
+                contentDescription = "Shell Ninja Logo",
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .border(1.dp, CyberAccentGlow.copy(alpha = 0.5f), CircleShape)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Developed by Shell Ninja",
+                color = CyberAccentGlow,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = CyberIcons.OpenInNew,
+                contentDescription = null,
+                tint = CyberAccentGlow.copy(alpha = 0.7f),
+                modifier = Modifier.size(12.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Version Footer
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
@@ -358,19 +594,35 @@ fun SettingsScreen(
                 painter = painterResource(id = R.mipmap.ic_launcher),
                 contentDescription = "Blocker Icon",
                 modifier = Modifier
-                    .size(20.dp)
-                    .clip(RoundedCornerShape(5.dp))
+                    .size(18.dp)
+                    .clip(RoundedCornerShape(4.dp))
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(7.dp))
             Text(
-                text = "Blocker v1.0.6.7 (build 88)",
+                text = "Blocker v${BlockerStore.APP_VERSION} (build ${BlockerStore.BUILD_NUMBER})",
                 color = CyberTextSub,
-                fontSize = 12.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
+    }
+
+    // --- Dialog for Update Release Notes & Download ---
+    if (showUpdateModal && updateState.release != null) {
+        UpdateModal(
+            updateState = updateState,
+            onDismiss = { showUpdateModal = false },
+            onDownloadAndInstall = {
+                repo.downloadAndInstallUpdate()
+                cacheStats = repo.getCacheStats()
+            },
+            onOpenSettings = {
+                repo.openInstallSettings()
+            },
+            canInstall = repo.canRequestPackageInstalls()
+        )
     }
 
     // --- Dialogs for Password Management ---

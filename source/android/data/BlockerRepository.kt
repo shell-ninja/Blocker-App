@@ -148,9 +148,13 @@ class BlockerRepository(private val context: Context) {
     private val _isRefreshingApps = MutableStateFlow(false)
     val isRefreshingApps: StateFlow<Boolean> = _isRefreshingApps.asStateFlow()
 
+    val updateManager = UpdateManager(appContext)
+    val updateState: StateFlow<UpdateState> = updateManager.updateState
+
     init {
         BlockerStore.seedDefaultApps(appContext)
         refreshAll()
+        checkForUpdates(false)
 
         // Periodic ticker for active countdowns
         scope.launch {
@@ -159,6 +163,30 @@ class BlockerRepository(private val context: Context) {
                 tickCountdowns()
             }
         }
+    }
+
+    fun checkForUpdates(manual: Boolean = false) {
+        updateManager.checkForUpdate(manual)
+    }
+
+    fun downloadAndInstallUpdate() {
+        updateManager.downloadAndInstall()
+    }
+
+    fun clearUpdateCache(): Long {
+        return updateManager.clearUpdateCache()
+    }
+
+    fun getCacheStats(): Pair<Int, Long> {
+        return updateManager.getCacheStats()
+    }
+
+    fun canRequestPackageInstalls(): Boolean {
+        return updateManager.canRequestPackageInstalls()
+    }
+
+    fun openInstallSettings() {
+        updateManager.openInstallSettings()
     }
 
     fun refreshAll() {
@@ -363,6 +391,10 @@ class BlockerRepository(private val context: Context) {
             val rem = BlockerStore.focusRemainingMs(appContext)
             _focusState.value = _focusState.value.copy(remainingMs = rem)
         }
+        val prot = _protectionState.value
+        if (prot.pendingUntil > 0L || prot.guardOpenUntil > 0L) {
+            refreshProtection()
+        }
     }
 
     // --- Action Methods ---
@@ -382,15 +414,8 @@ class BlockerRepository(private val context: Context) {
         } else {
             // Check if open window is active
             val openUntil = p.getLong("open_protection", 0L)
-            if (now < openUntil) {
-                DeviceOwnerHelper.updateUninstallBlocked(appContext, false)
-                p.edit()
-                    .putBoolean("active", false)
-                    .remove("pending_protection")
-                    .remove("open_protection")
-                    .apply()
-                BlockerStore.updateIntegrityHmac(appContext)
-                refreshProtection()
+            if (openUntil > 0L && now < openUntil) {
+                confirmProtectionOff()
             } else {
                 // Request countdown timer (strictly 24 hours)
                 val delayMs = BlockerStore.delayMs(appContext)
@@ -401,6 +426,23 @@ class BlockerRepository(private val context: Context) {
                 BlockerStore.updateIntegrityHmac(appContext)
                 refreshProtection()
             }
+        }
+    }
+
+    fun confirmProtectionOff() {
+        val p = BlockerStore.prefs(appContext)
+        val now = SecureTime.now(appContext)
+        val openUntil = p.getLong("open_protection", 0L)
+        val pendingUntil = p.getLong("pending_protection", 0L)
+        if ((openUntil > 0L && now < openUntil) || (pendingUntil > 0L && now >= pendingUntil)) {
+            DeviceOwnerHelper.updateUninstallBlocked(appContext, false)
+            p.edit()
+                .putBoolean("active", false)
+                .remove("pending_protection")
+                .remove("open_protection")
+                .apply()
+            BlockerStore.updateIntegrityHmac(appContext)
+            refreshProtection()
         }
     }
 

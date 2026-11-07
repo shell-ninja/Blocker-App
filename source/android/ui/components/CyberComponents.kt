@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.R
 import com.blocker.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 enum class CardTone {
     DEFAULT, OK, ACCENT, DANGER, WARN
@@ -326,77 +328,208 @@ fun CyberSwitch(
 }
 
 /**
- * Countdown delay lock bar
+ * Countdown delay lock bar with live ticker and confirmation window
  */
 @Composable
 fun LockBar(
     pendingUntil: Long,
+    guardOpenUntil: Long = 0L,
+    onConfirm: () -> Unit = {},
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (pendingUntil <= 0L) return
+    if (pendingUntil <= 0L && guardOpenUntil <= 0L) return
 
-    val now = System.currentTimeMillis()
-    val remainingMs = (pendingUntil - now).coerceAtLeast(0L)
-    val remainingSec = remainingMs / 1000L
-    val hours = remainingSec / 3600L
-    val minutes = (remainingSec % 3600L) / 60L
-    val seconds = remainingSec % 60L
+    var currentNow by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    val timeStr = if (hours > 0) {
-        String.format("%02dh %02dm %02ds", hours, minutes, seconds)
-    } else {
-        String.format("%02dm %02ds", minutes, seconds)
+    LaunchedEffect(pendingUntil, guardOpenUntil) {
+        while (isActive) {
+            currentNow = System.currentTimeMillis()
+            delay(500L)
+        }
     }
+
+    val isGuardOpen = guardOpenUntil > 0L && currentNow < guardOpenUntil
+    val isPendingReady = pendingUntil > 0L && currentNow >= pendingUntil
+    val isReady = isGuardOpen || isPendingReady
 
     val shape = RoundedCornerShape(16.dp)
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(CyberAccentWell)
-            .border(1.dp, CyberAccent.copy(alpha = 0.45f), shape)
-            .padding(14.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+    if (isReady) {
+        // Confirmation Window (Guard is open for 10 minutes)
+        val guardRemainingMs = if (guardOpenUntil > 0L) (guardOpenUntil - currentNow).coerceAtLeast(0L) else 0L
+        val guardMins = (guardRemainingMs / 1000L) / 60L
+        val guardSecs = (guardRemainingMs / 1000L) % 60L
+        val windowText = if (guardRemainingMs > 0L) {
+            String.format("%02dm %02ds remaining to confirm", guardMins, guardSecs)
+        } else {
+            "Ready to turn off"
+        }
+
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(CyberOkSoft)
+                .border(1.dp, CyberOkBorder, shape)
+                .padding(14.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(CyberOkSoft),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = CyberIcons.Check,
+                        contentDescription = null,
+                        tint = CyberOk,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Timer Complete",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = windowText,
+                        color = CyberOk,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "The waiting period has finished. Confirm below to turn off protection, or cancel to keep your fortress locked.",
+                color = CyberTextSub,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Btn(
+                    label = "Keep Active",
+                    onClick = onCancel,
+                    kind = BtnKind.GHOST,
+                    modifier = Modifier.weight(1f)
+                )
+                Btn(
+                    label = "Confirm & Turn Off",
+                    onClick = onConfirm,
+                    kind = BtnKind.DANGER,
+                    modifier = Modifier.weight(1.3f)
+                )
+            }
+        }
+    } else {
+        // Pending Countdown
+        val remainingMs = (pendingUntil - currentNow).coerceAtLeast(0L)
+        val remainingSec = remainingMs / 1000L
+        val hours = remainingSec / 3600L
+        val minutes = (remainingSec % 3600L) / 60L
+        val seconds = remainingSec % 60L
+
+        val timeStr = if (hours > 0) {
+            String.format("%02dh %02dm %02ds", hours, minutes, seconds)
+        } else {
+            String.format("%02dm %02ds", minutes, seconds)
+        }
+
+        // Calculate progress based on total 24h (or 60s in debug)
+        val isDebug = pendingUntil - currentNow < 120_000L && pendingUntil - currentNow > 0L
+        val totalSpan = if (isDebug) 60_000f else 86_400_000f
+        val progress = (1f - (remainingMs.toFloat() / totalSpan)).coerceIn(0f, 1f)
+
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(CyberAccentWell)
+                .border(1.dp, CyberAccent.copy(alpha = 0.45f), shape)
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(CyberAccentSoft),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = CyberIcons.Lock,
+                        contentDescription = null,
+                        tint = CyberAccentGlow,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Protection Delay Active",
+                        color = Color.White,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "$timeStr remaining",
+                        color = CyberAccentGlow,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                TextButton(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.textButtonColors(contentColor = CyberWarn)
+                ) {
+                    Text(text = "Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Progress bar
             Box(
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(CyberAccentSoft),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF1E293B))
             ) {
-                Icon(
-                    imageVector = CyberIcons.Lock,
-                    contentDescription = null,
-                    tint = CyberAccentGlow,
-                    modifier = Modifier.size(18.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Brush.horizontalGradient(listOf(CyberAccent, CyberAccentGlow)))
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Unlock timer active",
-                    color = CyberText,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "$timeStr remaining",
-                    color = CyberTextSub,
-                    fontSize = 12.sp
-                )
-            }
-            TextButton(
-                onClick = onCancel,
-                colors = ButtonDefaults.textButtonColors(contentColor = CyberWarn)
-            ) {
-                Text(text = "Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Strict waiting period active. Protection remains fully engaged until countdown completes and you confirm.",
+                color = CyberTextSub,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }
