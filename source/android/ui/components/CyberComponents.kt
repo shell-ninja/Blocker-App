@@ -450,9 +450,8 @@ fun LockBar(
             String.format("%02dm %02ds", minutes, seconds)
         }
 
-        // Calculate progress based on total 24h (or 60s in debug)
-        val isDebug = pendingUntil - currentNow < 120_000L && pendingUntil - currentNow > 0L
-        val totalSpan = if (isDebug) 60_000f else 86_400_000f
+        // Calculate progress based on total 24h
+        val totalSpan = 86_400_000f
         val progress = (1f - (remainingMs.toFloat() / totalSpan)).coerceIn(0f, 1f)
 
         Column(

@@ -45,7 +45,8 @@ fun BlockerAppRoot(
     val securityLock by repo.securityLockState.collectAsState()
 
     var currentTab by remember { mutableStateOf(NavTab.HOME) }
-    var showOnboarding by remember { mutableStateOf(!perms.accessibility) }
+    val isOnboardingDone = remember { repo.isOnboardingCompleted() }
+    var showOnboarding by remember { mutableStateOf(!isOnboardingDone && !perms.accessibility) }
     val isAppLocked = securityLock.isParentLockEnabled && !securityLock.isAppUnlocked
 
     // Intercept back button during study/focus lock or app lock
@@ -79,7 +80,10 @@ fun BlockerAppRoot(
                 showOnboarding -> {
                     OnboardingScreen(
                         repo = repo,
-                        onComplete = { showOnboarding = false }
+                        onComplete = {
+                            repo.setOnboardingCompleted(true)
+                            showOnboarding = false
+                        }
                     )
                 }
                 study.active -> {

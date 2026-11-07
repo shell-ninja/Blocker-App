@@ -339,10 +339,14 @@ object BlockerStore {
     }
 
     fun delayDays(c: Context): Int = 1
-    // Fixed 24-hour waiting period. Debug builds shorten 24 hours to one minute so timers can be tested quickly.
-    fun delayMs(c: Context): Long {
-        val debug = (c.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        return if (debug) 60_000L else DAY_MS
+    // Fixed strict 24-hour waiting period
+    fun delayMs(c: Context): Long = DAY_MS
+
+    fun isOnboardingCompleted(c: Context): Boolean =
+        prefs(c).getBoolean("onboarding_completed", false)
+
+    fun setOnboardingCompleted(c: Context, completed: Boolean) {
+        prefs(c).edit().putBoolean("onboarding_completed", completed).apply()
     }
 
     // --- Parental Security & App Lock ---

@@ -323,7 +323,14 @@ class BlockerRepository(private val context: Context) {
         )
     }
 
-    fun refreshInstalledApps() {
+    fun isOnboardingCompleted(): Boolean = BlockerStore.isOnboardingCompleted(appContext)
+
+    fun setOnboardingCompleted(completed: Boolean) {
+        BlockerStore.setOnboardingCompleted(appContext, completed)
+    }
+
+    fun refreshInstalledApps(force: Boolean = false) {
+        if (!force && _installedApps.value.isNotEmpty()) return
         scope.launch {
             _isRefreshingApps.value = true
             val items = withContext(Dispatchers.IO) {
@@ -436,6 +443,15 @@ class BlockerRepository(private val context: Context) {
         val pendingUntil = p.getLong("pending_protection", 0L)
         if ((openUntil > 0L && now < openUntil) || (pendingUntil > 0L && now >= pendingUntil)) {
             DeviceOwnerHelper.updateUninstallBlocked(appContext, false)
+            DeviceOwnerHelper.clearDisallowSafeBoot(appContext)
+            // Programmatically deactivate Device Admin so user can uninstall freely
+            val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            if (dpm != null) {
+                val admin1 = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
+                val admin2 = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
+                runCatching { dpm.removeActiveAdmin(admin1) }
+                runCatching { dpm.removeActiveAdmin(admin2) }
+            }
             p.edit()
                 .putBoolean("active", false)
                 .remove("pending_protection")
@@ -443,6 +459,7 @@ class BlockerRepository(private val context: Context) {
                 .apply()
             BlockerStore.updateIntegrityHmac(appContext)
             refreshProtection()
+            refreshPermissions()
         }
     }
 

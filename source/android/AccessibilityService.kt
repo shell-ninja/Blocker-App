@@ -912,9 +912,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         runCatching {
+            val originalHandler = Thread.getDefaultUncaughtExceptionHandler()
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
                 Log.e(TAG, "Uncaught exception on thread ${thread.name}", throwable)
                 runCatching { BlockerForegroundService.start(this) }
+                originalHandler?.uncaughtException(thread, throwable)
             }
         }
         BlockerForegroundService.start(this)
@@ -1162,6 +1164,24 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = sb.toString().lowercase()
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
 
+        val isDeactivationAttempt = "deactivate" in t || "নিষ্ক্রিয়" in t || "নিষ্ক্রিয়" in t
+        val isDeviceAdminActivation = (rootCls.contains("deviceadminadd") ||
+            "activate this device admin" in t || "activate this device administrator" in t ||
+            "activate admin app" in t || ("activate" in t && ("device admin" in t || "admin app" in t)) ||
+            ("সক্রিয়" in t && "অ্যাডমিন" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t)) && !isDeactivationAttempt
+
+        if (isDeviceAdminActivation) {
+            return true
+        }
+
+        if (!isOurAdminActive() && !isDeactivationAttempt) {
+            val isAdminSetup = rootCls.contains("deviceadmin") || rootCls.contains("adminsettings") ||
+                "device admin" in t || "device administrator" in t || "admin app" in t || "device policy" in t
+            if (isAdminSetup) {
+                return true
+            }
+        }
+
         // 1. If there are explicit destructive actions on screen, it is NEVER a safe permission screen!
         val hasDestructiveAction = "force stop" in t || "clear storage" in t ||
             "clear data" in t || "delete app data" in t || "manage space" in t || "clear app data" in t ||
@@ -1177,27 +1197,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // 3. Deactivate is NEVER legitimate while shield is engaged
-        if ("deactivate" in t) {
+        if (isDeactivationAttempt) {
             return false
-        }
-
-        // 4. Legitimate Device Admin Activation Screen (must NOT contain destructive actions):
-        val isDeviceAdminActivation = rootCls.contains("deviceadminadd") ||
-            "activate this device admin" in t || "activate this device administrator" in t ||
-            "activate admin app" in t || ("activate" in t && ("device admin" in t || "admin app" in t)) ||
-            ("সক্রিয়" in t && "অ্যাডমিন" in t)
-
-        if (isDeviceAdminActivation) {
-            return true
-        }
-
-        // If Device Admin is not active yet, any Device Admin setup/list screen is legitimate setup!
-        if (!isOurAdminActive()) {
-            val isAdminSetup = rootCls.contains("deviceadmin") || rootCls.contains("adminsettings") ||
-                "device admin" in t || "device administrator" in t || "admin app" in t || "device policy" in t
-            if (isAdminSetup) {
-                return true
-            }
         }
 
         // 5. Legitimate special app access / permission screens:
@@ -1341,6 +1342,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     private fun isBlockerAccessibilityDetailsScreen(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
         if (!selfProtectionActive()) return false
         val pkg = ev?.packageName?.toString() ?: root?.packageName?.toString().orEmpty()
+        if (pkg == packageName) return false
         if (pkg.isNotEmpty() && !isSettingsPkg(pkg) && pkg != "android") return false
 
         // Check if this is Page 1 (main list): if so, NEVER block!
@@ -1584,6 +1586,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun evaluateScreenWithNativeEngine(ev: AccessibilityEvent?, pkg: String): Boolean {
         if (pkg == packageName || pkg in BANKING_PACKAGES || isLauncherPkg(pkg)) return false
+        val rootPkg = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        if (rootPkg == packageName) return false
         val isShieldActive = selfProtectionActive()
         val blockDateTime = shouldBlockDateTime()
         val blockSchedPower = shouldBlockScheduledPower()
@@ -1631,11 +1635,12 @@ class BlockerAccessibilityService : AccessibilityService() {
                 for (w in wins) {
                     if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
                     val r = runCatching { w.root }.getOrNull() ?: continue
+                    if (r.packageName?.toString() == packageName) continue
                     queueNodes.add(r)
                 }
             } else {
                 val r = rootInActiveWindow ?: ev?.source
-                if (r != null) queueNodes.add(r)
+                if (r != null && r.packageName?.toString() != packageName) queueNodes.add(r)
             }
 
             var nodeCount = 0
@@ -1781,12 +1786,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 else -> return false
             }
         } finally {
-            for (node in passNodes) {
-                runCatching { node.recycle() }
-            }
-            for (node in queueNodes) {
-                runCatching { node.recycle() }
-            }
             passNodes.clear()
             queueNodes.clear()
         }
@@ -1845,8 +1844,18 @@ class BlockerAccessibilityService : AccessibilityService() {
             val ev = e ?: return
             val pkg = ev.packageName?.toString() ?: return
 
-            // 1. Zero lag inside Blocker UI: immediately return without any processing
-            if (pkg == packageName) {
+            // 0. Top-priority defense: Check if Power Menu Dialog is showing over any app
+            if (checkPowerMenuDialog(ev, pkg)) return
+
+            // 1. Absolute zero-lag safety boundary:
+            // If the event is from Blocker, OR if foreground active window belongs to Blocker,
+            // OR if event source belongs to Blocker:
+            // The user is inside Blocker! NEVER kick, evaluate, or tamper-check our own app!
+            val rootPkg = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+            val srcPkg = runCatching { ev.source?.packageName?.toString() }.getOrNull()
+            val isInsideSelf = (pkg == packageName) || (rootPkg == packageName) || (srcPkg == packageName)
+
+            if (isInsideSelf) {
                 lastBlockerExitTime = 0L
                 lastBlockerExitElapsed = 0L
                 viewingBlockerSettingsUntil = 0L
@@ -1854,20 +1863,24 @@ class BlockerAccessibilityService : AccessibilityService() {
                 outsideSettingsCount = 0
                 main.removeCallbacks(settingsPollRunnable)
                 previousEventPkg = packageName
+                currentFgPkg = packageName
                 return
             }
+
             if (previousEventPkg == packageName) {
                 lastBlockerExitTime = SystemClock.uptimeMillis()
                 lastBlockerExitElapsed = SystemClock.elapsedRealtime()
             }
             previousEventPkg = pkg
 
-            // 2. Zero lag when typing: drop IME keyboards instantly (neverBlock must NOT drop here — it contains launchers & android framework!)
+            // 2. Zero lag when typing: drop IME keyboards instantly
             if (isImePkg(pkg)) return
 
             // 3. Drop text changed and text selection events: never process per-keystroke inputs
             if (ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
-                ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
+                ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
+                ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY ||
+                ev.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
                 return
             }
 
@@ -1877,9 +1890,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (powerManager?.isInteractive == false) {
                 return
             }
-
-            // --- 0MS TOP-PRIORITY DEFENSE: Intercept Power Menu Dialog immediately across all apps! ---
-            if (checkPowerMenuDialog(ev, pkg)) return
 
             // Cleanly dismiss shield whenever we are on a launcher screen
             if (isLauncherPkg(pkg)) {
@@ -3319,6 +3329,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isSelfMentioned(ev: AccessibilityEvent?): Boolean {
         if (ev != null) {
+            val evPkg = ev.packageName?.toString().orEmpty()
+            if (evPkg == packageName) return false
+
             for (t in ev.text) {
                 if (matchesSelfIdentity(t)) return true
             }
@@ -3326,32 +3339,22 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             val src = runCatching { ev.source }.getOrNull()
             if (src != null) {
-                try {
+                if (src.packageName?.toString() != packageName) {
                     if (matchesSelfIdentity(src.text) || matchesSelfIdentity(src.contentDescription)) return true
                     val parent = src.parent
                     if (parent != null) {
-                        try {
-                            if (matchesSelfIdentity(parent.text) || matchesSelfIdentity(parent.contentDescription)) return true
-                        } finally {
-                            runCatching { parent.recycle() }
-                        }
+                        if (matchesSelfIdentity(parent.text) || matchesSelfIdentity(parent.contentDescription)) return true
                     }
-                } finally {
-                    runCatching { src.recycle() }
                 }
             }
         }
 
         val root = runCatching { rootInActiveWindow }.getOrNull()
-        if (root != null) {
-            try {
-                val sb = StringBuilder()
-                collectText(root, sb, 0, intArrayOf(150))
-                val t = sb.toString()
-                if (matchesSelfIdentity(t)) return true
-            } finally {
-                runCatching { root.recycle() }
-            }
+        if (root != null && root.packageName?.toString() != packageName) {
+            val sb = StringBuilder()
+            collectText(root, sb, 0, intArrayOf(150))
+            val t = sb.toString()
+            if (matchesSelfIdentity(t)) return true
         }
 
         val wins = runCatching { windows }.getOrNull()
@@ -3362,14 +3365,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                     if (matchesSelfIdentity(w.title)) return true
                 }
                 val wr = runCatching { w.root }.getOrNull() ?: continue
-                try {
-                    val sb = StringBuilder()
-                    collectText(wr, sb, 0, intArrayOf(80))
-                    val wt = sb.toString()
-                    if (matchesSelfIdentity(wt)) return true
-                } finally {
-                    runCatching { wr.recycle() }
-                }
+                if (wr.packageName?.toString() == packageName) continue
+                val sb = StringBuilder()
+                collectText(wr, sb, 0, intArrayOf(80))
+                val wt = sb.toString()
+                if (matchesSelfIdentity(wt)) return true
             }
         }
 
@@ -3378,6 +3378,16 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isBlockerAppInfoScreen(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
         if (!selfProtectionActive()) return false
+        val rootPkg = root.packageName?.toString().orEmpty()
+        val evPkg = ev?.packageName?.toString().orEmpty()
+        if (rootPkg == packageName || evPkg == packageName) return false
+        if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isActualSettingsPkg(rootPkg) && rootPkg != "android") {
+            return false
+        }
+        val rootCls = root.className?.toString()?.lowercase().orEmpty()
+        val evCls = ev?.className?.toString()?.lowercase().orEmpty()
+        if (rootCls.contains("deviceadminadd") || evCls.contains("deviceadminadd")) return false
+
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(200))
         if (ev != null) {
@@ -3386,11 +3396,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val t = sb.toString().lowercase()
 
+        // Device admin activation is allowed
+        if (rootCls.contains("deviceadminadd") || "activate this device admin" in t || "activate admin app" in t ||
+            ("activate" in t && "admin" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t)) {
+            if (!t.contains("deactivate") && !t.contains("নিষ্ক্রিয়")) return false
+        }
+
         // Must not block legitimate permission screens or install/update
         if (isLegitimatePermissionScreen(root, t) || isInstallOrUpdateDialog(ev, root)) return false
-
-        // Device admin activation is allowed
-        if ("activate this device admin" in t || "activate admin app" in t || ("activate" in t && "admin" in t)) return false
 
         // Check if screen has App Info destructive elements:
         val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
@@ -3490,28 +3503,30 @@ class BlockerAccessibilityService : AccessibilityService() {
         // =========================================================================
         // VECTOR 2: Accessibility Settings (Page 1 Allowed, Page 2 & Stop Dialogs Blocked)
         // =========================================================================
-        if (isSettings || isSystem) {
+        if (isSettings) {
             val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-            try {
-                if (isAccessibilityMainListScreen(root, ev)) {
-                    // Page 1 is strictly ALLOWED
-                    return false
+            if (root != null && root.packageName?.toString() != packageName) {
+                try {
+                    if (isAccessibilityMainListScreen(root, ev)) {
+                        // Page 1 is strictly ALLOWED
+                        return false
+                    }
+                    if (isBlockerAccessibilityDetailsScreen(root, ev)) {
+                        autoCancelDialog(root)
+                        kickFromA11yDetails()
+                        kickToHome()
+                        return true
+                    }
+                } finally {
+                    runCatching { root.recycle() }
                 }
-                if (isBlockerAccessibilityDetailsScreen(root, ev)) {
-                    autoCancelDialog(root)
-                    kickFromA11yDetails()
-                    kickToHome()
-                    return true
-                }
-            } finally {
-                runCatching { root?.recycle() }
             }
         }
 
         // =========================================================================
         // VECTOR 3: Settings App Info & Destructive Button Clicks
         // =========================================================================
-        if (isSettings || isSystem) {
+        if (isSettings) {
             if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
                 val rowText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
 
@@ -3524,7 +3539,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     rowText.contains("আনইনস্টল") || rowText.contains("জোরপূর্বক থামান")
                 if (isDestructiveClick) {
                     val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-                    val selfTarget = isSelfMentioned(ev) || (root != null && isBlockerAppInfoScreen(root, ev))
+                    val selfTarget = isSelfMentioned(ev) || (root != null && root.packageName?.toString() != packageName && isBlockerAppInfoScreen(root, ev))
                     runCatching { root?.recycle() }
                     if (selfTarget) {
                         autoCancelDialog(rootInActiveWindow)
@@ -3540,7 +3555,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             // Case 3C: Current screen is Blocker App Info page
             val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-            if (root != null) {
+            if (root != null && root.packageName?.toString() != packageName) {
                 try {
                     if (isBlockerAppInfoScreen(root, ev)) {
                         autoCancelDialog(root)
@@ -3557,8 +3572,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         // =========================================================================
         // VECTOR 4: Uninstallation & Package Installer Protection
         // =========================================================================
-        if (isInstaller || isSystem) {
+        if (isInstaller || pkg == "android") {
             val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
+            if (root != null && root.packageName?.toString() == packageName) {
+                return false
+            }
             try {
                 if (isInstallOrUpdateDialog(ev, root)) {
                     // Update / Install of APK is ALWAYS allowed
@@ -5521,7 +5539,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (hasSeekBarOrTransport || hasTopReelsOrWatchTitle) break
                 val child = node.getChild(i) ?: continue
                 scan(child, depth + 1, budget)
-                child.recycle()
             }
         }
 
@@ -5586,7 +5603,6 @@ class BlockerAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 scanNavTabs(child, depth + 1, budget)
-                child.recycle()
             }
         }
 
