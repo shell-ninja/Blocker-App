@@ -40,4 +40,10 @@ object CyberIcons {
     val ExpandLess: ImageVector = Icons.Rounded.ExpandLess
     val Book: ImageVector = Icons.Rounded.MenuBook
     val Guide: ImageVector = Icons.Rounded.Explore
+
+    val Dnd: ImageVector = Icons.Rounded.DoNotDisturb
+    val NotificationsOff: ImageVector = Icons.Rounded.NotificationsOff
+    val Wifi: ImageVector = Icons.Rounded.Wifi
+    val WifiOff: ImageVector = Icons.Rounded.WifiOff
+    val Cellular: ImageVector = Icons.Rounded.SignalCellularAlt
 }

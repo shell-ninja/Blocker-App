@@ -380,7 +380,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     private val hideRunnable = Runnable { removeOverlay() }
 
     // system UI and launchers are never scanned or blocked (blocking the launcher would trap the user)
-    private var neverBlock: Set<String> = setOf("com.android.systemui", "android") + BANKING_PACKAGES
+    private var neverBlock: Set<String> = setOf("com.android.systemui", "android", "com.blocker") + BANKING_PACKAGES
+    @Volatile private var cachedImePackages: Set<String> = emptySet()
     private var discoveredSettingsPkgs: Set<String> = emptySet()
     @Volatile private var viewingBlockerSettingsUntil: Long = 0L
     @Volatile private var lastPollKick = 0L
@@ -922,6 +923,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         loadAppIdentity()
         BlockerStore.seedDefaultApps(this)   // default app blocks work even before Blocker's own UI is ever opened
         refreshLauncherPackages()
+        refreshImePackages()
         neverBlock = neverBlock + launcherPackages() + cameraPackages()
         reload()
         runCatching {
@@ -1146,13 +1148,15 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isLegitimatePermissionScreen(root: AccessibilityNodeInfo?, text: String): Boolean {
+        if (!shieldEngaged()) return true
         val t = text.lowercase()
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
 
         // 0. Legitimate Device Admin Activation Screen (must exempt before destructive checks)
-        val isDeviceAdminActivation = (rootCls.contains("deviceadminadd") ||
-            (("device admin" in t || "device administrator" in t || "admin app" in t) &&
-             ("activate" in t || "turn on" in t || "enable" in t))) &&
+        val isDeviceAdminActivation = (rootCls.contains("deviceadmin") || rootCls.contains("adminsettings") ||
+            "device admin" in t || "device administrator" in t || "admin app" in t ||
+            "activate this device admin" in t || "activate this device administrator" in t ||
+            "activate admin app" in t || ("activate" in t && "admin" in t)) &&
             "deactivate" !in t
         if (isDeviceAdminActivation) {
             return true
@@ -1168,9 +1172,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // If there are explicit dangerous actions on screen, it is NEVER a safe permission screen!
-        val hasDestructiveAction = "uninstall" in t || "force stop" in t || "clear storage" in t ||
+        val hasDestructiveAction = "force stop" in t || "clear storage" in t ||
             "clear data" in t || "delete app data" in t || "manage space" in t || "clear app data" in t ||
-            "do you want to uninstall" in t || "uninstall this app" in t || "disable" in t
+            "do you want to uninstall" in t || "uninstall this app" in t || "disable" in t ||
+            ("uninstall" in t && !isDeviceAdminActivation)
         if (hasDestructiveAction) {
             return false
         }
@@ -1302,6 +1307,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isBlockerAccessibilityDetailsScreen(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
+        if (!shieldEngaged()) return false
         val pkg = ev?.packageName?.toString() ?: root?.packageName?.toString().orEmpty()
         if (pkg.isNotEmpty() && !isSettingsPkg(pkg) && pkg != "android") return false
 
@@ -1311,6 +1317,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (ev != null) sb.append(" ").append(ev.text.joinToString(" "))
             sb.toString().lowercase()
         }
+        if ("device admin" in fullText || "device administrator" in fullText || "admin app" in fullText) return false
 
         val name = if (appLabel.isNotEmpty()) appLabel.lowercase() else "blocker"
         val hasAppName = name in fullText || "blocker" in fullText || packageName.lowercase() in fullText
@@ -1438,7 +1445,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun reload() {
         discoveredSettingsPkgs = settingsPackages()
-        neverBlock = setOf("com.android.systemui", "android") + BANKING_PACKAGES + launcherPackages() + cameraPackages()
+        cachedImePackages = imePackages()
+        neverBlock = setOf("com.android.systemui", "android", packageName) + BANKING_PACKAGES + launcherPackages() + cameraPackages() + cachedImePackages
         domains = BlockerStore.set(this, "domains")
         keywords = BlockerStore.set(this, "keywords") - RETIRED_KEYWORDS
         tlds = BlockerStore.set(this, "tlds")
@@ -1511,6 +1519,21 @@ class BlockerAccessibilityService : AccessibilityService() {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .enabledInputMethodList.map { it.packageName }.toSet()
     }.getOrDefault(emptySet())
+
+    private fun isImePkg(pkg: String): Boolean {
+        if (cachedImePackages.contains(pkg)) return true
+        val lower = pkg.lowercase()
+        return lower.contains("inputmethod") || lower.contains("keyboard") ||
+            lower.contains("ime") || lower.contains("honeyboard") ||
+            lower.contains("swiftkey") || lower.contains("gboard") ||
+            lower.contains("ridmik")
+    }
+
+    private fun refreshImePackages() {
+        val imes = imePackages()
+        cachedImePackages = imes
+        neverBlock = neverBlock + imes + packageName
+    }
 
     private val directBuffer: ByteBuffer = ByteBuffer.allocateDirect(128 * 1024).order(ByteOrder.nativeOrder())
     private val queueNodes = ArrayList<AccessibilityNodeInfo>(200)
@@ -1782,6 +1805,18 @@ class BlockerAccessibilityService : AccessibilityService() {
             val ev = e ?: return
             val pkg = ev.packageName?.toString() ?: return
 
+            // 1. Zero lag inside Blocker UI: immediately return without any processing
+            if (pkg == packageName) return
+
+            // 2. Zero lag when typing: drop IME keyboards and neverBlock instantly
+            if (isImePkg(pkg) || pkg in neverBlock) return
+
+            // 3. Drop text changed and text selection events: never process per-keystroke inputs
+            if (ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
+                ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
+                return
+            }
+
             if (powerManager == null) {
                 powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
             }
@@ -1972,7 +2007,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val txt = sb.toString().lowercase()
                 val isOurApp = "blocker" in txt || packageName.lowercase() in txt
                 if (isOurApp) {
-                    if (!isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
+                    val isDevAdminAct = "activate this device admin" in txt || "activate this device administrator" in txt ||
+                        "activate admin app" in txt || ("activate" in txt && "admin" in txt)
+                    if (!isDevAdminAct && !isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
                         val hasDestructiveAction = "force stop" in txt || "uninstall" in txt || "disable" in txt ||
                             "clear storage" in txt || "clear data" in txt || "manage space" in txt || "storage & cache" in txt
                         if (hasDestructiveAction) {
@@ -2884,9 +2921,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
+        // Exempt legitimate Device Admin Activation screen
+        val isDeviceAdminActivation = "activate this device admin" in t || "activate this device administrator" in t ||
+            "activate admin app" in t || ("activate" in t && "admin" in t) || (rootPkg.contains("settings") && "device admin" in t && "activate" in t)
+        if (isDeviceAdminActivation) {
+            return false
+        }
+
         // 1. Uninstall attempt (package installer or confirmation dialog)
-        val isUninstallDialog = "do you want to uninstall" in t ||
-            ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t))
+        val isUninstallDialog = ("do you want to uninstall" in t ||
+            ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t))) && !isDeviceAdminActivation
         val isUninstall = isUninstallDialog && (isOurApp || isBlockedAppTarget(t, root))
         if (isUninstall) {
             autoCancelDialog(root)
@@ -2922,7 +2966,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // 4. App Info screen for Blocker (Open / Uninstall / Force stop / Storage / Permissions)
-        val isAppInfoScreen = isOurApp && !isLegitimatePermissionScreen(root, t) && (
+        val isAppInfoScreen = isOurApp && !isDeviceAdminActivation && !isLegitimatePermissionScreen(root, t) && (
             "app info" in t || "application info" in t || "app details" in t ||
             "force stop" in t || "storage" in t || "clear" in t ||
             ("notifications" in t && "permissions" in t) ||
@@ -5793,11 +5837,16 @@ class BlockerAccessibilityService : AccessibilityService() {
     ) {
         val now = System.currentTimeMillis()
 
-        // 1. Unconditionally kick out of the blocked app (NEVER skip or debounce the kick!)
+        // 1. Immediately display instant shield & overlay BEFORE triggering heavy launcher transitions!
+        TamperShieldManager.showInstantShield(this)
+        val btn = btnText ?: getAstaghfirullahButton()
+        showOverlay(heading, msg, 5000, subheading, btn)
+
+        // 2. Unconditionally kick out of the blocked app
         performGlobalAction(GLOBAL_ACTION_BACK)
         kickToHome()
 
-        // 2. Terminate background processes of the blocked app so it does not linger in memory/recents
+        // 3. Terminate background processes of the blocked app so it does not linger in memory/recents
         val killPkg = targetPkg ?: currentFgPkg
         if (!killPkg.isNullOrEmpty() && killPkg != packageName && killPkg !in neverBlock) {
             main.postDelayed({
@@ -5807,12 +5856,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             }, 150L)
         }
 
-        // 3. Debounce visual overlay and stats increment so rapid hits don't flicker or inflate stats
-        if (now - lastHit >= 700L) {
+        // 4. Update stats (debounced)
+        if (now - lastHit >= 500L) {
             lastHit = now
             BlockerStore.incr(this, kind)
-            val btn = btnText ?: getAstaghfirullahButton()
-            showOverlay(heading, msg, 5000, subheading, btn)
         }
     }
 
@@ -6054,16 +6101,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             preInflatedCard?.apply {
                 animate().cancel()
-                alpha = 0f
-                scaleX = 0.94f
-                scaleY = 0.94f
-                animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(160L)
-                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
-                    .start()
+                alpha = 1f
+                scaleX = 1f
+                scaleY = 1f
             }
 
             preInflatedProgressFill?.apply {

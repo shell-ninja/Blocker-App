@@ -1,6 +1,8 @@
 package com.blocker.data
 
+import android.app.Activity
 import android.app.AppOpsManager
+import android.app.NotificationManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -69,7 +71,10 @@ data class StudyState(
     val currentRound: Int = 1,
     val isBreak: Boolean = false,
     val focusMinutes: Int = 25,
-    val breakMinutes: Int = 5
+    val breakMinutes: Int = 5,
+    val autoDnd: Boolean = true,
+    val autoWifi: Boolean = true,
+    val hasDndAccess: Boolean = false
 )
 
 data class AppItem(
@@ -256,6 +261,9 @@ class BlockerRepository(private val context: Context) {
         val sBreak = BlockerStore.studyIsBreak(appContext)
         val sFm = BlockerStore.studyFocusMinutes(appContext)
         val sBm = BlockerStore.studyBreakMinutes(appContext)
+        val sAutoDnd = BlockerStore.prefs(appContext).getBoolean("study_auto_dnd", true)
+        val sAutoWifi = BlockerStore.prefs(appContext).getBoolean("study_auto_wifi", true)
+        val dndAccess = hasDndAccess()
 
         _studyState.value = StudyState(
             active = sActive,
@@ -265,7 +273,10 @@ class BlockerRepository(private val context: Context) {
             currentRound = sCur,
             isBreak = sBreak,
             focusMinutes = sFm,
-            breakMinutes = sBm
+            breakMinutes = sBm,
+            autoDnd = sAutoDnd,
+            autoWifi = sAutoWifi,
+            hasDndAccess = dndAccess
         )
     }
 
@@ -552,13 +563,76 @@ class BlockerRepository(private val context: Context) {
         _blockedKeywords.value = current
     }
 
+    fun hasDndAccess(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            return nm?.isNotificationPolicyAccessGranted == true
+        }
+        return true
+    }
+
+    fun requestDndAccess(context: Context) {
+        val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val act = (context as? Activity)
+        if (act != null) act.startActivity(intent) else context.startActivity(intent)
+    }
+
+    fun setStudyAutoDnd(enabled: Boolean) {
+        BlockerStore.prefs(appContext).edit().putBoolean("study_auto_dnd", enabled).apply()
+        refreshFocusAndStudy()
+    }
+
+    fun setStudyAutoWifi(enabled: Boolean) {
+        BlockerStore.prefs(appContext).edit().putBoolean("study_auto_wifi", enabled).apply()
+        refreshFocusAndStudy()
+    }
+
+    fun openWifiSettings(context: Context) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Intent(Settings.Panel.ACTION_WIFI)
+        } else {
+            Intent(Settings.ACTION_WIFI_SETTINGS)
+        }.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        val act = (context as? Activity)
+        if (act != null) act.startActivity(intent) else context.startActivity(intent)
+    }
+
+    fun openDataSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val act = (context as? Activity)
+        try {
+            if (act != null) act.startActivity(intent) else context.startActivity(intent)
+        } catch (_: Throwable) {
+            try {
+                val fallback = Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (act != null) act.startActivity(fallback) else context.startActivity(fallback)
+            } catch (_: Throwable) {
+                openPermissionSettings(context, "settings")
+            }
+        }
+    }
+
     fun startStudySession(focusMinutes: Int, breakMinutes: Int, rounds: Int) {
         BlockerStore.startStudy(appContext, focusMinutes, breakMinutes, rounds)
+        if (BlockerStore.prefs(appContext).getBoolean("study_auto_dnd", true) && hasDndAccess()) {
+            BlockerStore.muteNotifications(appContext)
+        }
+        if (BlockerStore.prefs(appContext).getBoolean("study_auto_wifi", true)) {
+            BlockerStore.disableWifi(appContext)
+        }
         refreshFocusAndStudy()
     }
 
     fun endStudySession() {
         BlockerStore.endStudySession(appContext)
+        BlockerStore.restoreNotifications(appContext)
+        BlockerStore.restoreWifi(appContext)
         refreshFocusAndStudy()
     }
 
@@ -655,22 +729,41 @@ class BlockerRepository(private val context: Context) {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
             )
             "deviceAdmin" -> {
-                val adminComponent = ComponentName(appContext, com.blocker.BlockerDeviceAdminReceiver::class.java)
+                val admin1 = ComponentName(appContext, com.blocker.BlockerDeviceAdminReceiver::class.java)
+                val admin2 = ComponentName(appContext, com.blocker.MyDeviceAdminReceiver::class.java)
                 listOf(
                     Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled while protection is active."),
+                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin1)
+                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enforces active protection and anti-tamper safeguards."),
+                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin2)
+                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enforces active protection and anti-tamper safeguards."),
+                    Intent("android.settings.DEVICE_ADMIN_SETTINGS"),
+                    Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.DeviceAdminSettings")),
+                    Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$DeviceAdminSettingsActivity")),
+                    Intent().setComponent(ComponentName("com.samsung.android.settings.security", "com.samsung.android.settings.security.DeviceAdminSettings")),
                     Intent(Settings.ACTION_SECURITY_SETTINGS),
                     Intent(Settings.ACTION_SETTINGS)
                 )
             }
+            "dnd" -> listOf(
+                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS),
+                Intent(Settings.ACTION_SOUND_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS)
+            )
+            "settings" -> listOf(Intent(Settings.ACTION_SETTINGS))
             else -> emptyList()
         }
 
+        val act = (context as? Activity)
         for (intent in tries) {
             try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
+                if (act != null) {
+                    act.startActivity(intent)
+                } else {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                }
                 break
             } catch (_: Throwable) {}
         }

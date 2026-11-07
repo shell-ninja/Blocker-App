@@ -26,7 +26,7 @@ import com.blocker.R
 import com.blocker.ui.theme.*
 
 enum class CardTone {
-    DEFAULT, OK, ACCENT, DANGER
+    DEFAULT, OK, ACCENT, DANGER, WARN
 }
 
 enum class BadgeTone {
@@ -56,6 +56,7 @@ fun GlowCard(
         active || tone == CardTone.OK -> Brush.verticalGradient(listOf(Color(0xFF0F2231), Color(0xFF09141F)))
         tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(Color(0xFF1B1336), Color(0xFF0E0B1A)))
         tone == CardTone.DANGER -> Brush.verticalGradient(listOf(Color(0xFF26101B), Color(0xFF14080F)))
+        tone == CardTone.WARN -> Brush.verticalGradient(listOf(Color(0xFF291F0E), Color(0xFF171107)))
         else -> Brush.verticalGradient(listOf(CyberCardTop, CyberCardBottom))
     }
 
@@ -63,6 +64,7 @@ fun GlowCard(
         active || tone == CardTone.OK -> Brush.verticalGradient(listOf(CyberOk.copy(alpha = 0.7f), CyberOk.copy(alpha = 0.25f)))
         tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(CyberAccent.copy(alpha = 0.75f), CyberAccent.copy(alpha = 0.25f)))
         tone == CardTone.DANGER -> Brush.verticalGradient(listOf(CyberDanger.copy(alpha = 0.7f), CyberDanger.copy(alpha = 0.25f)))
+        tone == CardTone.WARN -> Brush.verticalGradient(listOf(CyberWarn.copy(alpha = 0.75f), CyberWarn.copy(alpha = 0.25f)))
         else -> Brush.verticalGradient(listOf(CyberCardBorderGlow.copy(alpha = 0.45f), CyberCardBorder))
     }
 

@@ -288,52 +288,14 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Granular Defense Switches
+        // System Safeguards
         SectionHeader(
-            title = "Granular Rules",
-            subtitle = "Zero-GC microsecond filters enforced by native engine",
-            icon = CyberIcons.ShieldCheck
+            title = "System Safeguards",
+            subtitle = "Protects against hardware key tampering and unauthorized shutdowns",
+            icon = CyberIcons.Power
         )
 
         Spacer(modifier = Modifier.height(10.dp))
-
-        // Facebook Reels
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Icon(
-                        imageVector = CyberIcons.Movie,
-                        contentDescription = null,
-                        tint = Color(0xFFA78BFA),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Block Facebook Reels",
-                            color = Color.White,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Instantly skips addictive short-form video reels",
-                            color = CyberTextSub,
-                            fontSize = 11.5.sp
-                        )
-                    }
-                }
-                CyberSwitch(
-                    checked = protection.blockFacebookReels,
-                    onCheckedChange = { repo.setFacebookReelsBlocked(it) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         // Prevent Power Off
         GlowCard(modifier = Modifier.fillMaxWidth()) {
@@ -367,44 +329,6 @@ fun HomeScreen(
                 CyberSwitch(
                     checked = protection.preventPowerOff,
                     onCheckedChange = { repo.setPreventPowerOff(it) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Banking Mode
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Icon(
-                        imageVector = CyberIcons.Bank,
-                        contentDescription = null,
-                        tint = Color(0xFFA78BFA),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Banking Mode",
-                            color = Color.White,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Suspends overlays automatically inside banking apps",
-                            color = CyberTextSub,
-                            fontSize = 11.5.sp
-                        )
-                    }
-                }
-                CyberSwitch(
-                    checked = protection.isBankingMode,
-                    onCheckedChange = { repo.setBankingMode(it) }
                 )
             }
         }

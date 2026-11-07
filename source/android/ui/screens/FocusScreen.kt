@@ -814,6 +814,31 @@ fun FocusScreen(
                             fontWeight = FontWeight.Bold
                         )
 
+                        if (study.autoDnd || study.autoWifi) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (study.autoDnd) {
+                                    StatusPillBadge(
+                                        label = "DND Active",
+                                        tone = BadgeTone.ACCENT,
+                                        small = true,
+                                        icon = CyberIcons.Dnd
+                                    )
+                                }
+                                if (study.autoWifi) {
+                                    StatusPillBadge(
+                                        label = if (study.isBreak) "Wi-Fi Restored" else "Wi-Fi Muted",
+                                        tone = if (study.isBreak) BadgeTone.OK else BadgeTone.WARN,
+                                        small = true,
+                                        icon = if (study.isBreak) CyberIcons.Wifi else CyberIcons.WifiOff
+                                    )
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(20.dp))
 
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -994,6 +1019,222 @@ fun FocusScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Connectivity & Notification Lockdown
+                SectionHeader(
+                    title = "Lockdown Safeguards & Connectivity",
+                    icon = CyberIcons.Dnd,
+                    subtitle = "Automate Do Not Disturb, silence notifications, and eliminate internet distractions"
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // DND Access Warning Card if not granted
+                if (!study.hasDndAccess) {
+                    GlowCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        active = true,
+                        tone = CardTone.WARN
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = CyberIcons.Warning,
+                                    contentDescription = null,
+                                    tint = CyberWarn,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "DND Permission Needed",
+                                    color = Color.White,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "To automatically silence incoming rings, alerts, and notifications during study sessions, grant Do Not Disturb access.",
+                                color = CyberTextSub,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Btn(
+                                label = "Grant DND Permission",
+                                icon = CyberIcons.Dnd,
+                                onClick = { repo.requestDndAccess(context) },
+                                kind = BtnKind.PRIMARY
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // Auto DND Toggle
+                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(CyberAccentWell)
+                                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = CyberIcons.Dnd,
+                                    contentDescription = null,
+                                    tint = Color(0xFFA78BFA),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Silence Notifications (DND)",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Auto-enables Do Not Disturb during focus cycles",
+                                    color = CyberTextSub,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                        CyberSwitch(
+                            checked = study.autoDnd,
+                            onCheckedChange = { repo.setStudyAutoDnd(it) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Auto Wi-Fi Disconnect Toggle
+                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f).padding(end = 12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(CyberAccentWell)
+                                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = CyberIcons.WifiOff,
+                                    contentDescription = null,
+                                    tint = Color(0xFFA78BFA),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Turn off Wi-Fi during Study",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Disconnects Wi-Fi during focus; restores on breaks",
+                                    color = CyberTextSub,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                        CyberSwitch(
+                            checked = study.autoWifi,
+                            onCheckedChange = { repo.setStudyAutoWifi(it) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Cellular & Connectivity Quick Actions
+                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(CyberAccentWell)
+                                        .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = CyberIcons.Cellular,
+                                        contentDescription = null,
+                                        tint = Color(0xFFA78BFA),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Mobile Data & Network Controls",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Quick shortcuts to toggle off cellular or internet data",
+                                        color = CyberTextSub,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Btn(
+                                label = "Cellular Settings",
+                                icon = CyberIcons.Cellular,
+                                onClick = { repo.openDataSettings(context) },
+                                kind = BtnKind.SECONDARY,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Btn(
+                                label = "Wi-Fi Settings",
+                                icon = CyberIcons.Wifi,
+                                onClick = { repo.openWifiSettings(context) },
+                                kind = BtnKind.SECONDARY,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))

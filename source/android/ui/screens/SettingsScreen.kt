@@ -265,52 +265,6 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Banking Mode
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(CyberAccentWell),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = CyberIcons.Bank,
-                            contentDescription = null,
-                            tint = Color(0xFFA78BFA),
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Auto-Pause for Banking Apps",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Auto-exempts financial apps (bKash, Nagad) to pass security checks",
-                            color = CyberTextSub,
-                            fontSize = 11.5.sp
-                        )
-                    }
-                }
-                CyberSwitch(
-                    checked = protection.isAutoPauseBanking,
-                    onCheckedChange = { repo.setAutoPauseBanking(it) }
-                )
-            }
-        }
-
         Spacer(modifier = Modifier.height(16.dp))
 
         // 4. Popup Language
