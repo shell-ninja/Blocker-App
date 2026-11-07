@@ -712,124 +712,163 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 break;
             }
         }
+        if (is_story) {
+            return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+        }
 
-        if (!is_story) {
-            bool reels_detected = false;
+        // ---------------------------------------------------------------------
+        // STATE A: Main Navigation Bar Inspector & Newsfeed Safe-Guard
+        // ---------------------------------------------------------------------
+        // Scan top (top < 220) and bottom (bottom > 880) for Facebook's main tab bar (4 to 6 horizontal tab nodes)
+        int nav_tabs_top = 0;
+        int nav_tabs_bottom = 0;
+        bool home_tab_selected = false;
+        bool reels_or_video_tab_selected = false;
+        uint16_t home_tab_idx = 0xFFFF;
 
-            // Signal 1: Dedicated Activity / Fragment Class Signature
-            if (contains_ci(cls, "FbShorts") || contains_ci(cls, "ReelViewer") ||
-                contains_ci(cls, "Reels") || contains_ci(cls, "InspirationViewer") ||
-                contains_ci(cls, "ClipsViewer") || contains_ci(cls, "Warion")) {
-                reels_detected = true;
-            }
+        for (size_t i = 0; i < node_count; ++i) {
+            const auto& n = nodes[i];
+            bool is_top_band = (n.top < 220 && n.bottom < 300);
+            bool is_bottom_band = (n.top > 800 && n.bottom > 880);
 
-            // Signal 2: Selected Navigation Tab State
-            if (!reels_detected) {
-                for (size_t i = 0; i < node_count; ++i) {
-                    const auto& n = nodes[i];
-                    bool in_nav_bar = (n.top < 220 || n.bottom > 880);
-                    if (in_nav_bar) {
-                        bool is_selected = (n.flags & (NODE_FLAG_SELECTED | NODE_FLAG_CHECKED | NODE_FLAG_STATE_DESC_SELECTED)) != 0;
-                        if (is_selected) {
-                            if (contains_ci(n.text, "reels") || contains_ci(n.cd, "reels") ||
-                                contains_ci(n.text, "রিলস") || contains_ci(n.cd, "রিলস") ||
-                                contains_ci(n.cd, "reels, tab") || contains_ci(n.cd, "reels tab") ||
-                                contains_ci(n.cd, "tab reels")) {
-                                reels_detected = true;
-                                break;
-                            }
-                        }
+            if (is_top_band || is_bottom_band) {
+                std::string_view t = n.text;
+                std::string_view c = n.cd;
+
+                bool is_tab_node = contains_ci(c, "tab") || contains_ci(t, "home") || contains_ci(t, "feed") ||
+                    contains_ci(t, "friends") || contains_ci(t, "watch") || contains_ci(t, "video") ||
+                    contains_ci(t, "marketplace") || contains_ci(t, "notifications") || contains_ci(t, "menu") ||
+                    contains_ci(t, "reels") || contains_ci(c, "home") || contains_ci(c, "feed");
+
+                if (is_tab_node) {
+                    if (is_top_band) nav_tabs_top++;
+                    if (is_bottom_band) nav_tabs_bottom++;
+
+                    bool is_home = contains_ci(c, "home, tab") || contains_ci(c, "feed, tab") ||
+                        contains_ci(c, "tab home") || contains_ci(c, "tab feed") ||
+                        (t == "Home" || t == "Feed" || t == "ফিড" || t == "হোম");
+
+                    bool is_reels_or_video = contains_ci(c, "reels, tab") || contains_ci(c, "reels tab") ||
+                        contains_ci(c, "tab reels") || contains_ci(c, "video, tab") || contains_ci(c, "watch, tab") ||
+                        contains_ci(c, "tab video") || contains_ci(c, "tab watch") ||
+                        (t == "Reels" || t == "Video" || t == "Watch" || t == "রিলস" || t == "ভিডিও");
+
+                    bool is_selected = (n.flags & (NODE_FLAG_SELECTED | NODE_FLAG_CHECKED | NODE_FLAG_STATE_DESC_SELECTED)) != 0 ||
+                        contains_ci(c, "selected") || contains_ci(c, "active");
+
+                    if (is_home) {
+                        if (home_tab_idx == 0xFFFF) home_tab_idx = static_cast<uint16_t>(n.original_index);
+                        if (is_selected) home_tab_selected = true;
+                    }
+                    if (is_reels_or_video && is_selected) {
+                        reels_or_video_tab_selected = true;
                     }
                 }
             }
+        }
 
-            // Signal 3: Spatial & Structural Litho Geometry Fingerprint (Full-Screen Player)
-            if (!reels_detected) {
-                bool has_full_bleed = false;
-                for (size_t i = 0; i < node_count; ++i) {
-                    uint16_t w = nodes[i].right - nodes[i].left;
-                    uint16_t h = nodes[i].bottom - nodes[i].top;
-                    if (h >= 800 && w >= 950) {
-                        has_full_bleed = true;
-                        break;
-                    }
-                }
+        bool main_tab_bar_visible = (nav_tabs_top >= 3 || nav_tabs_bottom >= 3);
 
-                if (has_full_bleed) {
-                    // Right-Edge Vertical Action Rail: >= 3 clickable nodes in right 28%
-                    int rail_hits = 0;
-                    for (size_t i = 0; i < node_count; ++i) {
-                        const auto& n = nodes[i];
-                        if (n.left >= 720 && n.top >= 350 && n.bottom <= 920) {
-                            if (n.flags & NODE_FLAG_CLICKABLE) {
-                                if (contains_ci(n.text, "like") || contains_ci(n.cd, "like") ||
-                                    contains_ci(n.text, "react") || contains_ci(n.cd, "react") ||
-                                    contains_ci(n.text, "comment") || contains_ci(n.cd, "comment") ||
-                                    contains_ci(n.text, "share") || contains_ci(n.cd, "share") ||
-                                    contains_ci(n.text, "send") || contains_ci(n.cd, "send") ||
-                                    contains_ci(n.text, "audio") || contains_ci(n.cd, "audio") ||
-                                    contains_ci(n.text, "follow") || contains_ci(n.cd, "follow") ||
-                                    contains_ci(n.text, "save") || contains_ci(n.cd, "save") ||
-                                    contains_ci(n.text, "more") || contains_ci(n.cd, "more") ||
-                                    contains_ci(n.text, "remix") || contains_ci(n.cd, "remix")) {
-                                    rail_hits++;
-                                }
-                            }
-                        }
-                    }
+        // STATE A SAFE-GUARD:
+        // If Main Tab Bar is Visible AND Home / Feed Tab is Selected:
+        // The user is on their normal Newsfeed! Immediately return ALLOW!
+        if (main_tab_bar_visible && home_tab_selected) {
+            return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+        }
 
-                    if (rail_hits >= 3) {
-                        reels_detected = true;
-                    }
+        // ---------------------------------------------------------------------
+        // STATE B: Dedicated Facebook Reels Tab or Video/Watch Tab
+        // ---------------------------------------------------------------------
+        if (main_tab_bar_visible && reels_or_video_tab_selected && !home_tab_selected) {
+            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, home_tab_idx, show_hud, 0);
+        }
 
-                    // Top Overlay Header: top < 180 with "Reels", "Create a reel", "For you"
-                    if (!reels_detected) {
-                        for (size_t i = 0; i < node_count; ++i) {
-                            const auto& n = nodes[i];
-                            if (n.top < 180) {
-                                if (contains_ci(n.text, "reels") || contains_ci(n.cd, "reels") ||
-                                    contains_ci(n.text, "create a reel") || contains_ci(n.cd, "create a reel") ||
-                                    contains_ci(n.text, "for you") || contains_ci(n.cd, "for you")) {
-                                    reels_detected = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // ---------------------------------------------------------------------
+        // STATE C: Clicked Video / Reel Player (Main Tab Bar is NOT visible)
+        // ---------------------------------------------------------------------
+        bool player_activity = contains_ci(cls, "FbShorts") || contains_ci(cls, "ReelViewer") ||
+            contains_ci(cls, "TahoeActivity") || contains_ci(cls, "VideoHome") ||
+            contains_ci(cls, "FullScreenVideo") || contains_ci(cls, "InspirationViewer") ||
+            contains_ci(cls, "ClipsViewer");
 
-            // Signal 4: Inline Newsfeed Reels Carousel triggers
-            if (!reels_detected) {
-                for (size_t i = 0; i < node_count; ++i) {
-                    const auto& n = nodes[i];
-                    if (contains_ci(n.text, "swipe up for next reel") || contains_ci(n.cd, "swipe up for next reel") ||
-                        contains_ci(n.text, "remix this reel") || contains_ci(n.cd, "remix this reel") ||
-                        contains_ci(n.text, "watch more reels") || contains_ci(n.cd, "watch more reels")) {
-                        reels_detected = true;
-                        break;
-                    }
-                }
-            }
-
-            if (reels_detected) {
-                // Find Home / Feed Tab node for zero tab-trap escape
-                uint16_t home_tab_idx = 0xFFFF;
-                for (size_t i = 0; i < node_count; ++i) {
-                    const auto& n = nodes[i];
-                    if (n.flags & NODE_FLAG_CLICKABLE) {
-                        if (contains_ci(n.cd, "home, tab") || contains_ci(n.cd, "home tab") ||
-                            contains_ci(n.cd, "feed") || contains_ci(n.text, "feed") ||
-                            contains_ci(n.cd, "news feed") || contains_ci(n.text, "news feed") ||
-                            contains_ci(n.cd, "হোম") || contains_ci(n.text, "হোম")) {
-                            home_tab_idx = static_cast<uint16_t>(n.original_index);
-                            break;
-                        }
-                    }
-                }
-
+        if (!main_tab_bar_visible || player_activity) {
+            // Signature C1: Dedicated Player Activity Class
+            if (player_activity) {
                 uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
-                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, home_tab_idx, show_hud, 0);
+                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+            }
+
+            // Signature C2: True Vertical Right-Edge Reels Action Rail
+            int like_x = -1, like_y = -1;
+            int comment_x = -1, comment_y = -1;
+            int share_x = -1, share_y = -1;
+            bool has_story_reply = false;
+
+            for (size_t i = 0; i < node_count; ++i) {
+                const auto& n = nodes[i];
+                std::string_view t = n.text;
+                std::string_view c = n.cd;
+
+                if (n.top > 850 && (contains_ci(t, "reply to") || contains_ci(c, "reply to") ||
+                    contains_ci(t, "send message") || contains_ci(c, "send message"))) {
+                    has_story_reply = true;
+                }
+
+                int cx = (n.left + n.right) / 2;
+                int cy = (n.top + n.bottom) / 2;
+
+                if (cx >= 800) {
+                    if (contains_ci(t, "like") || contains_ci(c, "like") ||
+                        contains_ci(t, "react") || contains_ci(c, "react")) {
+                        like_x = cx; like_y = cy;
+                    } else if (contains_ci(t, "comment") || contains_ci(c, "comment")) {
+                        comment_x = cx; comment_y = cy;
+                    } else if (contains_ci(t, "share") || contains_ci(c, "share") ||
+                               contains_ci(t, "send") || contains_ci(c, "send")) {
+                        share_x = cx; share_y = cy;
+                    }
+                }
+            }
+
+            if (!has_story_reply && like_x > 0 && comment_x > 0 && share_x > 0) {
+                int min_x = std::min({like_x, comment_x, share_x});
+                int max_x = std::max({like_x, comment_x, share_x});
+                if ((max_x - min_x) <= 80) { // Same vertical column (<= 8% screen width)
+                    if (like_y < comment_y && comment_y < share_y) {
+                        if ((comment_y - like_y) >= 40 && (share_y - comment_y) >= 40) {
+                            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+                            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+                        }
+                    }
+                }
+            }
+
+            // Signature C3: Video Player Overlay Controls
+            bool has_player_controls = false;
+            for (size_t i = 0; i < node_count; ++i) {
+                const auto& n = nodes[i];
+                std::string_view t = n.text;
+                std::string_view c = n.cd;
+
+                // Top overlay bar with exact "Reels" or "Watch"
+                if (n.top < 160 && (t == "Reels" || c == "Reels" || t == "Watch" || c == "Watch")) {
+                    has_player_controls = true;
+                    break;
+                }
+                // Transport controls
+                if (contains_ci(c, "seek bar") || contains_ci(c, "pause video") ||
+                    contains_ci(t, "pause video") || contains_ci(c, "enter full screen") ||
+                    contains_ci(c, "exit full screen") || contains_ci(t, "original audio") ||
+                    contains_ci(c, "original audio")) {
+                    has_player_controls = true;
+                    break;
+                }
+            }
+
+            if (has_player_controls) {
+                uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
             }
         }
     }
