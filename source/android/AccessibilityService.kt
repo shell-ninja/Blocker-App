@@ -704,11 +704,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg.isNotEmpty()) armAppInfoScan(rootPkg, fresh = false, holdMs = APP_INFO_HOLD_ACTIVE_MS)
         val cls = root.className?.toString().orEmpty()
 
-        // ── Device Admin: ONLY block if our admin is ALREADY active AND this is a deactivation attempt! ──
-        if (shieldEngaged() && isOurAdminActive() && !isLegitimatePermissionScreen(root, "")) {
+        // ── Device Admin: ONLY block if our admin is ALREADY active AND this is an explicit deactivation attempt! ──
+        if (shieldEngaged() && isOurAdminActive()) {
             val isDeactCls = DEVICE_ADMIN_DETAIL_CLASSES.any { cls.contains(it, ignoreCase = true) } ||
                 cls.contains("DeviceAdminAdd", ignoreCase = true) || cls.contains("DeviceAdmin", ignoreCase = true)
-            if (isDeactCls) {
+            if (isDeactCls && isExplicitDeviceAdminDeactivation(root, "")) {
                 viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
                 autoCancelDialog(root)
                 pollKick("Device Admin deactivation is locked while Protection Mode is active.")
@@ -755,6 +755,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Scheduled Power Off guard: strictly blocks scheduled shutdown configuration
         if (shouldBlockScheduledPower() && isScheduledPowerSettingsScreen(root, t, "", rootPkg)) {
             pollKick("Scheduled power off is locked while protection is active.")
+            return
+        }
+
+        // Exclude Device Admin screens from App Info check:
+        if (isDeviceAdminScreenOrSetup(root, cls, t)) {
             return
         }
 
@@ -1138,6 +1143,57 @@ class BlockerAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun isDeviceAdminScreenOrSetup(root: AccessibilityNodeInfo?, cls: String = "", text: String = ""): Boolean {
+        val c = cls.lowercase()
+        val rootC = root?.className?.toString()?.lowercase().orEmpty()
+        if (c.contains("deviceadmin") || rootC.contains("deviceadmin") ||
+            c.contains("adminsettings") || rootC.contains("adminsettings") ||
+            c.contains("deviceadminadd") || rootC.contains("deviceadminadd") ||
+            c.contains("deviceadminsettings") || rootC.contains("deviceadminsettings") ||
+            c.contains("deviceadmindetail") || rootC.contains("deviceadmindetail") ||
+            c.contains("deviceadminui") || rootC.contains("deviceadminui") ||
+            c.contains("devicepolicy") || rootC.contains("devicepolicy") ||
+            DEVICE_ADMIN_LIST_CLASSES.any { c.contains(it.lowercase()) || rootC.contains(it.lowercase()) } ||
+            DEVICE_ADMIN_DETAIL_CLASSES.any { c.contains(it.lowercase()) || rootC.contains(it.lowercase()) }) {
+            return true
+        }
+        val sb = StringBuilder(text.lowercase())
+        if (root != null) {
+            collectText(root, sb, 0, intArrayOf(250))
+        }
+        val t = sb.toString().lowercase()
+        if (ADMIN_SCREEN_TITLES.any { it in t }) return true
+        if ("device admin" in t || "device administrator" in t || "device administrators" in t ||
+            "admin app" in t || "admin apps" in t || "device policy" in t ||
+            "ডিভাইস অ্যাডমিন" in t || "ডিভাইস প্রশাসক" in t || "অ্যাডমিন অ্যাপ" in t) {
+            return true
+        }
+        if ("activate this device admin" in t || "activate device admin" in t || "turn on device admin" in t ||
+            "activate this device administrator" in t || "activate device administrator" in t ||
+            "activate admin app" in t || "enable device admin" in t ||
+            (("সক্রিয়" in t || "সক্রিয়" in t) && "অ্যাডমিন" in t)) {
+            return true
+        }
+        return false
+    }
+
+    private fun isExplicitDeviceAdminDeactivation(root: AccessibilityNodeInfo?, text: String = ""): Boolean {
+        if (!isOurAdminActive()) return false
+        val sb = StringBuilder(text.lowercase())
+        if (root != null) {
+            collectText(root, sb, 0, intArrayOf(250))
+        }
+        val t = sb.toString().lowercase()
+        val hasActivate = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
+        if (hasActivate) return false
+        return "deactivate this device admin" in t ||
+            "deactivate this device administrator" in t ||
+            "deactivate admin app" in t ||
+            "remove device admin" in t ||
+            "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t ||
+            ("deactivate" in t && ("admin" in t || "device" in t))
+    }
+
     private fun isLegitimatePermissionTitle(title: String): Boolean {
         if (title.isEmpty()) return false
         val t = title.lowercase()
@@ -1148,7 +1204,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             "unknown apps" in t || "install unknown" in t || "allow from this source" in t ||
             "usage access" in t || "special app access" in t || "special access" in t || "special permissions" in t ||
             "display over other apps" in t || "appear on top" in t || "draw over other apps" in t ||
-            "accessibility" in t || "অ্যাক্সেসিবিলিটি" in t
+            "accessibility" in t || "অ্যাক্সেসিবিলিটি" in t ||
+            "device admin" in t || "device administrator" in t || "admin apps" in t || "admin app" in t ||
+            "device policy" in t || "ডিভাইস অ্যাডমিন" in t || "ডিভাইস প্রশাসক" in t
     }
 
     private fun isLegitimatePermissionScreen(text: String): Boolean {
@@ -1163,6 +1221,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val t = sb.toString().lowercase()
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
+
+        // 0. Device Admin screens are legitimate permission screens unless it is an explicit deactivation
+        if (isDeviceAdminScreenOrSetup(root, rootCls, t)) {
+            if (isOurAdminActive() && isExplicitDeviceAdminDeactivation(root, t)) {
+                return false
+            }
+            return true
+        }
 
         val hasActivateWord = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
         val isExplicitDeactAction = "deactivate this device admin" in t ||
@@ -2063,14 +2129,14 @@ class BlockerAccessibilityService : AccessibilityService() {
             val isAdminListCls   = evCls in DEVICE_ADMIN_LIST_CLASSES || rootCls in DEVICE_ADMIN_LIST_CLASSES ||
                 evCls.contains("DeviceAdmin", ignoreCase = true) || rootCls.contains("DeviceAdmin", ignoreCase = true) ||
                 evCls.contains("AdminSettings", ignoreCase = true) || rootCls.contains("AdminSettings", ignoreCase = true)
-            if ((isAdminListTitle || isAdminListCls) && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, winTitle)) {
+            if ((isAdminListTitle || isAdminListCls) && isOurAdminActive() && isExplicitDeviceAdminDeactivation(rootNow, winTitle)) {
                 lockOutOfSettings("Device Admin settings are locked while Protection Mode is active."); return
             }
 
             // ── 2. Device Admin detail / deactivate screen (title-based) ───────────
             val isAdminDetailCls = evCls in DEVICE_ADMIN_DETAIL_CLASSES || rootCls in DEVICE_ADMIN_DETAIL_CLASSES ||
                 evCls.contains("DeviceAdminAdd", ignoreCase = true) || rootCls.contains("DeviceAdminAdd", ignoreCase = true)
-            if (isAdminDetailCls && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, winTitle)) {
+            if (isAdminDetailCls && isOurAdminActive() && isExplicitDeviceAdminDeactivation(rootNow, winTitle)) {
                 lockOutOfSettings("Device Admin deactivation is locked while Protection Mode is active."); return
             }
 
@@ -2086,10 +2152,9 @@ class BlockerAccessibilityService : AccessibilityService() {
                 collectText(rootForScan, sb, 0, intArrayOf(300))
                 val txt = sb.toString().lowercase()
                 val isOurApp = "blocker" in txt || packageName.lowercase() in txt
-                if (isOurApp) {
-                    val isDevAdminAct = "activate this device admin" in txt || "activate this device administrator" in txt ||
-                        "activate admin app" in txt || ("activate" in txt && "admin" in txt)
-                    if (!isDevAdminAct && !isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
+                val isDevAdmin = isDeviceAdminScreenOrSetup(rootForScan, rootCls, txt)
+                if (isOurApp && !isDevAdmin) {
+                    if (!isLegitimatePermissionScreen(rootForScan, txt) && !isInstallOrUpdateDialog(ev, rootForScan)) {
                         val hasDestructiveAction = "force stop" in txt || "uninstall" in txt || "disable" in txt ||
                             "clear storage" in txt || "clear data" in txt || "manage space" in txt || "storage & cache" in txt
                         if (hasDestructiveAction) {
@@ -3013,16 +3078,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // Exempt legitimate Device Admin Activation screen
+        val isDeviceAdminActivation = isDeviceAdminScreenOrSetup(root, rootCls, t)
         val hasActivate = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
-        val isExplicitDeact = isOurAdminActive() && ("deactivate this device admin" in t ||
-            "deactivate this device administrator" in t || "deactivate admin app" in t ||
-            "remove device admin" in t || "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t)
-        val isDeviceAdminActivation = (!isOurAdminActive() && ("device admin" in t || "admin app" in t || rootCls.contains("deviceadmin") || evCls.contains("deviceadmin"))) ||
-            "activate this device admin" in t || "activate this device administrator" in t ||
-            "activate admin app" in t || (hasActivate && "admin" in t) || (rootPkg.contains("settings") && "device admin" in t && hasActivate) ||
-            rootCls.contains("deviceadminadd") || evCls.contains("deviceadminadd")
-        if (isDeviceAdminActivation && !isExplicitDeact) {
-            return false
+        if (isDeviceAdminActivation) {
+            if (isOurAdminActive() && isExplicitDeviceAdminDeactivation(root, t)) {
+                autoCancelDialog(root)
+                lockOutOfSettings("Device Admin settings are locked while Protection Mode is active.")
+                return true
+            }
+            return false // Legitimate device admin setup / activation! NEVER block!
         }
 
         // 1. Uninstall attempt (package installer or confirmation dialog)
@@ -3416,17 +3480,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val t = sb.toString().lowercase()
 
-        // Device admin activation is allowed (not an App Info screen)
-        val hasActivateWord = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
-        val isExplicitDeact = isOurAdminActive() && ("deactivate this device admin" in t ||
-            "deactivate this device administrator" in t || "deactivate admin app" in t ||
-            "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t)
-        if (rootCls.contains("deviceadminadd") || evCls.contains("deviceadminadd") ||
-            "activate this device admin" in t || "activate admin app" in t ||
-            ("activate" in t && "admin" in t) || (hasActivateWord && "admin" in t) ||
-            (!isOurAdminActive() && ("device admin" in t || "admin app" in t || rootCls.contains("deviceadmin")))) {
-            if (!isExplicitDeact) return false
-        }
+        // Device admin screens are NEVER App Info screens
+        if (isDeviceAdminScreenOrSetup(root, rootCls, t)) return false
 
         // Must not block legitimate permission screens or install/update
         if (isLegitimatePermissionScreen(root, t) || isInstallOrUpdateDialog(ev, root)) return false
@@ -3580,7 +3635,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
             if (root != null && root.packageName?.toString() != packageName) {
                 try {
-                    if (isBlockerAppInfoScreen(root, ev)) {
+                    val rootCls = root.className?.toString().orEmpty()
+                    if (!isDeviceAdminScreenOrSetup(root, rootCls, "") && isBlockerAppInfoScreen(root, ev)) {
                         autoCancelDialog(root)
                         kickFromAppInfo()
                         kickToHome()
@@ -3695,11 +3751,17 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (stateChange) {
             lastWindowOpenUp = nowUp
             val cls = ev.className?.toString()?.lowercase().orEmpty()
-            if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && isOurAdminActive() && !isLegitimatePermissionScreen(rootNow, "")) {
+            if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && isOurAdminActive() && isExplicitDeviceAdminDeactivation(rootNow, "")) {
                 pollKick("Device Admin settings are locked while Protection Mode is active.")
                 return
             }
+            if (isDeviceAdminScreenOrSetup(rootNow, cls, currentSettingsScreenTitle)) {
+                return // Exclude Device Admin screens! NEVER kick during setup or activation!
+            }
             if (titleMatches && !isInstallOrUpdateDialog(ev, rootInActiveWindow)) {
+                if (isDeviceAdminScreenOrSetup(rootNow, cls, currentSettingsScreenTitle)) {
+                    return // NEVER kick device admin setup!
+                }
                 if (!isLegitimatePermissionTitle(currentSettingsScreenTitle)) {
                     if (isActualSettingsPkg(pkg)) {
                         kickFromAppInfo()
@@ -3715,13 +3777,17 @@ class BlockerAccessibilityService : AccessibilityService() {
         // Direct root content check on window open / content change: fires immediately if Blocker App Info or Uninstall is visible
         val root = rootInActiveWindow
         if (root != null) {
+            val rootCls = root.className?.toString().orEmpty()
             val sb = StringBuilder()
             collectText(root, sb, 0, intArrayOf(300))
             val t = sb.toString().lowercase()
+            if (isDeviceAdminScreenOrSetup(root, rootCls, t)) {
+                return // Exclude Device Admin screens!
+            }
             val isOurApp = "blocker" in t || packageName.lowercase() in t
             if (isOurApp) {
                 if (!isLegitimatePermissionScreen(root, t) && !isInstallOrUpdateDialog(ev, root)) {
-                    val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+                    val hasDestructiveAction = "force stop" in t || ("uninstall" in t && ("open" in t || "storage" in t || "disable" in t)) || "disable" in t ||
                         "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
                     if (hasDestructiveAction) {
                         viewingBlockerSettingsUntil = System.currentTimeMillis() + 30_000L
@@ -3775,31 +3841,33 @@ class BlockerAccessibilityService : AccessibilityService() {
                         val nt = n.text?.toString().orEmpty()
                         val nd = n.contentDescription?.toString().orEmpty()
                         if (nt.contains(".apk", ignoreCase = true) || nd.contains(".apk", ignoreCase = true)) {
-                            nodes.forEach { it.recycle() }
-                            runCatching { src.recycle() }
                             return
                         }
                         if (nt.contains(name, ignoreCase = true) || nd.contains(name, ignoreCase = true) ||
                             nt.contains("Blocker", ignoreCase = true) || nd.contains("Blocker", ignoreCase = true)) {
                             hit = true
                         }
-                        n.recycle()
                         if (hit) break
                     }
                 }
                 if (!hit) {
                     hit = rowShowsName(src, name, ver, 0, intArrayOf(30))
                 }
-                runCatching { src.recycle() }
             }
         }
         if (!hit) return
 
         // Blocker row was clicked inside Settings!
-        // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization), allow it:
+        // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization, Device Admin), allow it:
         if (isLegitimatePermissionTitle(currentSettingsScreenTitle)) return
 
         val root = rootInActiveWindow ?: ev.source
+        val rootCls = root?.className?.toString().orEmpty()
+        if (isDeviceAdminScreenOrSetup(root, rootCls, currentSettingsScreenTitle)) {
+            if (!isOurAdminActive() || !isExplicitDeviceAdminDeactivation(root, currentSettingsScreenTitle)) {
+                return // Legitimate device admin setup / activation! NEVER kick!
+            }
+        }
         if (isAccessibilityMainListScreen(root, null)) {
             return
         }
@@ -4496,7 +4564,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     appInfoFreshUntil = 0L
                 }
             } finally {
-                runCatching { root.recycle() }
+                // Background scan pass complete
             }
         }
     }
@@ -4506,31 +4574,40 @@ class BlockerAccessibilityService : AccessibilityService() {
      * [deep] additionally allows the bounded walk (used for post-open settle passes only).
      */
     private fun matchesBlockerAppInfo(root: AccessibilityNodeInfo, deep: Boolean): Boolean {
-        val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
-        val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node
-        if (runCatching { fastMatch(root, name, ver) || (deep && walkMatch(root, name, ver)) }.getOrDefault(false)) {
-            return true
-        }
-
+        val rootCls = root.className?.toString().orEmpty()
         val sb = StringBuilder()
         collectText(root, sb, 0, intArrayOf(300))
         val t = sb.toString().lowercase()
+
+        // 1. NEVER match Device Admin screens as App Info!
+        if (isDeviceAdminScreenOrSetup(root, rootCls, t)) return false
+
+        // 2. Legitimate permission screens / A11y main list / Installer
         if (isAccessibilityMainListScreen(root, t)) return false
-        if (isLegitimatePermissionScreen(null, t)) return false
+        if (isLegitimatePermissionScreen(root, t)) return false
+        if (isInstallOrUpdateDialog(root = root)) return false
+
+        val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
+        val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node
 
         val isOurApp = name.lowercase() in t || "blocker" in t || packageName.lowercase() in t || "com.blocker" in t || "ব্লকার" in t
         if (!isOurApp) return false
+
         val isUninstallDialog = ("do you want to uninstall" in t || "uninstall this app" in t) &&
             "force stop" !in t && "storage" !in t
         if (isUninstallDialog) return true
+
         val isUnknownApps = ("install unknown" in t || "unknown apps" in t || "allow from this source" in t) &&
             "force stop" !in t && "clear" !in t && "storage" !in t && "uninstall" !in t
         if (isUnknownApps) return false
-        if (isInstallOrUpdateDialog(root = root)) return false
 
-        val hasDestructiveAction = "force stop" in t || "uninstall" in t || "disable" in t ||
+        val hasDestructiveAction = "force stop" in t || ("uninstall" in t && ("open" in t || "disable" in t || "storage" in t)) || "disable" in t ||
             "clear storage" in t || "clear data" in t || "manage space" in t || "storage & cache" in t
         if (!hasDestructiveAction) return false
+
+        if (runCatching { fastMatch(root, name, ver) || (deep && walkMatch(root, name, ver)) }.getOrDefault(false)) {
+            return true
+        }
 
         return true
     }
@@ -4541,7 +4618,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         return APP_INFO_ACTION_TEXTS.any { a -> anyNodeMatches(root, a) { it.contains(a, ignoreCase = true) } }
     }
 
-    /** One framework-side text search (a single IPC); every node it returns is verified and recycled. */
+    /** One framework-side text search (a single IPC). */
     @Suppress("DEPRECATION")
     private fun anyNodeMatches(root: AccessibilityNodeInfo, query: String, accept: (String) -> Boolean): Boolean {
         val nodes = root.findAccessibilityNodeInfosByText(query) ?: return false
@@ -4552,7 +4629,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val d = n.contentDescription?.toString()
                 hit = (t != null && accept(t)) || (d != null && accept(d))
             }
-            n.recycle()
         }
         return hit
     }
@@ -4573,7 +4649,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         for (i in 0 until n.childCount) {
             val c = n.getChild(i)
             val done = walkAppInfo(c, depth + 1, budget, found, name, ver)
-            c?.recycle()
             if (done) return true
         }
         return false
@@ -4972,7 +5047,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             OverlayHudManager.show(this, message)
             showOverlay(getTamperHeading(), formatTamperCovenantBody(message), 5000, getTamperSubheading(), getUnderstoodButton())
         } finally {
-            runCatching { root?.recycle() }
+            // cleanup complete
         }
     }
 

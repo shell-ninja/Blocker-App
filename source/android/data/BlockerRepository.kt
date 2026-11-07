@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -636,7 +637,7 @@ class BlockerRepository(private val context: Context) {
         val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val act = (context as? Activity)
+        val act = context.findActivity() ?: (context as? Activity)
         if (act != null) act.startActivity(intent) else context.startActivity(intent)
     }
 
@@ -657,7 +658,7 @@ class BlockerRepository(private val context: Context) {
         } else {
             Intent(Settings.ACTION_WIFI_SETTINGS)
         }.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-        val act = (context as? Activity)
+        val act = context.findActivity() ?: (context as? Activity)
         if (act != null) act.startActivity(intent) else context.startActivity(intent)
     }
 
@@ -666,7 +667,7 @@ class BlockerRepository(private val context: Context) {
         val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val act = (context as? Activity)
+        val act = context.findActivity() ?: (context as? Activity)
         try {
             if (act != null) act.startActivity(intent) else context.startActivity(intent)
         } catch (_: Throwable) {
@@ -818,7 +819,7 @@ class BlockerRepository(private val context: Context) {
             else -> emptyList()
         }
 
-        val act = (context as? Activity)
+        val act = context.findActivity() ?: (context as? Activity)
         MainActivity.isLaunchingExternal = true
         for (intent in tries) {
             try {
@@ -829,7 +830,22 @@ class BlockerRepository(private val context: Context) {
                     context.startActivity(intent)
                 }
                 break
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+                try {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    appContext.startActivity(intent)
+                    break
+                } catch (_: Throwable) {}
+            }
         }
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var current = this
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
+        }
+        return null
     }
 }
