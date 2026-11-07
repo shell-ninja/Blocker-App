@@ -2,6 +2,7 @@ package com.blocker.ui.components
 
 import android.content.Intent
 import android.net.Uri
+import com.blocker.MainActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -145,6 +146,7 @@ fun UpdateModal(
                             .background(CyberCardSurface)
                             .clickable {
                                 runCatching {
+                                    MainActivity.isLaunchingExternal = true
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(rel.htmlUrl))
                                     context.startActivity(intent)
                                 }

@@ -1164,13 +1164,23 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = sb.toString().lowercase()
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
 
-        val isDeactivationAttempt = "deactivate" in t || "নিষ্ক্রিয়" in t || "নিষ্ক্রিয়" in t
-        val isDeviceAdminActivation = (rootCls.contains("deviceadminadd") ||
-            "activate this device admin" in t || "activate this device administrator" in t ||
-            "activate admin app" in t || ("activate" in t && ("device admin" in t || "admin app" in t)) ||
-            ("সক্রিয়" in t && "অ্যাডমিন" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t)) && !isDeactivationAttempt
+        val hasActivateWord = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
+        val isExplicitDeactAction = "deactivate this device admin" in t ||
+            "deactivate this device administrator" in t ||
+            "deactivate admin app" in t ||
+            "remove device admin" in t ||
+            "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t ||
+            ("deactivate" in t && !hasActivateWord && isOurAdminActive())
+        val isDeactivationAttempt = isOurAdminActive() && isExplicitDeactAction
 
-        if (isDeviceAdminActivation) {
+        val isDeviceAdminActivation = rootCls.contains("deviceadminadd") ||
+            "activate this device admin" in t || "activate this device administrator" in t ||
+            "activate admin app" in t || ("activate" in t && ("device admin" in t || "admin app" in t || "administrator" in t)) ||
+            ("turn on" in t && ("admin" in t || "device" in t)) ||
+            (("সক্রিয়" in t || "সক্রিয়" in t) && "অ্যাডমিন" in t) ||
+            (!isOurAdminActive() && (rootCls.contains("deviceadmin") || "device admin" in t || "device administrator" in t || "admin app" in t))
+
+        if (isDeviceAdminActivation && !isDeactivationAttempt) {
             return true
         }
 
@@ -1622,6 +1632,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isOnboardingArmed) configFlags = configFlags or 32
         if (blockDateTime) configFlags = configFlags or 64
         if (blockSchedPower) configFlags = configFlags or 128
+        if (isOurAdminActive()) configFlags = configFlags or 256
 
         if (configFlags == 0) return false
 
@@ -2964,6 +2975,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         val rawT = sb.toString().lowercase()
         if ("tamper protection" in rawT || "uninstall protected" in rawT || "power off locked" in rawT || "focus mode" in rawT || "নিরাপত্তা সুরক্ষা" in rawT) return false
         val t = rawT.replace("prevents blocker from being uninstalled.", "")
+        val rootCls = root.className?.toString()?.lowercase().orEmpty()
+        val evCls = ev.className?.toString()?.lowercase().orEmpty()
 
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
@@ -3000,9 +3013,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // Exempt legitimate Device Admin Activation screen
-        val isDeviceAdminActivation = "activate this device admin" in t || "activate this device administrator" in t ||
-            "activate admin app" in t || ("activate" in t && "admin" in t) || (rootPkg.contains("settings") && "device admin" in t && "activate" in t)
-        if (isDeviceAdminActivation) {
+        val hasActivate = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
+        val isExplicitDeact = isOurAdminActive() && ("deactivate this device admin" in t ||
+            "deactivate this device administrator" in t || "deactivate admin app" in t ||
+            "remove device admin" in t || "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t)
+        val isDeviceAdminActivation = (!isOurAdminActive() && ("device admin" in t || "admin app" in t || rootCls.contains("deviceadmin") || evCls.contains("deviceadmin"))) ||
+            "activate this device admin" in t || "activate this device administrator" in t ||
+            "activate admin app" in t || (hasActivate && "admin" in t) || (rootPkg.contains("settings") && "device admin" in t && hasActivate) ||
+            rootCls.contains("deviceadminadd") || evCls.contains("deviceadminadd")
+        if (isDeviceAdminActivation && !isExplicitDeact) {
             return false
         }
 
@@ -3042,10 +3061,11 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // 3. Device Admin deactivation attempt (strictly requires our admin active and deactivation keyword)
+        // 3. Device Admin deactivation attempt (strictly requires our admin active and explicit deactivation action)
         val isAdminDeactivate = isOurAdminActive() && (
-            ("deactivate" in t && ("admin" in t || "device" in t)) ||
-            "deactivate this device admin" in t || "deactivate this device administrator" in t
+            "deactivate this device admin" in t || "deactivate this device administrator" in t ||
+            "deactivate admin app" in t || "remove device admin" in t ||
+            ("deactivate" in t && ("admin" in t || "device" in t) && !hasActivate)
         ) && (isOurApp || "admin" in t)
         if (isAdminDeactivate && !isLegitimatePermissionScreen(root, t)) {
             autoCancelDialog(root)
@@ -3396,10 +3416,16 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val t = sb.toString().lowercase()
 
-        // Device admin activation is allowed
-        if (rootCls.contains("deviceadminadd") || "activate this device admin" in t || "activate admin app" in t ||
-            ("activate" in t && "admin" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t) || ("সক্রিয়" in t && "অ্যাডমিন" in t)) {
-            if (!t.contains("deactivate") && !t.contains("নিষ্ক্রিয়")) return false
+        // Device admin activation is allowed (not an App Info screen)
+        val hasActivateWord = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
+        val isExplicitDeact = isOurAdminActive() && ("deactivate this device admin" in t ||
+            "deactivate this device administrator" in t || "deactivate admin app" in t ||
+            "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t)
+        if (rootCls.contains("deviceadminadd") || evCls.contains("deviceadminadd") ||
+            "activate this device admin" in t || "activate admin app" in t ||
+            ("activate" in t && "admin" in t) || (hasActivateWord && "admin" in t) ||
+            (!isOurAdminActive() && ("device admin" in t || "admin app" in t || rootCls.contains("deviceadmin")))) {
+            if (!isExplicitDeact) return false
         }
 
         // Must not block legitimate permission screens or install/update
@@ -3517,9 +3543,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         kickToHome()
                         return true
                     }
-                } finally {
-                    runCatching { root.recycle() }
-                }
+                } catch (_: Throwable) {}
             }
         }
 
@@ -3540,7 +3564,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (isDestructiveClick) {
                     val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
                     val selfTarget = isSelfMentioned(ev) || (root != null && root.packageName?.toString() != packageName && isBlockerAppInfoScreen(root, ev))
-                    runCatching { root?.recycle() }
                     if (selfTarget) {
                         autoCancelDialog(rootInActiveWindow)
                         performGlobalAction(GLOBAL_ACTION_BACK)
@@ -3563,9 +3586,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         kickToHome()
                         return true
                     }
-                } finally {
-                    runCatching { root.recycle() }
-                }
+                } catch (_: Throwable) {}
             }
         }
 

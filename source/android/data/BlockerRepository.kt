@@ -19,6 +19,7 @@ import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
 import com.blocker.FocusSchedule
+import com.blocker.MainActivity
 import com.blocker.MyDeviceAdminReceiver
 import com.blocker.SecureTime
 import kotlinx.coroutines.CoroutineScope
@@ -631,6 +632,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun requestDndAccess(context: Context) {
+        MainActivity.isLaunchingExternal = true
         val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -649,6 +651,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun openWifiSettings(context: Context) {
+        MainActivity.isLaunchingExternal = true
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Intent(Settings.Panel.ACTION_WIFI)
         } else {
@@ -659,6 +662,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun openDataSettings(context: Context) {
+        MainActivity.isLaunchingExternal = true
         val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -815,12 +819,13 @@ class BlockerRepository(private val context: Context) {
         }
 
         val act = (context as? Activity)
+        MainActivity.isLaunchingExternal = true
         for (intent in tries) {
             try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (act != null) {
                     act.startActivity(intent)
                 } else {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 }
                 break

@@ -88,6 +88,7 @@ struct SerializedNodeHeader {
 #define CONFIG_FLAG_ONBOARDING_ARMED   (1 << 5)
 #define CONFIG_FLAG_BLOCK_DATE_TIME    (1 << 6)
 #define CONFIG_FLAG_BLOCK_SCHED_POWER  (1 << 7)
+#define CONFIG_FLAG_ADMIN_ACTIVE       (1 << 8)
 
 // Action Codes
 #define ACTION_ALLOW            0

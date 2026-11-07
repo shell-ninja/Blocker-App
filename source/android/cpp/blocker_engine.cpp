@@ -646,8 +646,16 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 contains_ci(cls, "DeviceAdmin");
 
             if (is_admin_screen) {
+                // If our device admin is NOT active, it CANNOT be a deactivation attempt!
+                bool is_our_admin_active = (hdr->config_flags & CONFIG_FLAG_ADMIN_ACTIVE) != 0;
+                if (!is_our_admin_active) {
+                    return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+                }
+
                 bool mentions_self = false;
-                bool is_deactivation_attempt = false;
+                bool has_activate_word = false;
+                bool has_deactivate_action = false;
+
                 for (size_t i = 0; i < node_count; ++i) {
                     std::string_view t = nodes[i].text;
                     std::string_view c = nodes[i].cd;
@@ -655,12 +663,24 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                         (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg)))) {
                         mentions_self = true;
                     }
-                    if (contains_ci(t, "deactivate") || contains_ci(c, "deactivate") ||
-                        contains_ci(t, "remove device admin") || contains_ci(c, "remove device admin")) {
-                        is_deactivation_attempt = true;
+                    if (contains_ci(t, "activate") || contains_ci(c, "activate") ||
+                        contains_ci(t, "turn on") || contains_ci(c, "turn on") ||
+                        contains_ci(t, "সক্রিয়") || contains_ci(t, "সক্রিয়")) {
+                        has_activate_word = true;
+                    }
+                    if (contains_ci(t, "deactivate this device admin") || contains_ci(c, "deactivate this device admin") ||
+                        contains_ci(t, "deactivate this device administrator") || contains_ci(c, "deactivate this device administrator") ||
+                        contains_ci(t, "remove device admin") || contains_ci(c, "remove device admin") ||
+                        contains_ci(t, "নিষ্ক্রিয় করুন") || contains_ci(t, "নিষ্ক্রিয় করুন")) {
+                        has_deactivate_action = true;
                     }
                 }
-                if (mentions_self && is_deactivation_attempt) {
+
+                if (has_activate_word && !has_deactivate_action) {
+                    return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+                }
+
+                if (mentions_self && (has_deactivate_action || (!has_activate_word && contains_ci(cls, "DeviceAdminAdd")))) {
                     return pack_verdict(ACTION_TAMPER_DETECTED, REASON_DEVICE_ADMIN_TAMPER, 0xFFFF, 0, 1);
                 }
                 // Legitimate admin activation or list screen: allow user to turn ON device admin

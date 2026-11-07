@@ -18,6 +18,11 @@ import com.blocker.ui.theme.CyberBg
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        @Volatile
+        var isLaunchingExternal: Boolean = false
+    }
+
     private lateinit var repo: BlockerRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +45,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        isLaunchingExternal = false
         if (::repo.isInitialized) {
             repo.refreshAll()
         }
@@ -47,16 +53,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // Anti-tamper minimize defense: immediately close and purge task on minimize
-        finishAndRemoveTask()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // Ensure the task is completely purged from recents when no longer visible
-        if (!isFinishing) {
-            finishAndRemoveTask()
+        if (isLaunchingExternal) {
+            // User intentionally navigated to a permission or settings screen from inside Blocker.
+            // Keep the activity alive so the user can complete setup and return cleanly.
+            return
         }
+        // Anti-tamper minimize defense: close completely and purge task when user presses Home or Recents
+        finishAndRemoveTask()
     }
 
     @Deprecated("Deprecated in Java")

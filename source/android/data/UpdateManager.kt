@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.blocker.BlockerStore
+import com.blocker.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +113,7 @@ class UpdateManager(private val context: Context) {
 
     fun openInstallSettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            MainActivity.isLaunchingExternal = true
             val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
                 data = Uri.parse("package:${context.packageName}")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -339,6 +341,7 @@ class UpdateManager(private val context: Context) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            MainActivity.isLaunchingExternal = true
             context.startActivity(installIntent)
         } catch (e: Exception) {
             _updateState.value = _updateState.value.copy(

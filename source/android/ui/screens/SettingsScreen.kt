@@ -2,6 +2,7 @@ package com.blocker.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import com.blocker.MainActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -522,6 +523,7 @@ fun SettingsScreen(
                 .border(1.dp, CyberAccent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
                 .clickable {
                     runCatching {
+                        MainActivity.isLaunchingExternal = true
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/shell-ninja/Blocker-App"))
                         context.startActivity(intent)
                     }
@@ -550,6 +552,7 @@ fun SettingsScreen(
                 .clip(RoundedCornerShape(14.dp))
                 .clickable {
                     runCatching {
+                        MainActivity.isLaunchingExternal = true
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/shell-ninja"))
                         context.startActivity(intent)
                     }
