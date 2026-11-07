@@ -305,10 +305,15 @@ if "androidx.core.content.FileProvider" not in t:
     t = t.replace("</application>", provider_xml + "</application>", 1)
     write(mf, t)
 
-# 4c. Set excludeFromRecents on MainActivity so minimizing leaves no card/menu in Recents
+# 4c. Set excludeFromRecents, autoRemoveFromRecents, and noHistory on MainActivity so minimizing leaves no card/menu in Recents
 t = read(mf)
-if 'android:name=".MainActivity"' in t and 'android:excludeFromRecents="true"' not in t:
-    t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
+if 'android:name=".MainActivity"' in t:
+    if 'android:excludeFromRecents="true"' not in t:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
+    if 'android:autoRemoveFromRecents="true"' not in t:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:autoRemoveFromRecents="true"', 1)
+    if 'android:noHistory="true"' not in t:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:noHistory="true"', 1)
 write(mf, t)
 
 # 5. app/build.gradle

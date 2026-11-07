@@ -44,4 +44,23 @@ class MainActivity : ComponentActivity() {
             repo.refreshAll()
         }
     }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Anti-tamper minimize defense: immediately close and purge task on minimize
+        finishAndRemoveTask()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Ensure the task is completely purged from recents when no longer visible
+        if (!isFinishing) {
+            finishAndRemoveTask()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        finishAndRemoveTask()
+    }
 }
