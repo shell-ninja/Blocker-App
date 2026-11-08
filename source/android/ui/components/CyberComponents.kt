@@ -1,7 +1,7 @@
 package com.blocker.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,15 +15,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.R
-import com.blocker.ui.theme.*
+import com.blocker.BlockerStore
+import com.blocker.ui.theme.NordicColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -40,9 +43,9 @@ enum class BtnKind {
 }
 
 /**
- * 3D Bento Squircle Card Surface
- * Dark slate-navy surface (#0E1322 / #0E1726), 18dp corner radius.
- * Active cards support luminous emerald highlight.
+ * Flagship Dark Nordic Bento Card Surface.
+ * Elevated Nordic Slate (0xFF1C1F2B), 20.dp corner radius, 1.dp structural border (0xFF2A2E3D),
+ * and subtle 1.dp top rim highlight (0xFF3A4054).
  */
 @Composable
 fun GlowCard(
@@ -53,34 +56,33 @@ fun GlowCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(20.dp)
+    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
 
-    val bgBrush = when {
-        active || tone == CardTone.OK -> Brush.verticalGradient(listOf(Color(0xFF0F2231), Color(0xFF09141F)))
-        tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(Color(0xFF1B1336), Color(0xFF0E0B1A)))
-        tone == CardTone.DANGER -> Brush.verticalGradient(listOf(Color(0xFF26101B), Color(0xFF14080F)))
-        tone == CardTone.WARN -> Brush.verticalGradient(listOf(Color(0xFF291F0E), Color(0xFF171107)))
-        else -> Brush.verticalGradient(listOf(CyberCardTop, CyberCardBottom))
-    }
-
-    val borderBrush = when {
-        active || tone == CardTone.OK -> Brush.verticalGradient(listOf(CyberOk.copy(alpha = 0.7f), CyberOk.copy(alpha = 0.25f)))
-        tone == CardTone.ACCENT -> Brush.verticalGradient(listOf(CyberAccent.copy(alpha = 0.75f), CyberAccent.copy(alpha = 0.25f)))
-        tone == CardTone.DANGER -> Brush.verticalGradient(listOf(CyberDanger.copy(alpha = 0.7f), CyberDanger.copy(alpha = 0.25f)))
-        tone == CardTone.WARN -> Brush.verticalGradient(listOf(CyberWarn.copy(alpha = 0.75f), CyberWarn.copy(alpha = 0.25f)))
-        else -> Brush.verticalGradient(listOf(CyberCardBorderGlow.copy(alpha = 0.45f), CyberCardBorder))
-    }
-
-    val clickModifier = if (onClick != null) {
-        Modifier.clickable(onClick = onClick)
-    } else {
-        Modifier
+    val borderColor = when {
+        active || tone == CardTone.OK -> NordicColors.AccentPrimary
+        tone == CardTone.DANGER -> NordicColors.AlertMuted
+        tone == CardTone.WARN -> Color(0xFFEBCB8B)
+        else -> NordicColors.HairlineBorder
     }
 
     Column(
         modifier = modifier
             .clip(shape)
-            .background(bgBrush)
-            .border(1.dp, borderBrush, shape)
+            .background(if (active) NordicColors.CardSurfaceHero else NordicColors.CardSurface)
+            .drawWithCache {
+                val highlightY = 1.dp.toPx()
+                val highlightStartX = 20.dp.toPx()
+                val highlightEndX = size.width - 20.dp.toPx()
+                onDrawBehind {
+                    drawLine(
+                        color = NordicColors.TopEdgeHighlight,
+                        start = Offset(highlightStartX, highlightY),
+                        end = Offset(highlightEndX, highlightY),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+            }
+            .border(1.dp, borderColor, shape)
             .then(clickModifier)
             .padding(18.dp),
         content = content
@@ -88,8 +90,8 @@ fun GlowCard(
 }
 
 /**
- * Luminous Status Pill Badge
- * Supports breathing glow animation on active states (e.g. 'Fortress Live', 'Airtight Lock', 'Healthy').
+ * Flagship Nordic Status Pill Badge.
+ * Active states feature solid Nordic Light Gray / Ice White pill with Dark Nordic ink.
  */
 @Composable
 fun StatusPillBadge(
@@ -104,7 +106,7 @@ fun StatusPillBadge(
     val alphaAnim by if (breathing) {
         infiniteTransition.animateFloat(
             initialValue = 1f,
-            targetValue = 0.60f,
+            targetValue = 0.70f,
             animationSpec = infiniteRepeatable(
                 animation = tween(1200, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
@@ -116,14 +118,14 @@ fun StatusPillBadge(
     }
 
     val (bg, border, textClr) = when (tone) {
-        BadgeTone.OK -> Triple(CyberOkSoft, CyberOk.copy(alpha = 0.6f), CyberOkGlow)
-        BadgeTone.WARN -> Triple(CyberWarnSoft, CyberWarn.copy(alpha = 0.6f), CyberWarn)
-        BadgeTone.DANGER -> Triple(CyberDangerSoft, CyberDanger.copy(alpha = 0.6f), CyberDanger)
-        BadgeTone.ACCENT -> Triple(CyberAccentSoft, CyberAccent.copy(alpha = 0.6f), CyberAccentGlow)
-        BadgeTone.IDLE -> Triple(CyberCardSurface, CyberCardBorder, CyberTextSub)
+        BadgeTone.OK -> Triple(NordicColors.AccentPrimary, NordicColors.AccentPrimary, NordicColors.OnAccentPrimary)
+        BadgeTone.WARN -> Triple(Color(0x33EBCB8B), Color(0x66EBCB8B), Color(0xFFEBCB8B))
+        BadgeTone.DANGER -> Triple(Color(0x33BF616A), Color(0x88BF616A), NordicColors.AlertMuted)
+        BadgeTone.ACCENT -> Triple(NordicColors.AccentPrimary, NordicColors.AccentPrimary, NordicColors.OnAccentPrimary)
+        BadgeTone.IDLE -> Triple(NordicColors.CardSurface, NordicColors.HairlineBorder, NordicColors.TextSecondary)
     }
 
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(12.dp)
     val padH = if (small) 8.dp else 12.dp
     val padV = if (small) 3.dp else 5.dp
     val fontSz = if (small) 10.5.sp else 12.sp
@@ -145,7 +147,7 @@ fun StatusPillBadge(
                 modifier = Modifier.size(if (small) 11.dp else 13.dp)
             )
             Spacer(modifier = Modifier.width(5.dp))
-        } else {
+        } else if (tone != BadgeTone.OK && tone != BadgeTone.ACCENT) {
             Box(
                 modifier = Modifier
                     .size(if (small) 5.dp else 6.dp)
@@ -166,9 +168,7 @@ fun StatusPillBadge(
 }
 
 /**
- * 2x2 Bento Stat Card Component
- * Crisp tabular white number, purple squircle icon well in top right,
- * and cool muted slate-gray label.
+ * Flagship Bento Stat Card with Light/Regular Tabular Numerals.
  */
 @Composable
 fun BentoStatCard(
@@ -178,16 +178,16 @@ fun BentoStatCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(20.dp)
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
 
     Column(
         modifier = modifier
             .clip(shape)
-            .background(CyberCard)
-            .border(1.dp, CyberCardBorder, shape)
+            .background(NordicColors.CardSurface)
+            .border(1.dp, NordicColors.HairlineBorder, shape)
             .then(clickModifier)
-            .padding(16.dp)
+            .padding(18.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -196,25 +196,26 @@ fun BentoStatCard(
         ) {
             Text(
                 text = "$value",
-                color = Color.White,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-0.5).sp
+                color = NordicColors.TextPrimary,
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Normal,
+                style = TextStyle(fontFeatureSettings = "tnum"),
+                lineHeight = 40.sp
             )
 
             Box(
                 modifier = Modifier
                     .size(34.dp)
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(CyberAccentWell)
-                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NordicColors.CardSurfaceHero)
+                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color(0xFFC084FC),
-                    modifier = Modifier.size(18.dp)
+                    tint = NordicColors.AccentPrimary,
+                    modifier = Modifier.size(17.dp)
                 )
             }
         }
@@ -223,15 +224,15 @@ fun BentoStatCard(
 
         Text(
             text = label,
-            color = CyberTextSub,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium
+            color = NordicColors.TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Normal
         )
     }
 }
 
 /**
- * Modern Action Button (Primary gradient, Secondary outline, Ghost)
+ * Flagship Nordic Button (Primary solid light-gray, Secondary slate outline, Ghost, Danger).
  */
 @Composable
 fun Btn(
@@ -244,27 +245,11 @@ fun Btn(
 ) {
     val shape = RoundedCornerShape(14.dp)
 
-    val (bgBrush, borderColor, textClr) = when (kind) {
-        BtnKind.PRIMARY -> Triple(
-            Brush.horizontalGradient(listOf(CyberAccent, CyberAccentGlow)),
-            null,
-            Color.White
-        )
-        BtnKind.SECONDARY -> Triple(
-            Brush.horizontalGradient(listOf(CyberCardSurface, CyberCardSurface)),
-            CyberCardBorder,
-            Color.White
-        )
-        BtnKind.GHOST -> Triple(
-            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)),
-            CyberCardBorder,
-            CyberTextSub
-        )
-        BtnKind.DANGER -> Triple(
-            Brush.horizontalGradient(listOf(CyberDanger, Color(0xFFB91C1C))),
-            null,
-            Color.White
-        )
+    val (bgColor, borderColor, textClr) = when (kind) {
+        BtnKind.PRIMARY -> Triple(NordicColors.AccentPrimary, null, NordicColors.OnAccentPrimary)
+        BtnKind.SECONDARY -> Triple(NordicColors.CardSurface, NordicColors.HairlineBorder, NordicColors.TextPrimary)
+        BtnKind.GHOST -> Triple(Color.Transparent, NordicColors.HairlineBorder, NordicColors.TextSecondary)
+        BtnKind.DANGER -> Triple(NordicColors.AlertMuted, null, NordicColors.TextPrimary)
     }
 
     val borderModifier = if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier
@@ -272,10 +257,10 @@ fun Btn(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(if (enabled) bgBrush else Brush.horizontalGradient(listOf(CyberCardSurface, CyberCardSurface)))
+            .background(if (enabled) bgColor else NordicColors.CardSurface)
             .then(borderModifier)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 11.dp),
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -286,23 +271,23 @@ fun Btn(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (enabled) textClr else CyberTextSub,
+                    tint = if (enabled) textClr else NordicColors.TextSecondary,
                     modifier = Modifier.size(17.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(
                 text = label,
-                color = if (enabled) textClr else CyberTextSub,
+                color = if (enabled) textClr else NordicColors.TextSecondary,
                 fontSize = 13.5.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold
             )
         }
     }
 }
 
 /**
- * CyberSwitch with smooth spring animation and sleek violet track
+ * CyberSwitch mapped directly to flagship NordicSwitch.
  */
 @Composable
 fun CyberSwitch(
@@ -311,24 +296,16 @@ fun CyberSwitch(
     modifier: Modifier = Modifier,
     enabled: Boolean = true
 ) {
-    Switch(
+    NordicSwitch(
         checked = checked,
         onCheckedChange = onCheckedChange,
-        enabled = enabled,
         modifier = modifier,
-        colors = SwitchDefaults.colors(
-            checkedThumbColor = Color.White,
-            checkedTrackColor = CyberAccent,
-            checkedBorderColor = CyberAccentGlow,
-            uncheckedThumbColor = CyberTextSub,
-            uncheckedTrackColor = CyberCardSurface,
-            uncheckedBorderColor = CyberCardBorder
-        )
+        enabled = enabled
     )
 }
 
 /**
- * Countdown delay lock bar with live ticker and confirmation window
+ * Countdown delay lock bar with live ticker and NordicLinearBar.
  */
 @Composable
 fun LockBar(
@@ -353,10 +330,9 @@ fun LockBar(
     val isPendingReady = pendingUntil > 0L && currentNow >= pendingUntil
     val isReady = isGuardOpen || isPendingReady
 
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(18.dp)
 
     if (isReady) {
-        // Confirmation Window (Guard is open for 10 minutes)
         val guardRemainingMs = if (guardOpenUntil > 0L) (guardOpenUntil - currentNow).coerceAtLeast(0L) else 0L
         val guardMins = (guardRemainingMs / 1000L) / 60L
         val guardSecs = (guardRemainingMs / 1000L) % 60L
@@ -370,9 +346,9 @@ fun LockBar(
             modifier = modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(CyberOkSoft)
-                .border(1.dp, CyberOkBorder, shape)
-                .padding(14.dp)
+                .background(NordicColors.CardSurface)
+                .border(1.dp, NordicColors.SuccessMuted, shape)
+                .padding(16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -382,27 +358,28 @@ fun LockBar(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(CyberOkSoft),
+                        .background(NordicColors.CardSurfaceHero)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = CyberIcons.Check,
                         contentDescription = null,
-                        tint = CyberOk,
-                        modifier = Modifier.size(20.dp)
+                        tint = NordicColors.SuccessMuted,
+                        modifier = Modifier.size(19.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Timer Complete",
-                        color = Color.White,
-                        fontSize = 14.sp,
+                        color = NordicColors.TextPrimary,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = windowText,
-                        color = CyberOk,
+                        color = NordicColors.SuccessMuted,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -412,11 +389,11 @@ fun LockBar(
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "The waiting period has finished. Confirm below to turn off protection, or cancel to keep your fortress locked.",
-                color = CyberTextSub,
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp
+                color = NordicColors.TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 17.sp
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -437,7 +414,6 @@ fun LockBar(
             }
         }
     } else {
-        // Pending Countdown
         val remainingMs = (pendingUntil - currentNow).coerceAtLeast(0L)
         val remainingSec = remainingMs / 1000L
         val hours = remainingSec / 3600L
@@ -447,20 +423,19 @@ fun LockBar(
         val timeStr = if (hours > 0) {
             String.format("%02dh %02dm %02ds", hours, minutes, seconds)
         } else {
-            String.format("%02dm %02ds", minutes, seconds)
+            String.format("%02d:%02d", minutes, seconds)
         }
 
-        // Calculate progress based on total 24h
-        val totalSpan = 86_400_000f
+        val totalSpan = if (BlockerStore.isTimerDebug()) 60_000f else 86_400_000f
         val progress = (1f - (remainingMs.toFloat() / totalSpan)).coerceIn(0f, 1f)
 
         Column(
             modifier = modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(CyberAccentWell)
-                .border(1.dp, CyberAccent.copy(alpha = 0.45f), shape)
-                .padding(14.dp)
+                .background(NordicColors.CardSurface)
+                .border(1.dp, NordicColors.HairlineBorder, shape)
+                .padding(16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -470,13 +445,14 @@ fun LockBar(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(CyberAccentSoft),
+                        .background(NordicColors.CardSurfaceHero)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = CyberIcons.Lock,
                         contentDescription = null,
-                        tint = CyberAccentGlow,
+                        tint = NordicColors.AccentPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -484,127 +460,57 @@ fun LockBar(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Protection Delay Active",
-                        color = Color.White,
-                        fontSize = 13.5.sp,
+                        color = NordicColors.TextPrimary,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "$timeStr remaining",
-                        color = CyberAccentGlow,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Medium
                     )
                 }
                 TextButton(
                     onClick = onCancel,
-                    colors = ButtonDefaults.textButtonColors(contentColor = CyberWarn)
+                    colors = ButtonDefaults.textButtonColors(contentColor = NordicColors.AlertMuted)
                 ) {
-                    Text(text = "Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(text = "Cancel", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Progress bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF1E293B))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Brush.horizontalGradient(listOf(CyberAccent, CyberAccentGlow)))
-                )
-            }
+            // Signature Nordic Linear Bar
+            NordicLinearBar(progress = progress)
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Strict waiting period active. Protection remains fully engaged until countdown completes and you confirm.",
-                color = CyberTextSub,
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp
+                color = NordicColors.TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 17.sp
             )
         }
     }
 }
 
 /**
- * Top App Header matching the React Native design
+ * Top App Header matching the Obsidian & Royal Purple Blocker design.
  */
 @Composable
 fun TopHeader(
     isLive: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    BrandTopBar(
+        isProtected = isLive,
         modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF0F1528), Color(0xFF0A0E1A))))
-            .border(1.dp, Brush.horizontalGradient(listOf(Color(0x457C3AED), Color(0x157C3AED))), RoundedCornerShape(22.dp))
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF16122C))
-                    .border(1.5.dp, CyberAccent, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.mipmap.ic_launcher),
-                    contentDescription = "Blocker Icon",
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-            }
-            Spacer(modifier = Modifier.width(11.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Block",
-                    color = Color.White,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.4).sp
-                )
-                Text(
-                    text = "er",
-                    color = Color(0xFFA78BFA),
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.4).sp
-                )
-                Box(
-                    modifier = Modifier
-                        .padding(start = 5.dp, bottom = 8.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (isLive) CyberOk else CyberTextSub)
-                )
-            }
-        }
-
-        StatusPillBadge(
-            label = if (isLive) "Fortress Live" else "Protection Paused",
-            tone = if (isLive) BadgeTone.OK else BadgeTone.IDLE,
-            breathing = isLive,
-            icon = if (isLive) CyberIcons.Check else null
-        )
-    }
+    )
 }
 
 /**
- * Section Header Title
+ * Section Header Title.
  */
 @Composable
 fun SectionHeader(
@@ -619,26 +525,26 @@ fun SectionHeader(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color(0xFFA78BFA),
-                    modifier = Modifier.size(19.dp)
+                    tint = NordicColors.AccentPrimary,
+                    modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(
                 text = title,
-                color = CyberText,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-0.3).sp
+                color = NordicColors.TextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.2).sp
             )
         }
         if (subtitle != null) {
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = subtitle,
-                color = CyberTextSub,
-                fontSize = 12.5.sp,
-                lineHeight = 17.sp
+                color = NordicColors.TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
             )
         }
     }

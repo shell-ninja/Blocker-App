@@ -10,18 +10,18 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
-    primary = CyberAccent,
-    onPrimary = CyberText,
-    secondary = CyberOk,
-    onSecondary = CyberText,
-    tertiary = CyberWarn,
-    background = CyberBg,
-    onBackground = CyberText,
-    surface = CyberCard,
-    onSurface = CyberText,
-    surfaceVariant = CyberCardSurface,
-    onSurfaceVariant = CyberTextSub,
-    outline = CyberCardBorder
+    primary = NordicColors.AccentPrimary,
+    onPrimary = NordicColors.OnAccentPrimary,
+    secondary = NordicColors.AccentPrimary,
+    onSecondary = NordicColors.OnAccentPrimary,
+    tertiary = NordicColors.SuccessMuted,
+    background = NordicColors.CanvasBg,
+    onBackground = NordicColors.TextPrimary,
+    surface = NordicColors.CardSurface,
+    onSurface = NordicColors.TextPrimary,
+    surfaceVariant = NordicColors.CardSurfaceHero,
+    onSurfaceVariant = NordicColors.TextSecondary,
+    outline = NordicColors.HairlineBorder
 )
 
 @Composable
@@ -33,8 +33,8 @@ fun BlockerTheme(
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                window.statusBarColor = CyberBg.toArgb()
-                window.navigationBarColor = CyberBg.toArgb()
+                window.statusBarColor = NordicColors.CanvasBg.toArgb()
+                window.navigationBarColor = NordicColors.CanvasBg.toArgb()
                 WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
                 WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
             }

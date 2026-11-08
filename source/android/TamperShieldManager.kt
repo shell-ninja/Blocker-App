@@ -66,8 +66,10 @@ object TamperShieldManager {
 
         // Pre-attach the shield view in advance with View.GONE!
         try {
-            wm?.addView(container, wmParams)
-            isAttached = true
+            if (container.parent == null && !container.isAttachedToWindow) {
+                wm?.addView(container, wmParams)
+                isAttached = true
+            }
         } catch (_: Throwable) {}
     }
 
@@ -94,15 +96,15 @@ object TamperShieldManager {
             val params = shieldParams ?: return@Runnable
             val wm = windowManager ?: (service.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@Runnable
 
-            if (!isAttached) {
-                try {
-                    wm.addView(view, params)
-                    isAttached = true
-                } catch (t: Throwable) {
-                    try {
+            if (!isAttached || view.parent == null || !view.isAttachedToWindow) {
+                runCatching {
+                    if (view.parent == null && !view.isAttachedToWindow) {
+                        wm.addView(view, params)
+                        isAttached = true
+                    } else {
                         wm.updateViewLayout(view, params)
                         isAttached = true
-                    } catch (_: Throwable) {}
+                    }
                 }
             }
 

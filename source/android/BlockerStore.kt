@@ -181,10 +181,17 @@ object SecureTime {
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
     const val APP_VERSION = "1.0.6.7"
+    const val DISPLAY_VERSION = "1.0.6.7"
     const val BUILD_NUMBER = 92
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
     const val GUARD_WINDOW_MS = 10 * 60_000L
+
+    fun isTimerDebug(): Boolean = try {
+        BuildConfig.DEBUG || BuildConfig.IS_DEBUG_TIMER
+    } catch (_: Throwable) {
+        false
+    }
 
     fun prefs(c: Context): SharedPreferences =
         c.applicationContext.getSharedPreferences("blocker_store", Context.MODE_PRIVATE)
@@ -250,49 +257,53 @@ object BlockerStore {
         return true
     }
 
+    fun autoClampStuckTimers(c: Context) {
+        if (!isTimerDebug()) return
+        val p = prefs(c)
+        val now = SecureTime.now(c)
+        var changed = false
+        val editor = p.edit()
+        val all = p.all
+        for ((key, value) in all) {
+            if (key.startsWith("pending_") || key.contains("unlock") || key.contains("cooldown")) {
+                val target = (value as? Number)?.toLong() ?: continue
+                val remaining = target - now
+                if (remaining > 60_000L) {
+                    editor.putLong(key, now + 60_000L)
+                    changed = true
+                }
+            }
+        }
+        if (changed) {
+            editor.apply()
+            updateIntegrityHmac(c)
+        }
+    }
+
     fun checkAndApplyExpiredDelayTimers(c: Context) {
+        autoClampStuckTimers(c)
         val now = SecureTime.now(c)
         val p = prefs(c)
         var changed = false
         val editor = p.edit()
 
-        val pendingProtection = p.getLong("pending_protection", 0L)
-        if (pendingProtection != 0L && now >= pendingProtection) {
-            editor.remove("pending_protection")
-            editor.putLong("open_protection", now + GUARD_WINDOW_MS)
-            changed = true
-        }
-
-        val openProtection = p.getLong("open_protection", 0L)
-        if (openProtection != 0L && now >= openProtection) {
-            editor.remove("open_protection")
-            changed = true
-        }
-
-        val pendingShield = p.getLong("pending_shield", 0L)
-        if (pendingShield != 0L && now >= pendingShield) {
-            editor.remove("pending_shield")
-            editor.putLong("open_shield", now + GUARD_WINDOW_MS)
-            changed = true
-        }
-
-        val openShield = p.getLong("open_shield", 0L)
-        if (openShield != 0L && now >= openShield) {
-            editor.remove("open_shield")
-            changed = true
-        }
-
-        val pendingPower = p.getLong("pending_power_menu", 0L)
-        if (pendingPower != 0L && now >= pendingPower) {
-            editor.remove("pending_power_menu")
-            editor.putLong("open_power_menu", now + GUARD_WINDOW_MS)
-            changed = true
-        }
-
-        val openPower = p.getLong("open_power_menu", 0L)
-        if (openPower != 0L && now >= openPower) {
-            editor.remove("open_power_menu")
-            changed = true
+        val all = p.all
+        for ((k, v) in all) {
+            if (k.startsWith("pending_")) {
+                val target = (v as? Number)?.toLong() ?: continue
+                if (target != 0L && now >= target) {
+                    val baseKey = k.removePrefix("pending_")
+                    editor.remove(k)
+                    editor.putLong("open_$baseKey", now + GUARD_WINDOW_MS)
+                    changed = true
+                }
+            } else if (k.startsWith("open_")) {
+                val openUntil = (v as? Number)?.toLong() ?: continue
+                if (openUntil != 0L && now >= openUntil) {
+                    editor.remove(k)
+                    changed = true
+                }
+            }
         }
 
         if (changed) {
@@ -339,8 +350,8 @@ object BlockerStore {
     }
 
     fun delayDays(c: Context): Int = 1
-    // Fixed strict 24-hour waiting period
-    fun delayMs(c: Context): Long = DAY_MS
+    // 1-minute in debug builds (BuildConfig.DEBUG || BuildConfig.IS_DEBUG_TIMER), strict 24-hour waiting period in production
+    fun delayMs(c: Context): Long = if (isTimerDebug()) 60_000L else DAY_MS
 
     fun isOnboardingCompleted(c: Context): Boolean =
         prefs(c).getBoolean("onboarding_completed", false)

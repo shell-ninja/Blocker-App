@@ -64,7 +64,7 @@ fun ParentLockScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
+            .background(NordicColors.CanvasBg)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -75,29 +75,29 @@ fun ParentLockScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Glowing Lock Icon
+            // Nordic Monochromatic Lock Aura
             Box(
                 modifier = Modifier
                     .size(90.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(CyberAccentSoft)
-                    .border(1.5.dp, CyberAccent.copy(alpha = 0.6f), CircleShape),
+                    .background(NordicColors.CardSurfaceHero)
+                    .border(1.5.dp, NordicColors.AccentPrimary.copy(alpha = 0.25f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
-                        .background(CyberAccentWell)
-                        .border(1.dp, CyberAccentGlow, CircleShape),
+                        .background(NordicColors.CardSurface)
+                        .border(1.dp, NordicColors.HairlineBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = CyberIcons.Lock,
                         contentDescription = "Parental Lock",
-                        tint = Color(0xFFC084FC),
-                        modifier = Modifier.size(32.dp)
+                        tint = NordicColors.AccentPrimary,
+                        modifier = Modifier.size(30.dp)
                     )
                 }
             }
@@ -106,7 +106,7 @@ fun ParentLockScreen(
 
             Text(
                 text = "Parental Security Lock",
-                color = Color.White,
+                color = NordicColors.TextPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.4).sp
@@ -116,7 +116,7 @@ fun ParentLockScreen(
 
             Text(
                 text = "Enter master password to access Blocker controls",
-                color = CyberTextSub,
+                color = NordicColors.TextSecondary,
                 fontSize = 13.5.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 lineHeight = 18.sp
@@ -142,26 +142,26 @@ fun ParentLockScreen(
                     onDone = { attemptUnlock() }
                 ),
                 placeholder = {
-                    Text(text = "Enter master password", color = CyberTextSub, fontSize = 13.5.sp)
+                    Text(text = "Enter master password", color = NordicColors.TextSecondary, fontSize = 13.5.sp)
                 },
                 trailingIcon = {
                     IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
                         Icon(
                             imageVector = if (isPasswordVisible) CyberIcons.EyeOff else CyberIcons.Eye,
                             contentDescription = if (isPasswordVisible) "Hide password" else "Show password",
-                            tint = CyberTextSub
+                            tint = NordicColors.TextSecondary
                         )
                     }
                 },
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = CyberCardSurface,
-                    unfocusedContainerColor = CyberCardSurface,
-                    focusedBorderColor = CyberAccent,
-                    unfocusedBorderColor = CyberCardBorder,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = CyberAccentGlow
+                    focusedContainerColor = NordicColors.CardSurfaceHero,
+                    unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                    focusedBorderColor = NordicColors.AccentPrimary,
+                    unfocusedBorderColor = NordicColors.HairlineBorder,
+                    focusedTextColor = NordicColors.TextPrimary,
+                    unfocusedTextColor = NordicColors.TextPrimary,
+                    cursorColor = NordicColors.AccentPrimary
                 )
             )
 
@@ -170,7 +170,7 @@ fun ParentLockScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "Incorrect password. Please verify and try again.",
-                        color = CyberDanger,
+                        color = NordicColors.AlertMuted,
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold
                     )

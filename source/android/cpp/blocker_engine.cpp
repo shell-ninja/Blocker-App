@@ -715,38 +715,53 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
             // Scoped Check: Does this Settings / App Info screen target Blocker?
             bool targets_self_in_settings = false;
             for (size_t i = 0; i < node_count; ++i) {
-                if ((!self_lbl.empty() && (contains_ci(nodes[i].text, self_lbl) || contains_ci(nodes[i].cd, self_lbl))) ||
-                    (!self_pkg.empty() && (contains_ci(nodes[i].text, self_pkg) || contains_ci(nodes[i].cd, self_pkg)))) {
+                std::string_view t = nodes[i].text;
+                std::string_view c = nodes[i].cd;
+                if ((!self_lbl.empty() && (contains_ci(t, self_lbl) || contains_ci(c, self_lbl))) ||
+                    (!self_pkg.empty() && (contains_ci(t, self_pkg) || contains_ci(c, self_pkg))) ||
+                    contains_ci(t, "blocker") || contains_ci(c, "blocker") ||
+                    contains_ci(t, "prachir") || contains_ci(c, "prachir") ||
+                    contains_ci(t, "com.blocker") || contains_ci(c, "com.blocker") ||
+                    contains_ci(t, "com.prachir.app") || contains_ci(c, "com.prachir.app") ||
+                    contains_ci(t, "প্রাচীর") || contains_ci(c, "প্রাচীর") ||
+                    contains_ci(t, "ব্লকার") || contains_ci(c, "ব্লকার")) {
                     targets_self_in_settings = true;
                     break;
                 }
             }
 
             if (targets_self_in_settings) {
-                bool has_force_stop = false;
-                bool has_uninstall = false;
-                bool has_open_or_disable = false;
-                bool has_storage_clear = false;
-
-                for (size_t i = 0; i < node_count; ++i) {
-                    std::string_view t = nodes[i].text;
-                    std::string_view c = nodes[i].cd;
-                    if (contains_ci(t, "force stop") || contains_ci(c, "force stop") ||
-                        contains_ci(t, "জোরপূর্বক থামান")) has_force_stop = true;
-                    if (contains_ci(t, "uninstall") || contains_ci(c, "uninstall") ||
-                        contains_ci(t, "আনইনস্টল")) has_uninstall = true;
-                    if (contains_ci(t, "open") || contains_ci(c, "open") ||
-                        contains_ci(t, "disable") || contains_ci(c, "disable") ||
-                        contains_ci(t, "খুলুন")) has_open_or_disable = true;
-                    if (contains_ci(t, "clear storage") || contains_ci(c, "clear storage") ||
-                        contains_ci(t, "clear data") || contains_ci(c, "clear data") ||
-                        contains_ci(t, "manage space") || contains_ci(c, "manage space") ||
-                        contains_ci(t, "storage & cache") || contains_ci(c, "storage & cache") ||
-                        contains_ci(t, "delete app data") || contains_ci(c, "delete app data") ||
-                        contains_ci(t, "মুছুন")) has_storage_clear = true;
+                bool has_destructive_or_app_info = false;
+                if (contains_ci(cls, "InstalledAppDetails") || contains_ci(cls, "AppInfo") ||
+                    contains_ci(cls, "SpaActivity") || contains_ci(cls, "ManageApplications")) {
+                    has_destructive_or_app_info = true;
                 }
 
-                if (has_force_stop || (has_uninstall && has_open_or_disable) || has_storage_clear) {
+                if (!has_destructive_or_app_info) {
+                    for (size_t i = 0; i < node_count; ++i) {
+                        std::string_view t = nodes[i].text;
+                        std::string_view c = nodes[i].cd;
+                        std::string_view id = nodes[i].id;
+                        if (contains_ci(t, "force stop") || contains_ci(c, "force stop") ||
+                            contains_ci(t, "জোরপূর্বক থামান") || contains_ci(t, "uninstall") ||
+                            contains_ci(c, "uninstall") || contains_ci(t, "আনইনস্টল") ||
+                            contains_ci(t, "clear storage") || contains_ci(c, "clear storage") ||
+                            contains_ci(t, "clear data") || contains_ci(c, "clear data") ||
+                            contains_ci(t, "manage space") || contains_ci(c, "manage space") ||
+                            contains_ci(t, "storage & cache") || contains_ci(c, "storage & cache") ||
+                            contains_ci(t, "delete app data") || contains_ci(c, "delete app data") ||
+                            contains_ci(t, "app info") || contains_ci(c, "app info") ||
+                            contains_ci(t, "application info") || contains_ci(c, "application info") ||
+                            contains_ci(t, "app details") || contains_ci(c, "app details") ||
+                            contains_ci(t, "disable") || contains_ci(c, "disable") ||
+                            contains_ci(t, "মুছুন")) {
+                            has_destructive_or_app_info = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (has_destructive_or_app_info) {
                     return pack_verdict(ACTION_TAMPER_DETECTED, REASON_APP_INFO_TAMPER, 0xFFFF, 0, 1);
                 }
             }
@@ -775,9 +790,146 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
         }
 
         // ---------------------------------------------------------------------
-        // STATE A: Main Navigation Bar Inspector & Newsfeed Safe-Guard
+        // STATE C FIRST: Full-Screen / Clicked Player, Litho Action Rail, Transport
+        // Evaluated BEFORE the newsfeed tab bar safe-guard so that videos and Reels
+        // clicked from the newsfeed are blocked immediately even if the main tab bar
+        // remains present in the underlying accessibility hierarchy.
         // ---------------------------------------------------------------------
-        // Scan top (top < 220) and bottom (bottom > 880) for Facebook's main tab bar (4 to 6 horizontal tab nodes)
+
+        // Signature C1: Dedicated Player Activity Classes
+        bool player_activity = contains_ci(cls, "FbShorts") || contains_ci(cls, "ReelViewer") ||
+            contains_ci(cls, "TahoeActivity") || contains_ci(cls, "VideoHome") ||
+            contains_ci(cls, "FullScreenVideo") || contains_ci(cls, "InspirationViewer") ||
+            contains_ci(cls, "ClipsViewer") || contains_ci(cls, "WatchAndMore") ||
+            contains_ci(cls, "VideoPlayer");
+
+        if (player_activity) {
+            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+        }
+
+        // Signature C2: Dedicated Video / Reels Player Container & View IDs
+        bool has_player_id = false;
+        for (size_t i = 0; i < node_count; ++i) {
+            std::string_view id = nodes[i].id;
+            if (contains_ci(id, "fb_shorts") || contains_ci(id, "reel_viewer") ||
+                contains_ci(id, "reels_viewer") || contains_ci(id, "rich_video_player") ||
+                contains_ci(id, "video_player") || contains_ci(id, "video_container") ||
+                contains_ci(id, "video_fullscreen") || contains_ci(id, "fullscreen_video") ||
+                contains_ci(id, "warion") || contains_ci(id, "unified_video_viewer") ||
+                contains_ci(id, "exo_subtitles")) {
+                has_player_id = true;
+                break;
+            }
+        }
+        if (has_player_id) {
+            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+        }
+
+        // Signature C3: True Vertical Right-Edge Reels Action Rail (Litho)
+        int like_x = -1, like_y = -1;
+        int comment_x = -1, comment_y = -1;
+        int share_x = -1, share_y = -1;
+        bool has_story_reply = false;
+
+        for (size_t i = 0; i < node_count; ++i) {
+            const auto& n = nodes[i];
+            std::string_view t = n.text;
+            std::string_view c = n.cd;
+
+            if (n.top > 850 && (contains_ci(t, "reply to") || contains_ci(c, "reply to") ||
+                contains_ci(t, "send message") || contains_ci(c, "send message"))) {
+                has_story_reply = true;
+            }
+
+            int cx = (n.left + n.right) / 2;
+            int cy = (n.top + n.bottom) / 2;
+
+            if (cx >= 700) {
+                if (contains_ci(t, "like") || contains_ci(c, "like") ||
+                    contains_ci(t, "react") || contains_ci(c, "react")) {
+                    like_x = cx; like_y = cy;
+                } else if (contains_ci(t, "comment") || contains_ci(c, "comment")) {
+                    comment_x = cx; comment_y = cy;
+                } else if (contains_ci(t, "share") || contains_ci(c, "share") ||
+                           contains_ci(t, "send") || contains_ci(c, "send")) {
+                    share_x = cx; share_y = cy;
+                }
+            }
+        }
+
+        if (!has_story_reply && like_x > 0 && comment_x > 0 && share_x > 0) {
+            int min_x = std::min({like_x, comment_x, share_x});
+            int max_x = std::max({like_x, comment_x, share_x});
+            if ((max_x - min_x) <= 120) { // Vertical column
+                if (like_y < comment_y && comment_y < share_y) {
+                    if ((comment_y - like_y) >= 35 && (share_y - comment_y) >= 35) {
+                        uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+                        return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+                    }
+                }
+            }
+        }
+
+        // Signature C4: Video Player Overlay & Transport Controls
+        bool has_player_controls = false;
+        for (size_t i = 0; i < node_count; ++i) {
+            const auto& n = nodes[i];
+            std::string_view t = n.text;
+            std::string_view c = n.cd;
+
+            // Top overlay bar with exact "Reels" or "Watch"
+            if (n.top < 160 && (t == "Reels" || c == "Reels" || t == "Watch" || c == "Watch")) {
+                has_player_controls = true;
+                break;
+            }
+            // Transport controls
+            if (contains_ci(c, "seek bar") || contains_ci(c, "pause video") ||
+                contains_ci(t, "pause video") || contains_ci(c, "play video") ||
+                contains_ci(t, "play video") || contains_ci(c, "enter full screen") ||
+                contains_ci(c, "exit full screen") || contains_ci(t, "original audio") ||
+                contains_ci(c, "original audio")) {
+                has_player_controls = true;
+                break;
+            }
+        }
+
+        if (has_player_controls) {
+            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+        }
+
+        // Signature C5: Clicked on a Reel / Video element (TYPE_VIEW_CLICKED)
+        if (hdr->event_type == 1) { // 1 = TYPE_VIEW_CLICKED
+            bool clicked_reel_or_video = false;
+            for (size_t i = 0; i < node_count; ++i) {
+                const auto& n = nodes[i];
+                if ((n.flags & NODE_FLAG_CLICKABLE) || i == 0) {
+                    std::string_view t = n.text;
+                    std::string_view c = n.cd;
+                    std::string_view id = n.id;
+                    if (contains_ci(c, "reel") || contains_ci(t, "reel") ||
+                        contains_ci(c, "shorts") || contains_ci(t, "shorts") ||
+                        contains_ci(c, "play video") || contains_ci(t, "play video") ||
+                        contains_ci(c, "রিল") || contains_ci(t, "রিল") ||
+                        contains_ci(id, "reel") || contains_ci(id, "video_player") ||
+                        contains_ci(id, "fb_shorts")) {
+                        clicked_reel_or_video = true;
+                        break;
+                    }
+                }
+            }
+            if (clicked_reel_or_video) {
+                uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
+                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // STATE A & B: Main Navigation Bar Inspector
+        // ---------------------------------------------------------------------
+        // Scan top (top < 220) and bottom (bottom > 800) for Facebook's main tab bar (4 to 6 horizontal tab nodes)
         int nav_tabs_top = 0;
         int nav_tabs_bottom = 0;
         bool home_tab_selected = false;
@@ -827,107 +979,17 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
 
         bool main_tab_bar_visible = (nav_tabs_top >= 3 || nav_tabs_bottom >= 3);
 
-        // STATE A SAFE-GUARD:
-        // If Main Tab Bar is Visible AND Home / Feed Tab is Selected:
-        // The user is on their normal Newsfeed! Immediately return ALLOW!
-        if (main_tab_bar_visible && home_tab_selected) {
-            return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
-        }
-
-        // ---------------------------------------------------------------------
-        // STATE B: Dedicated Facebook Reels Tab or Video/Watch Tab
-        // ---------------------------------------------------------------------
+        // STATE B: Dedicated Facebook Reels Tab or Video/Watch Tab is selected
         if (main_tab_bar_visible && reels_or_video_tab_selected && !home_tab_selected) {
             uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
             return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, home_tab_idx, show_hud, 0);
         }
 
-        // ---------------------------------------------------------------------
-        // STATE C: Clicked Video / Reel Player (Main Tab Bar is NOT visible)
-        // ---------------------------------------------------------------------
-        bool player_activity = contains_ci(cls, "FbShorts") || contains_ci(cls, "ReelViewer") ||
-            contains_ci(cls, "TahoeActivity") || contains_ci(cls, "VideoHome") ||
-            contains_ci(cls, "FullScreenVideo") || contains_ci(cls, "InspirationViewer") ||
-            contains_ci(cls, "ClipsViewer");
-
-        if (!main_tab_bar_visible || player_activity) {
-            // Signature C1: Dedicated Player Activity Class
-            if (player_activity) {
-                uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
-                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
-            }
-
-            // Signature C2: True Vertical Right-Edge Reels Action Rail
-            int like_x = -1, like_y = -1;
-            int comment_x = -1, comment_y = -1;
-            int share_x = -1, share_y = -1;
-            bool has_story_reply = false;
-
-            for (size_t i = 0; i < node_count; ++i) {
-                const auto& n = nodes[i];
-                std::string_view t = n.text;
-                std::string_view c = n.cd;
-
-                if (n.top > 850 && (contains_ci(t, "reply to") || contains_ci(c, "reply to") ||
-                    contains_ci(t, "send message") || contains_ci(c, "send message"))) {
-                    has_story_reply = true;
-                }
-
-                int cx = (n.left + n.right) / 2;
-                int cy = (n.top + n.bottom) / 2;
-
-                if (cx >= 800) {
-                    if (contains_ci(t, "like") || contains_ci(c, "like") ||
-                        contains_ci(t, "react") || contains_ci(c, "react")) {
-                        like_x = cx; like_y = cy;
-                    } else if (contains_ci(t, "comment") || contains_ci(c, "comment")) {
-                        comment_x = cx; comment_y = cy;
-                    } else if (contains_ci(t, "share") || contains_ci(c, "share") ||
-                               contains_ci(t, "send") || contains_ci(c, "send")) {
-                        share_x = cx; share_y = cy;
-                    }
-                }
-            }
-
-            if (!has_story_reply && like_x > 0 && comment_x > 0 && share_x > 0) {
-                int min_x = std::min({like_x, comment_x, share_x});
-                int max_x = std::max({like_x, comment_x, share_x});
-                if ((max_x - min_x) <= 80) { // Same vertical column (<= 8% screen width)
-                    if (like_y < comment_y && comment_y < share_y) {
-                        if ((comment_y - like_y) >= 40 && (share_y - comment_y) >= 40) {
-                            uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
-                            return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
-                        }
-                    }
-                }
-            }
-
-            // Signature C3: Video Player Overlay Controls
-            bool has_player_controls = false;
-            for (size_t i = 0; i < node_count; ++i) {
-                const auto& n = nodes[i];
-                std::string_view t = n.text;
-                std::string_view c = n.cd;
-
-                // Top overlay bar with exact "Reels" or "Watch"
-                if (n.top < 160 && (t == "Reels" || c == "Reels" || t == "Watch" || c == "Watch")) {
-                    has_player_controls = true;
-                    break;
-                }
-                // Transport controls
-                if (contains_ci(c, "seek bar") || contains_ci(c, "pause video") ||
-                    contains_ci(t, "pause video") || contains_ci(c, "enter full screen") ||
-                    contains_ci(c, "exit full screen") || contains_ci(t, "original audio") ||
-                    contains_ci(c, "original audio")) {
-                    has_player_controls = true;
-                    break;
-                }
-            }
-
-            if (has_player_controls) {
-                uint8_t show_hud = engine_check_hud_rate_limit(REASON_FB_REELS) ? 1 : 0;
-                return pack_verdict(ACTION_BLOCK_REELS, REASON_FB_REELS, 0xFFFF, show_hud, 0);
-            }
+        // STATE A SAFE-GUARD:
+        // If Main Tab Bar is Visible AND Home / Feed Tab is Selected (and no player active):
+        // The user is peacefully browsing normal Newsfeed text and photos! Return ALLOW!
+        if (main_tab_bar_visible && home_tab_selected) {
+            return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
         }
     }
 

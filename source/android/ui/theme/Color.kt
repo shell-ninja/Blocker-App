@@ -3,48 +3,48 @@ package com.blocker.ui.theme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-val CyberBg = Color(0xFF070913)
-val CyberBgAlt = Color(0xFF0E1322)
-val CyberCard = Color(0xFF0E1322)
-val CyberCardSurface = Color(0xFF121727)
-val CyberCardBorder = Color(0xFF1E2640)
-val CyberCardBorderGlow = Color(0x597C3AED)
-val CyberCardBorderSpecular = Color(0x33A78BFA)
+val CyberBg = NordicColors.CanvasBg
+val CyberBgAlt = NordicColors.CardSurface
+val CyberCard = NordicColors.CardSurface
+val CyberCardSurface = NordicColors.CardSurface
+val CyberCardBorder = NordicColors.HairlineBorder
+val CyberCardBorderGlow = NordicColors.HairlineBorder
+val CyberCardBorderSpecular = NordicColors.TopEdgeHighlight
 
-val CyberAmbientTop = Color(0xFF130E2A)
-val CyberAmbientMid = Color(0xFF080B16)
-val CyberAmbientBottom = Color(0xFF04060C)
+val CyberAmbientTop = NordicColors.CanvasBg
+val CyberAmbientMid = NordicColors.CanvasBg
+val CyberAmbientBottom = NordicColors.CanvasBg
 
-val CyberCardTop = Color(0xFF13192B)
-val CyberCardBottom = Color(0xFF0A0D1A)
+val CyberCardTop = NordicColors.CardSurface
+val CyberCardBottom = NordicColors.CardSurface
 
 val CyberMeshBackground = Brush.verticalGradient(
-    listOf(CyberAmbientTop, CyberAmbientMid, CyberAmbientBottom)
+    listOf(NordicColors.CanvasBg, NordicColors.CanvasBg)
 )
 
 val CyberCardGradient = Brush.verticalGradient(
-    listOf(CyberCardTop, CyberCardBottom)
+    listOf(NordicColors.CardSurface, NordicColors.CardSurface)
 )
 
-val CyberAccent = Color(0xFF7C3AED)
-val CyberAccentGlow = Color(0xFF9333EA)
-val CyberAccentSoft = Color(0x297C3AED)
-val CyberAccentWell = Color(0xFF18122B)
+val CyberAccent = NordicColors.AccentPrimary
+val CyberAccentGlow = NordicColors.AccentPrimary
+val CyberAccentSoft = Color(0x22ECEFF4)
+val CyberAccentWell = NordicColors.CardSurfaceHero
 
-val CyberOk = Color(0xFF10B981)
-val CyberOkGlow = Color(0xFF00E676)
-val CyberOkSoft = Color(0x2410B981)
-val CyberOkWell = Color(0xFF07241A)
-val CyberOkBorder = Color(0x6610B981)
+val CyberOk = NordicColors.SuccessMuted
+val CyberOkGlow = NordicColors.SuccessMuted
+val CyberOkSoft = Color(0x24A3BE8C)
+val CyberOkWell = Color(0xFF1E2824)
+val CyberOkBorder = Color(0x66A3BE8C)
 
-val CyberWarn = Color(0xFFF59E0B)
-val CyberWarnSoft = Color(0x24F59E0B)
-val CyberWarnBorder = Color(0x66F59E0B)
+val CyberWarn = Color(0xFFEBCB8B)
+val CyberWarnSoft = Color(0x24EBCB8B)
+val CyberWarnBorder = Color(0x66EBCB8B)
 
-val CyberDanger = Color(0xFFEF4444)
-val CyberDangerSoft = Color(0x24EF4444)
-val CyberDangerBorder = Color(0x66EF4444)
+val CyberDanger = NordicColors.AlertMuted
+val CyberDangerSoft = Color(0x24BF616A)
+val CyberDangerBorder = Color(0x66BF616A)
 
-val CyberText = Color(0xFFFFFFFF)
-val CyberTextSub = Color(0xFF8B97B0)
-val CyberTextMuted = Color(0xFF4B5568)
+val CyberText = NordicColors.TextPrimary
+val CyberTextSub = NordicColors.TextSecondary
+val CyberTextMuted = NordicColors.TrackMuted

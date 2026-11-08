@@ -1,9 +1,7 @@
 package com.blocker
 
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
+import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,13 +12,21 @@ import androidx.core.view.WindowCompat
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.BlockerAppRoot
 import com.blocker.ui.theme.BlockerTheme
-import com.blocker.ui.theme.CyberBg
+import com.blocker.ui.theme.NordicColors
+
+object PermissionFlowTracker {
+    @Volatile
+    var isLaunchingPermissionIntent: Boolean = false
+}
 
 class MainActivity : ComponentActivity() {
 
     companion object {
-        @Volatile
-        var isLaunchingExternal: Boolean = false
+        var isLaunchingExternal: Boolean
+            get() = PermissionFlowTracker.isLaunchingPermissionIntent
+            set(value) {
+                PermissionFlowTracker.isLaunchingPermissionIntent = value
+            }
     }
 
     private lateinit var repo: BlockerRepository
@@ -29,13 +35,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        BlockerStore.autoClampStuckTimers(this)
         repo = BlockerRepository(this)
 
         setContent {
             BlockerTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = CyberBg
+                    color = NordicColors.CanvasBg
                 ) {
                     BlockerAppRoot(repo = repo)
                 }
@@ -45,20 +52,27 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        isLaunchingExternal = false
+        BlockerStore.autoClampStuckTimers(this)
+        PermissionFlowTracker.isLaunchingPermissionIntent = false
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
         if (::repo.isInitialized) {
             repo.refreshAll()
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
+        if (!isChangingConfigurations && !PermissionFlowTracker.isLaunchingPermissionIntent) {
+            finishAndRemoveTask()
+        }
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isLaunchingExternal) {
-            // User intentionally navigated to a permission or settings screen from inside Blocker.
-            // Keep the activity alive so the user can complete setup and return cleanly.
-            return
-        }
-        // Anti-tamper minimize defense: close completely and purge task when user presses Home or Recents
+        if (PermissionFlowTracker.isLaunchingPermissionIntent) return
         finishAndRemoveTask()
     }
 

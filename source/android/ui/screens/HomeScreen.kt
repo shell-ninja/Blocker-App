@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
-import com.blocker.ui.theme.*
+import com.blocker.ui.theme.NordicColors
 
 @Composable
 fun HomeScreen(
@@ -39,7 +39,6 @@ fun HomeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
@@ -54,10 +53,8 @@ fun HomeScreen(
             )
         }
 
-        // Primary Hero Bento Card: "Protection Active" / "Protection Paused"
-        GlowCard(
-            active = protection.isActive,
-            tone = if (protection.isActive) CardTone.OK else CardTone.DEFAULT,
+        // Primary Hero Bento Card with Botanical Watermark Texture
+        NordicFoliageHeroCard(
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -67,17 +64,16 @@ fun HomeScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f).padding(end = 10.dp)
+                    modifier = Modifier.weight(1f).padding(end = 12.dp)
                 ) {
-                    // Luminous circular icon well
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(if (protection.isActive) CyberOkWell else Color(0xFF161A2B))
+                            .background(NordicColors.CardSurface)
                             .border(
                                 1.5.dp,
-                                if (protection.isActive) CyberOk.copy(alpha = 0.5f) else CyberCardBorder,
+                                if (protection.isActive) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
                                 CircleShape
                             ),
                         contentAlignment = Alignment.Center
@@ -85,8 +81,8 @@ fun HomeScreen(
                         Icon(
                             imageVector = if (protection.isActive) CyberIcons.Check else CyberIcons.Shield,
                             contentDescription = null,
-                            tint = if (protection.isActive) CyberOkGlow else CyberTextSub,
-                            modifier = Modifier.size(22.dp)
+                            tint = if (protection.isActive) NordicColors.AccentPrimary else NordicColors.TextSecondary,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -95,25 +91,26 @@ fun HomeScreen(
                     Column {
                         Text(
                             text = if (protection.isActive) "Protection Active" else "Protection Paused",
-                            color = Color.White,
-                            fontSize = 18.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.3).sp
+                            color = NordicColors.TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.2).sp
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (protection.isActive) {
-                                "Domain blocklists, keywords & limits enforced"
+                                "Adult filters, keywords & limits enforced"
                             } else {
-                                "Distraction protection is paused"
+                                "Shield is currently paused"
                             },
-                            color = CyberTextSub,
+                            color = NordicColors.TextSecondary,
                             fontSize = 12.sp,
                             lineHeight = 16.sp
                         )
                     }
                 }
 
-                CyberSwitch(
+                NordicSwitch(
                     checked = protection.isActive,
                     onCheckedChange = { repo.toggleProtection(it) }
                 )
@@ -122,11 +119,8 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Secondary Hero Bento Card: "Anti-Tamper Fortress"
-        GlowCard(
-            modifier = Modifier.fillMaxWidth(),
-            tone = CardTone.DEFAULT
-        ) {
+        // 7-Day Protection Activity Wave Graph Card
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -134,46 +128,31 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = CyberIcons.Lock,
+                        imageVector = CyberIcons.ShieldCheck,
                         contentDescription = null,
-                        tint = CyberOkGlow,
-                        modifier = Modifier.size(19.dp)
+                        tint = NordicColors.AccentPrimary,
+                        modifier = Modifier.size(17.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Anti-Tamper Fortress",
-                        color = Color.White,
-                        fontSize = 16.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.2).sp
+                        text = "Protection Activity",
+                        color = NordicColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
                 StatusPillBadge(
-                    label = "Airtight Lock",
+                    label = "7-Day Shield",
                     tone = BadgeTone.OK,
-                    breathing = protection.isShieldActive,
                     small = true
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            Text(
-                text = "Device Administrator, launcher shield, and watchdog active. Uninstallation is strictly locked.",
-                color = CyberTextSub,
-                fontSize = 12.5.sp,
-                lineHeight = 18.sp
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Btn(
-                label = "Anti-Uninstall Shield Active",
-                icon = CyberIcons.ShieldCheck,
-                kind = BtnKind.SECONDARY,
-                onClick = {},
-                modifier = Modifier.fillMaxWidth()
+            HomeDottedWaveActivityGraph(
+                activeDayIndex = 6
             )
         }
 
@@ -233,15 +212,15 @@ fun HomeScreen(
                     Icon(
                         imageVector = CyberIcons.Shield,
                         contentDescription = null,
-                        tint = Color(0xFFA78BFA),
-                        modifier = Modifier.size(19.dp)
+                        tint = NordicColors.AccentPrimary,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "System Health",
-                        color = Color.White,
-                        fontSize = 16.5.sp,
-                        fontWeight = FontWeight.Bold
+                        color = NordicColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
@@ -252,13 +231,14 @@ fun HomeScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             val healthItems = listOf(
                 Triple("Device admin (uninstall guard)", perms.deviceAdmin, "deviceAdmin"),
                 Triple("Usage access", perms.usageAccess, "usageAccess"),
                 Triple("Display over other apps", perms.overlay, "overlay"),
-                Triple("Accessibility service", perms.accessibility, "accessibility")
+                Triple("Accessibility service", perms.accessibility, "accessibility"),
+                Triple("Unrestricted battery", perms.batteryOptimizationsIgnored, "battery")
             )
 
             healthItems.forEachIndexed { idx, (label, ok, kind) ->
@@ -267,13 +247,13 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(enabled = !ok) { repo.openPermissionSettings(context, kind) }
-                        .padding(vertical = 5.dp),
+                        .padding(vertical = 7.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = label,
-                        color = if (ok) CyberTextSub else CyberText,
+                        color = if (ok) NordicColors.TextSecondary else NordicColors.TextPrimary,
                         fontSize = 13.sp
                     )
                     StatusPillBadge(
@@ -283,7 +263,7 @@ fun HomeScreen(
                     )
                 }
                 if (idx < healthItems.size - 1) {
-                    Divider(color = CyberCardBorder.copy(alpha = 0.5f), thickness = 0.8.dp)
+                    Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.6f), thickness = 0.8.dp)
                 }
             }
         }
@@ -299,36 +279,45 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Prevent Power Off
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
+        // Prevent Power Off Card
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Icon(
-                        imageVector = CyberIcons.Power,
-                        contentDescription = null,
-                        tint = Color(0xFFA78BFA),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Power,
+                            contentDescription = null,
+                            tint = NordicColors.AccentPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "Prevent Power Off",
-                            color = Color.White,
+                            color = NordicColors.TextPrimary,
                             fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = "Blocks power menu tampering while protected",
-                            color = CyberTextSub,
+                            color = NordicColors.TextSecondary,
                             fontSize = 11.5.sp
                         )
                     }
                 }
-                CyberSwitch(
+                NordicSwitch(
                     checked = protection.preventPowerOff,
                     onCheckedChange = { repo.setPreventPowerOff(it) }
                 )

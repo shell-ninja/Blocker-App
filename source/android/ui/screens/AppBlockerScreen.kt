@@ -57,7 +57,7 @@ fun AppBlockerScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
+            .background(NordicColors.CanvasBg)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         SectionHeader(
@@ -72,12 +72,12 @@ fun AppBlockerScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search installed apps...", color = CyberTextSub, fontSize = 13.5.sp) },
+            placeholder = { Text("Search installed apps...", color = NordicColors.TextSecondary, fontSize = 13.5.sp) },
             leadingIcon = {
                 Icon(
                     imageVector = CyberIcons.Search,
                     contentDescription = null,
-                    tint = CyberTextSub,
+                    tint = NordicColors.TextSecondary,
                     modifier = Modifier.size(18.dp)
                 )
             },
@@ -85,12 +85,12 @@ fun AppBlockerScreen(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = CyberCard,
-                unfocusedContainerColor = CyberCard,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = CyberAccent,
-                unfocusedBorderColor = CyberCardBorder
+                focusedContainerColor = NordicColors.CardSurfaceHero,
+                unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                focusedTextColor = NordicColors.TextPrimary,
+                unfocusedTextColor = NordicColors.TextPrimary,
+                focusedBorderColor = NordicColors.AccentPrimary,
+                unfocusedBorderColor = NordicColors.HairlineBorder
             )
         )
 
@@ -107,14 +107,14 @@ fun AppBlockerScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSelected) CyberAccentSoft else CyberCardSurface)
-                        .border(1.dp, if (isSelected) CyberAccent else CyberCardBorder, RoundedCornerShape(10.dp))
+                        .background(if (isSelected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                        .border(1.dp, if (isSelected) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                         .clickable { filterTab = index }
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = label,
-                        color = if (isSelected) Color.White else CyberTextSub,
+                        color = if (isSelected) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                     )
@@ -126,7 +126,7 @@ fun AppBlockerScreen(
 
         if (isRefreshing && apps.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = CyberAccent)
+                CircularProgressIndicator(color = NordicColors.AccentPrimary)
             }
         } else {
             LazyColumn(
@@ -149,11 +149,11 @@ fun AppBlockerScreen(
         val app = selectedAppForLimit!!
         AlertDialog(
             onDismissRequest = { selectedAppForLimit = null },
-            containerColor = CyberCard,
+            containerColor = NordicColors.CardSurface,
             title = {
                 Text(
                     text = "Daily Limit: ${app.label}",
-                    color = Color.White,
+                    color = NordicColors.TextPrimary,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -162,7 +162,7 @@ fun AppBlockerScreen(
                 Column {
                     Text(
                         text = "Block app once daily usage exceeds limit:",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(14.dp))
@@ -173,7 +173,12 @@ fun AppBlockerScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isCurrent) CyberAccentSoft else Color.Transparent)
+                                .background(if (isCurrent) NordicColors.CardSurfaceHero else Color.Transparent)
+                                .border(
+                                    1.dp,
+                                    if (isCurrent) NordicColors.AccentPrimary.copy(alpha = 0.4f) else Color.Transparent,
+                                    RoundedCornerShape(8.dp)
+                                )
                                 .clickable {
                                     repo.setAppLimit(app.packageName, mins)
                                     selectedAppForLimit = null
@@ -184,7 +189,7 @@ fun AppBlockerScreen(
                         ) {
                             Text(
                                 text = text,
-                                color = if (isCurrent) Color.White else CyberText,
+                                color = if (isCurrent) NordicColors.TextPrimary else NordicColors.TextSecondary,
                                 fontSize = 14.sp,
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
                             )
@@ -192,7 +197,7 @@ fun AppBlockerScreen(
                                 Icon(
                                     imageVector = CyberIcons.Check,
                                     contentDescription = null,
-                                    tint = CyberAccentGlow,
+                                    tint = NordicColors.AccentPrimary,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -202,7 +207,7 @@ fun AppBlockerScreen(
             },
             confirmButton = {
                 TextButton(onClick = { selectedAppForLimit = null }) {
-                    Text("Close", color = CyberAccent, fontWeight = FontWeight.Bold)
+                    Text("Close", color = NordicColors.AccentPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -220,8 +225,8 @@ private fun AppRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(CyberCard)
-            .border(1.dp, if (app.isBlocked) CyberAccentSoft else CyberCardBorder, shape)
+            .background(NordicColors.CardSurface)
+            .border(1.dp, if (app.isBlocked) NordicColors.AccentPrimary.copy(alpha = 0.35f) else NordicColors.HairlineBorder, shape)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -237,7 +242,7 @@ private fun AppRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = app.label,
-                color = Color.White,
+                color = NordicColors.TextPrimary,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -250,15 +255,15 @@ private fun AppRow(
                 val usageMins = app.todayUsageMs / 60_000L
                 Text(
                     text = "${usageMins}m today",
-                    color = CyberTextSub,
+                    color = NordicColors.TextSecondary,
                     fontSize = 11.5.sp
                 )
 
                 if (app.limitMinutes > 0) {
-                    Text(text = " • ", color = CyberTextMuted, fontSize = 11.sp)
+                    Text(text = " • ", color = NordicColors.TrackMuted, fontSize = 11.sp)
                     Text(
                         text = "Limit: ${app.limitMinutes}m",
-                        color = CyberWarn,
+                        color = NordicColors.AlertMuted,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -270,14 +275,14 @@ private fun AppRow(
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(CyberCardSurface)
+                .background(NordicColors.CardSurfaceHero)
                 .clickable(onClick = onLimitClick)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
             Icon(
                 imageVector = CyberIcons.Clock,
                 contentDescription = null,
-                tint = CyberTextSub,
+                tint = NordicColors.TextSecondary,
                 modifier = Modifier.size(15.dp)
             )
         }
@@ -285,7 +290,7 @@ private fun AppRow(
         Spacer(modifier = Modifier.width(10.dp))
 
         // Block Toggle Switch
-        CyberSwitch(
+        NordicSwitch(
             checked = app.isBlocked,
             onCheckedChange = { onToggle() }
         )

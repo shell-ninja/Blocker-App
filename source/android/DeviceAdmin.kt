@@ -22,12 +22,14 @@ object DeviceOwnerHelper {
 
     fun getAdminComponent(context: Context): ComponentName {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val prachirAdmin = ComponentName(context, PrachirDeviceAdminReceiver::class.java)
         val myAdmin = ComponentName(context, MyDeviceAdminReceiver::class.java)
         val blockerAdmin = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
         return when {
+            dpm?.isAdminActive(prachirAdmin) == true -> prachirAdmin
             dpm?.isAdminActive(myAdmin) == true -> myAdmin
             dpm?.isAdminActive(blockerAdmin) == true -> blockerAdmin
-            else -> myAdmin
+            else -> prachirAdmin
         }
     }
 
@@ -50,6 +52,7 @@ object DeviceOwnerHelper {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
             if (dpm.isDeviceOwnerApp(context.packageName)) {
                 val candidates = listOf(
+                    ComponentName(context, PrachirDeviceAdminReceiver::class.java),
                     ComponentName(context, MyDeviceAdminReceiver::class.java),
                     ComponentName(context, BlockerDeviceAdminReceiver::class.java)
                 )
@@ -99,6 +102,7 @@ object DeviceOwnerHelper {
         try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
             val candidates = listOf(
+                ComponentName(context, PrachirDeviceAdminReceiver::class.java),
                 ComponentName(context, MyDeviceAdminReceiver::class.java),
                 ComponentName(context, BlockerDeviceAdminReceiver::class.java)
             )
@@ -137,6 +141,7 @@ object DeviceOwnerHelper {
         // 2. Clear any additional restrictions and uninstall block
         try {
             val candidates = listOf(
+                ComponentName(context, PrachirDeviceAdminReceiver::class.java),
                 ComponentName(context, MyDeviceAdminReceiver::class.java),
                 ComponentName(context, BlockerDeviceAdminReceiver::class.java)
             )

@@ -154,6 +154,7 @@ class BlockerRepository(private val context: Context) {
     val updateState: StateFlow<UpdateState> = updateManager.updateState
 
     init {
+        BlockerStore.autoClampStuckTimers(appContext)
         BlockerStore.seedDefaultApps(appContext)
         refreshAll()
         checkForUpdates(false)
@@ -205,6 +206,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun refreshProtection() {
+        BlockerStore.autoClampStuckTimers(appContext)
         BlockerStore.checkAndApplyExpiredDelayTimers(appContext)
         val p = BlockerStore.prefs(appContext)
         val active = BlockerStore.active(appContext)
@@ -243,9 +245,10 @@ class BlockerRepository(private val context: Context) {
 
         // Device Admin
         val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val prachirAdmin = ComponentName(appContext, com.blocker.PrachirDeviceAdminReceiver::class.java)
         val blockerAdmin = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
         val myAdmin = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
-        val adm = dpm?.isAdminActive(blockerAdmin) == true || dpm?.isAdminActive(myAdmin) == true
+        val adm = dpm?.isAdminActive(prachirAdmin) == true || dpm?.isAdminActive(blockerAdmin) == true || dpm?.isAdminActive(myAdmin) == true
 
         // Usage Access
         val appOps = appContext.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
@@ -633,6 +636,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun requestDndAccess(context: Context) {
+        com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
         MainActivity.isLaunchingExternal = true
         val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -652,6 +656,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun openWifiSettings(context: Context) {
+        com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
         MainActivity.isLaunchingExternal = true
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Intent(Settings.Panel.ACTION_WIFI)
@@ -663,6 +668,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun openDataSettings(context: Context) {
+        com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
         MainActivity.isLaunchingExternal = true
         val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -777,6 +783,40 @@ class BlockerRepository(private val context: Context) {
 
     fun openPermissionSettings(context: Context, kind: String) {
         val pkg = appContext.packageName
+        com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
+        MainActivity.isLaunchingExternal = true
+
+        if (kind == "deviceAdmin") {
+            val adminComponent = ComponentName(context, com.blocker.PrachirDeviceAdminReceiver::class.java)
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                putExtra(
+                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "Blocker requires Device Administrator permission to prevent unauthorized uninstallation while protection is active."
+                )
+            }
+            val act = context.findActivity() ?: (context as? Activity)
+            runCatching {
+                if (act != null) {
+                    act.startActivity(intent)
+                } else {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                }
+            }.onFailure {
+                runCatching {
+                    val fallback = Intent(Settings.ACTION_SECURITY_SETTINGS)
+                    if (act != null) {
+                        act.startActivity(fallback)
+                    } else {
+                        fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(fallback)
+                    }
+                }
+            }
+            return
+        }
+
         val tries: List<Intent> = when (kind) {
             "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "overlay" -> listOf(
@@ -792,24 +832,6 @@ class BlockerRepository(private val context: Context) {
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
             )
-            "deviceAdmin" -> {
-                val admin1 = ComponentName(appContext, com.blocker.BlockerDeviceAdminReceiver::class.java)
-                val admin2 = ComponentName(appContext, com.blocker.MyDeviceAdminReceiver::class.java)
-                listOf(
-                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin1)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled."),
-                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin2)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents Blocker from being uninstalled."),
-                    Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.DeviceAdminSettings")),
-                    Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$DeviceAdminSettingsActivity")),
-                    Intent("android.settings.DEVICE_ADMIN_SETTINGS"),
-                    Intent().setComponent(ComponentName("com.samsung.android.settings.security", "com.samsung.android.settings.security.DeviceAdminSettings")),
-                    Intent(Settings.ACTION_SECURITY_SETTINGS),
-                    Intent(Settings.ACTION_SETTINGS)
-                )
-            }
             "dnd" -> listOf(
                 Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS),
                 Intent(Settings.ACTION_SOUND_SETTINGS),
@@ -820,7 +842,6 @@ class BlockerRepository(private val context: Context) {
         }
 
         val act = context.findActivity() ?: (context as? Activity)
-        MainActivity.isLaunchingExternal = true
         for (intent in tries) {
             try {
                 if (act != null) {

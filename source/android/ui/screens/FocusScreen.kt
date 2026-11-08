@@ -110,7 +110,7 @@ fun FocusScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
+            .background(NordicColors.CanvasBg)
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
@@ -119,8 +119,8 @@ fun FocusScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF0E1322))
-                .border(1.dp, Color(0xFF1E2640), RoundedCornerShape(16.dp))
+                .background(NordicColors.CardSurface)
+                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp))
                 .padding(4.dp)
         ) {
             // Focus Mode Tab
@@ -128,7 +128,7 @@ fun FocusScreen(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedTab == 0) CyberAccent else Color.Transparent)
+                    .background(if (selectedTab == 0) NordicColors.AccentPrimary else Color.Transparent)
                     .clickable(enabled = !study.active) { selectedTab = 0 }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
@@ -140,15 +140,15 @@ fun FocusScreen(
                     Icon(
                         imageVector = CyberIcons.Focus,
                         contentDescription = null,
-                        tint = if (selectedTab == 0) Color.White else CyberTextSub,
+                        tint = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Focus Mode",
-                        color = if (selectedTab == 0) Color.White else CyberTextSub,
+                        color = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -158,7 +158,7 @@ fun FocusScreen(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedTab == 1) CyberAccent else Color.Transparent)
+                    .background(if (selectedTab == 1) NordicColors.AccentPrimary else Color.Transparent)
                     .clickable { selectedTab = 1 }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
@@ -170,15 +170,15 @@ fun FocusScreen(
                     Icon(
                         imageVector = CyberIcons.Book,
                         contentDescription = null,
-                        tint = if (selectedTab == 1) Color.White else CyberTextSub,
+                        tint = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Study Mode",
-                        color = if (selectedTab == 1) Color.White else CyberTextSub,
+                        color = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.SemiBold
                     )
                     if (study.active) {
                         Spacer(modifier = Modifier.width(6.dp))
@@ -186,7 +186,7 @@ fun FocusScreen(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(CyberOk)
+                                .background(if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.AccentPrimary)
                         )
                     }
                 }
@@ -212,7 +212,7 @@ fun FocusScreen(
                     String.format("%02d:%02d", mins, secs)
                 }
 
-                GlowCard(modifier = Modifier.fillMaxWidth(), active = true, tone = CardTone.ACCENT) {
+                NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
@@ -223,21 +223,19 @@ fun FocusScreen(
                             breathing = true,
                             icon = CyberIcons.Focus
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = timeStr,
-                            color = Color.White,
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-1).sp
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HeroNumeral(
+                            value = timeStr,
+                            caption = "Remaining Focus Time",
+                            horizontalAlignment = Alignment.CenterHorizontally
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "Only essential allowed apps are accessible",
-                            color = CyberTextSub,
+                            color = NordicColors.TextSecondary,
                             fontSize = 12.sp
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
                         Btn(
                             label = "End Focus Early",
                             icon = CyberIcons.Stop,
@@ -247,7 +245,7 @@ fun FocusScreen(
                     }
                 }
             } else {
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -256,20 +254,20 @@ fun FocusScreen(
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = "Quick Focus Countdown",
-                                color = Color.White,
+                                color = NordicColors.TextPrimary,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Instantly block distractions for a targeted interval",
-                                color = CyberTextSub,
+                                color = NordicColors.TextSecondary,
                                 fontSize = 12.sp
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -285,14 +283,14 @@ fun FocusScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(CyberCardSurface)
-                                    .border(1.dp, CyberCardBorder, RoundedCornerShape(10.dp))
+                                    .background(NordicColors.CardSurfaceHero)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                     .clickable { repo.startQuickFocus(m) }
                                     .padding(horizontal = 13.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     text = lbl,
-                                    color = Color.White,
+                                    color = NordicColors.TextPrimary,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -313,7 +311,7 @@ fun FocusScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            GlowCard(modifier = Modifier.fillMaxWidth()) {
+            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -322,13 +320,13 @@ fun FocusScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Recurring Windows",
-                            color = Color.White,
+                            color = NordicColors.TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "${focus.schedules.size} schedule${if (focus.schedules.size == 1) "" else "s"} configured",
-                            color = CyberTextSub,
+                            color = NordicColors.TextSecondary,
                             fontSize = 12.sp
                         )
                     }
@@ -348,14 +346,14 @@ fun FocusScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(CyberBg)
-                            .border(1.dp, CyberCardBorder, RoundedCornerShape(14.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(14.dp))
                             .padding(14.dp)
                     ) {
                         Column {
                             Text(
                                 text = "New Schedule Details",
-                                color = Color.White,
+                                color = NordicColors.TextPrimary,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -367,14 +365,14 @@ fun FocusScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(CyberCardSurface)
-                                    .border(1.dp, CyberCardBorder, RoundedCornerShape(10.dp))
+                                    .background(NordicColors.CanvasBg)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 if (newScheduleLabel.isEmpty()) {
                                     Text(
                                         text = "Schedule name (e.g. Work, Bedtime)",
-                                        color = CyberTextSub,
+                                        color = NordicColors.TextSecondary,
                                         fontSize = 13.sp
                                     )
                                 }
@@ -382,11 +380,11 @@ fun FocusScreen(
                                     value = newScheduleLabel,
                                     onValueChange = { newScheduleLabel = it },
                                     textStyle = TextStyle(
-                                        color = Color.White,
+                                        color = NordicColors.TextPrimary,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium
                                     ),
-                                    cursorBrush = SolidColor(CyberAccent),
+                                    cursorBrush = SolidColor(NordicColors.AccentPrimary),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -402,14 +400,14 @@ fun FocusScreen(
                             ) {
                                 // Starts
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Starts", color = CyberTextSub, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "Starts", color = NordicColors.TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
-                                            .background(CyberCardSurface)
-                                            .border(1.dp, CyberCardBorder, RoundedCornerShape(10.dp))
+                                            .background(NordicColors.CanvasBg)
+                                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                             .clickable {
                                                 TimePickerDialog(
                                                     context,
@@ -424,7 +422,7 @@ fun FocusScreen(
                                     ) {
                                         Text(
                                             text = clock12(newStartMin),
-                                            color = Color.White,
+                                            color = NordicColors.TextPrimary,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -437,13 +435,13 @@ fun FocusScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = formatDuration(newStartMin, newEndMin),
-                                        color = CyberOk,
+                                        color = NordicColors.AccentPrimary,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = "duration",
-                                        color = CyberTextSub,
+                                        color = NordicColors.TextSecondary,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -452,14 +450,14 @@ fun FocusScreen(
 
                                 // Ends
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Ends", color = CyberTextSub, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "Ends", color = NordicColors.TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
-                                            .background(CyberCardSurface)
-                                            .border(1.dp, CyberCardBorder, RoundedCornerShape(10.dp))
+                                            .background(NordicColors.CanvasBg)
+                                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                             .clickable {
                                                 TimePickerDialog(
                                                     context,
@@ -474,7 +472,7 @@ fun FocusScreen(
                                     ) {
                                         Text(
                                             text = clock12(newEndMin),
-                                            color = Color.White,
+                                            color = NordicColors.TextPrimary,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -504,7 +502,7 @@ fun FocusScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "No daily schedules yet — tap Add to create a recurring focus window.",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.5.sp
                     )
                 } else if (focus.schedules.isNotEmpty()) {
@@ -516,10 +514,10 @@ fun FocusScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActiveNow) Color(0xFF0F1E25) else CyberBg)
+                                    .background(if (isActiveNow) NordicColors.CardSurfaceHero else NordicColors.CanvasBg)
                                     .border(
                                         1.dp,
-                                        if (isActiveNow) CyberOk.copy(alpha = 0.5f) else CyberCardBorder,
+                                        if (isActiveNow) NordicColors.AccentPrimary.copy(alpha = 0.5f) else NordicColors.HairlineBorder,
                                         RoundedCornerShape(12.dp)
                                     )
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
@@ -533,7 +531,7 @@ fun FocusScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 text = s.label,
-                                                color = Color.White,
+                                                color = NordicColors.TextPrimary,
                                                 fontSize = 13.5.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -550,7 +548,7 @@ fun FocusScreen(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = "${clock12(s.startMin)} – ${clock12(s.endMin)} (${formatDuration(s.startMin, s.endMin)})",
-                                            color = CyberTextSub,
+                                            color = NordicColors.TextSecondary,
                                             fontSize = 12.sp
                                         )
                                     }
@@ -563,12 +561,12 @@ fun FocusScreen(
                                             Icon(
                                                 imageVector = CyberIcons.Delete,
                                                 contentDescription = "Delete",
-                                                tint = CyberDanger,
+                                                tint = NordicColors.AlertMuted,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        CyberSwitch(
+                                        NordicSwitch(
                                             checked = s.enabled,
                                             onCheckedChange = { repo.toggleScheduleEnabled(s.id, it) }
                                         )
@@ -636,7 +634,7 @@ fun FocusScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Dedicated Item 5: Reddit Mature Content Lockdown
-            GlowCard(modifier = Modifier.fillMaxWidth()) {
+            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -650,14 +648,14 @@ fun FocusScreen(
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(RoundedCornerShape(11.dp))
-                                .background(CyberAccentWell)
-                                .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = CyberIcons.Lock,
                                 contentDescription = null,
-                                tint = Color(0xFFC084FC),
+                                tint = NordicColors.AccentPrimary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -665,14 +663,14 @@ fun FocusScreen(
                         Column {
                             Text(
                                 text = "Reddit Mature Content Lockdown",
-                                color = Color.White,
+                                color = NordicColors.TextPrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Enforces 'Show mature content' OFF at the system level",
-                                color = CyberTextSub,
+                                color = NordicColors.TextSecondary,
                                 fontSize = 12.sp
                             )
                         }
@@ -692,24 +690,24 @@ fun FocusScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            GlowCard(modifier = Modifier.fillMaxWidth()) {
+            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                 // Search box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(CyberBg)
-                        .border(1.dp, CyberCardBorder, RoundedCornerShape(10.dp))
+                        .background(NordicColors.CanvasBg)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                         .padding(horizontal = 12.dp, vertical = 9.dp)
                 ) {
                     if (appSearchQuery.isEmpty()) {
-                        Text(text = "Search apps to whitelist...", color = CyberTextSub, fontSize = 13.sp)
+                        Text(text = "Search apps to whitelist...", color = NordicColors.TextSecondary, fontSize = 13.sp)
                     }
                     BasicTextField(
                         value = appSearchQuery,
                         onValueChange = { appSearchQuery = it },
-                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                        cursorBrush = SolidColor(CyberAccent),
+                        textStyle = TextStyle(color = NordicColors.TextPrimary, fontSize = 13.sp),
+                        cursorBrush = SolidColor(NordicColors.AccentPrimary),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -732,7 +730,7 @@ fun FocusScreen(
                 if (filteredApps.isEmpty()) {
                     Text(
                         text = "No apps found matching query",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
@@ -753,12 +751,12 @@ fun FocusScreen(
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(
                                         text = app.label,
-                                        color = Color.White,
+                                        color = NordicColors.TextPrimary,
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-                                CyberSwitch(
+                                NordicSwitch(
                                     checked = isAllowed,
                                     onCheckedChange = { repo.toggleAllowedFocusApp(app.packageName) }
                                 )
@@ -779,11 +777,7 @@ fun FocusScreen(
                 val secs = remSec % 60L
                 val timeStr = String.format("%02d:%02d", mins, secs)
 
-                GlowCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    active = true,
-                    tone = if (study.isBreak) CardTone.OK else CardTone.ACCENT
-                ) {
+                NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
@@ -797,25 +791,29 @@ fun FocusScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        Text(
-                            text = timeStr,
-                            color = Color.White,
-                            fontSize = 54.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-1).sp
+                        HeroNumeral(
+                            value = timeStr,
+                            caption = if (study.isBreak) "Break Remaining" else "Study Session Countdown",
+                            horizontalAlignment = Alignment.CenterHorizontally
                         )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
                             text = "Round ${study.currentRound} of ${study.totalRounds}",
-                            color = CyberTextSub,
-                            fontSize = 14.sp,
+                            color = NordicColors.TextSecondary,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold
                         )
 
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NordicLinearBar(
+                            progress = study.currentRound.toFloat() / study.totalRounds.coerceAtLeast(1).toFloat(),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+                        )
+
                         if (study.autoDnd || study.autoWifi) {
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -863,10 +861,10 @@ fun FocusScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Active Quote Card
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "\"${randomQuote.quote}\"",
-                        color = Color.White,
+                        color = NordicColors.TextPrimary,
                         fontSize = 13.5.sp,
                         lineHeight = 20.sp,
                         fontWeight = FontWeight.Medium
@@ -874,7 +872,7 @@ fun FocusScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "— ${randomQuote.source}",
-                        color = Color(0xFFA78BFA),
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -890,17 +888,17 @@ fun FocusScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "Customize Study Cycles",
-                        color = Color.White,
+                        color = NordicColors.TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Full device lockout during focus; relax during scheduled breaks.",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp
                     )
 
@@ -909,7 +907,7 @@ fun FocusScreen(
                     // 1. Focus Duration Chips
                     Text(
                         text = "FOCUS DURATION",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
@@ -924,14 +922,14 @@ fun FocusScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) CyberAccentSoft else CyberCardSurface)
-                                    .border(1.dp, if (isSel) CyberAccent else CyberCardBorder, RoundedCornerShape(10.dp))
+                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                     .clickable { studyFocusMins = m }
                                     .padding(horizontal = 13.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = "${m}m",
-                                    color = if (isSel) Color.White else CyberTextSub,
+                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -944,7 +942,7 @@ fun FocusScreen(
                     // 2. Break Duration Chips
                     Text(
                         text = "BREAK DURATION",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
@@ -959,14 +957,14 @@ fun FocusScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) CyberOkSoft else CyberCardSurface)
-                                    .border(1.dp, if (isSel) CyberOk else CyberCardBorder, RoundedCornerShape(10.dp))
+                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                     .clickable { studyBreakMins = m }
                                     .padding(horizontal = 14.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = "${m}m",
-                                    color = if (isSel) Color.White else CyberTextSub,
+                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -979,7 +977,7 @@ fun FocusScreen(
                     // 3. Total Rounds Chips
                     Text(
                         text = "TOTAL ROUNDS",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
@@ -994,14 +992,14 @@ fun FocusScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) CyberAccentSoft else CyberCardSurface)
-                                    .border(1.dp, if (isSel) CyberAccent else CyberCardBorder, RoundedCornerShape(10.dp))
+                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
                                     .clickable { studyRounds = r }
                                     .padding(horizontal = 14.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = "$r",
-                                    color = if (isSel) Color.White else CyberTextSub,
+                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1034,23 +1032,21 @@ fun FocusScreen(
 
                 // DND Access Warning Card if not granted
                 if (!study.hasDndAccess) {
-                    GlowCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        active = true,
-                        tone = CardTone.WARN
+                    NordicMicroGridCard(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = CyberIcons.Warning,
                                     contentDescription = null,
-                                    tint = CyberWarn,
+                                    tint = NordicColors.AlertMuted,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "DND Permission Needed",
-                                    color = Color.White,
+                                    color = NordicColors.TextPrimary,
                                     fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1058,7 +1054,7 @@ fun FocusScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = "To automatically silence incoming rings, alerts, and notifications during study sessions, grant Do Not Disturb access.",
-                                color = CyberTextSub,
+                                color = NordicColors.TextSecondary,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp
                             )
@@ -1075,7 +1071,7 @@ fun FocusScreen(
                 }
 
                 // Auto DND Toggle
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1089,14 +1085,14 @@ fun FocusScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(RoundedCornerShape(11.dp))
-                                    .background(CyberAccentWell)
-                                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                    .background(NordicColors.CardSurfaceHero)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = CyberIcons.Dnd,
                                     contentDescription = null,
-                                    tint = Color(0xFFA78BFA),
+                                    tint = NordicColors.AccentPrimary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1104,19 +1100,19 @@ fun FocusScreen(
                             Column {
                                 Text(
                                     text = "Silence Notifications (DND)",
-                                    color = Color.White,
+                                    color = NordicColors.TextPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "Auto-enables Do Not Disturb during focus cycles",
-                                    color = CyberTextSub,
+                                    color = NordicColors.TextSecondary,
                                     fontSize = 11.5.sp
                                 )
                             }
                         }
-                        CyberSwitch(
+                        NordicSwitch(
                             checked = study.autoDnd,
                             onCheckedChange = { repo.setStudyAutoDnd(it) }
                         )
@@ -1126,7 +1122,7 @@ fun FocusScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Auto Wi-Fi Disconnect Toggle
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1140,14 +1136,14 @@ fun FocusScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(RoundedCornerShape(11.dp))
-                                    .background(CyberAccentWell)
-                                    .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                    .background(NordicColors.CardSurfaceHero)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = CyberIcons.WifiOff,
                                     contentDescription = null,
-                                    tint = Color(0xFFA78BFA),
+                                    tint = NordicColors.AccentPrimary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1155,19 +1151,19 @@ fun FocusScreen(
                             Column {
                                 Text(
                                     text = "Turn off Wi-Fi during Study",
-                                    color = Color.White,
+                                    color = NordicColors.TextPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "Disconnects Wi-Fi during focus; restores on breaks",
-                                    color = CyberTextSub,
+                                    color = NordicColors.TextSecondary,
                                     fontSize = 11.5.sp
                                 )
                             }
                         }
-                        CyberSwitch(
+                        NordicSwitch(
                             checked = study.autoWifi,
                             onCheckedChange = { repo.setStudyAutoWifi(it) }
                         )
@@ -1177,7 +1173,7 @@ fun FocusScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Cellular & Connectivity Quick Actions
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Column {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1189,14 +1185,14 @@ fun FocusScreen(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(RoundedCornerShape(11.dp))
-                                        .background(CyberAccentWell)
-                                        .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                                        .background(NordicColors.CardSurfaceHero)
+                                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = CyberIcons.Cellular,
                                         contentDescription = null,
-                                        tint = Color(0xFFA78BFA),
+                                        tint = NordicColors.AccentPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1204,14 +1200,14 @@ fun FocusScreen(
                                 Column {
                                     Text(
                                         text = "Mobile Data & Network Controls",
-                                        color = Color.White,
+                                        color = NordicColors.TextPrimary,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = "Quick shortcuts to toggle off cellular or internet data",
-                                        color = CyberTextSub,
+                                        color = NordicColors.TextSecondary,
                                         fontSize = 11.5.sp
                                     )
                                 }
@@ -1240,10 +1236,10 @@ fun FocusScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Quote Card
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "\"${randomQuote.quote}\"",
-                        color = Color.White,
+                        color = NordicColors.TextPrimary,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
                         fontWeight = FontWeight.Medium
@@ -1251,7 +1247,7 @@ fun FocusScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "— ${randomQuote.source}",
-                        color = Color(0xFFA78BFA),
+                        color = NordicColors.TextSecondary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1272,7 +1268,7 @@ private fun DistractionItemCard(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    GlowCard(modifier = modifier.fillMaxWidth()) {
+    NordicMicroGridCard(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1286,14 +1282,14 @@ private fun DistractionItemCard(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(11.dp))
-                        .background(CyberAccentWell)
-                        .border(1.dp, CyberAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp)),
+                        .background(NordicColors.CardSurfaceHero)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = Color(0xFFC084FC),
+                        tint = NordicColors.AccentPrimary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1301,20 +1297,20 @@ private fun DistractionItemCard(
                 Column {
                     Text(
                         text = title,
-                        color = Color.White,
+                        color = NordicColors.TextPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = subtitle,
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
                 }
             }
-            CyberSwitch(
+            NordicSwitch(
                 checked = checked,
                 onCheckedChange = onCheckedChange
             )

@@ -274,6 +274,8 @@ mkdir -p "${APK_DIR}"
 TARGET_APKS=(
     "${APK_DIR}/Blocker-release-${APP_VER}.apk"
     "${APK_DIR}/Blocker-debug-${APP_VER}.apk"
+    "${APK_DIR}/Blocker-release-v${APP_VER}.apk"
+    "${APK_DIR}/Blocker-debug-v${APP_VER}.apk"
     "${APK_DIR}/Blocker-release-debug-${APP_VER}.apk"
 )
 

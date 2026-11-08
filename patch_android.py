@@ -174,6 +174,7 @@ if "BlockerAccessibilityService" not in t:
     """
     tail = """    <service
         android:name=".BlockerAccessibilityService"
+        android:label="@string/app_name"
         android:exported="false"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
         <intent-filter>
@@ -185,7 +186,19 @@ if "BlockerAccessibilityService" not in t:
     </service>
 
     <receiver
+        android:name=".PrachirDeviceAdminReceiver"
+        android:label="@string/app_name"
+        android:exported="true"
+        android:permission="android.permission.BIND_DEVICE_ADMIN">
+        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
+        <intent-filter>
+            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+        </intent-filter>
+    </receiver>
+
+    <receiver
         android:name=".BlockerDeviceAdminReceiver"
+        android:label="@string/app_name"
         android:exported="true"
         android:permission="android.permission.BIND_DEVICE_ADMIN">
         <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin"/>
@@ -196,6 +209,7 @@ if "BlockerAccessibilityService" not in t:
 
     <receiver
         android:name=".MyDeviceAdminReceiver"
+        android:label="@string/app_name"
         android:exported="true"
         android:permission="android.permission.BIND_DEVICE_ADMIN">
         <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
@@ -305,15 +319,30 @@ if "androidx.core.content.FileProvider" not in t:
     t = t.replace("</application>", provider_xml + "</application>", 1)
     write(mf, t)
 
-# 4c. Set excludeFromRecents and autoRemoveFromRecents on MainActivity so minimizing leaves no card/menu in Recents
+# 4c. Set excludeFromRecents, autoRemoveFromRecents, singleTask and resizeableActivity=false on MainActivity
 t = read(mf)
 if 'android:name=".MainActivity"' in t:
     if 'android:excludeFromRecents="true"' not in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
     if 'android:autoRemoveFromRecents="true"' not in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:autoRemoveFromRecents="true"', 1)
+    if 'android:resizeableActivity="false"' not in t:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:resizeableActivity="false"', 1)
     if 'android:noHistory="true"' in t:
         t = t.replace('        android:noHistory="true"\n', '')
+if 'android:name=".PrachirDeviceAdminReceiver"' not in t:
+    prachir_rec = """    <receiver
+        android:name=".PrachirDeviceAdminReceiver"
+        android:label="@string/app_name"
+        android:exported="true"
+        android:permission="android.permission.BIND_DEVICE_ADMIN">
+        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
+        <intent-filter>
+            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+        </intent-filter>
+    </receiver>
+"""
+    t = t.replace("</application>", prachir_rec + "</application>", 1)
 write(mf, t)
 
 # 5. app/build.gradle
@@ -348,7 +377,8 @@ patch = digits[2] if len(digits) > 2 else 0
 hotfix = digits[3] if len(digits) > 3 else 0
 
 semver_base = (major * 1_000_000) + (minor * 100_000) + (patch * 1_000) + (hotfix * 100)
-version_code = max(1, semver_base + (build_number % 100))
+# Minimum 1006810 ensures monotonic increase over any previous v1.0.6.8 (1006805) build to prevent INSTALL_FAILED_VERSION_DOWNGRADE
+version_code = max(1006810, semver_base + (build_number % 100) + 100)
 g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {version_code}", g, count=1)
 g, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{app_version}"', g, count=1)
 if not n1 or not n2:
@@ -391,6 +421,13 @@ if "externalNativeBuild" not in g:
 """
     g = re.sub(r"(buildTypes\s*\{)", cmake_root + r"\1", g, count=1)
 g = re.sub(r'abiFilters\s+"armeabi-v7a",\s*"arm64-v8a"(?!,\s*"x86_64")', 'abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"', g)
+
+if "buildConfig true" not in g:
+    g = re.sub(r"(buildFeatures\s*\{[^}]*)", r'\1\n        buildConfig true', g, count=1)
+if 'buildConfigField "boolean", "IS_DEBUG_TIMER"' not in g:
+    g = re.sub(r"(debug\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "true"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "60000L"', g, count=1)
+    g = re.sub(r"(release\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "false"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "60000L"', g, count=1)
+
 write(gr, g)
 
 # 6. Decouple React Native in MainApplication.kt and register native package

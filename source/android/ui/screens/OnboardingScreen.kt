@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.blocker.R
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
-import com.blocker.ui.theme.*
+import com.blocker.ui.theme.NordicColors
 
 @Composable
 fun OnboardingScreen(
@@ -44,38 +44,55 @@ fun OnboardingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 20.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Icon & Welcome
-        Box(
-            modifier = Modifier
-                .size(68.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF16122C))
-                .border(1.5.dp, CyberAccent, RoundedCornerShape(20.dp)),
-            contentAlignment = Alignment.Center
+        // Flagship Botanical Hero Welcome Card
+        NordicFoliageHeroCard(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Image(
-                painter = painterResource(id = R.mipmap.ic_launcher),
-                contentDescription = "Blocker Logo",
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(14.dp))
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(NordicColors.CardSurfaceHero)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.mipmap.ic_launcher),
+                        contentDescription = "Blocker Icon",
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column {
+                    Text(
+                        text = "Welcome to Blocker",
+                        color = NordicColors.TextPrimary,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Airtight focus, Islamic reminders, and distraction defense",
+                        color = NordicColors.TextSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = "Welcome to Blocker",
-            color = Color.White,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = (-0.4).sp
-        )
 
         Spacer(modifier = Modifier.height(18.dp))
 
@@ -85,16 +102,14 @@ fun OnboardingScreen(
                 SectionHeader(
                     title = "Popup Message Language",
                     icon = CyberIcons.ShieldCheck,
-                    subtitle = "Choose your preferred language for blocker warning popups, Quranic reminders, and Hadiths.\n(Settings and navigation remain in English.)"
+                    subtitle = "Choose your preferred language for warning popups, Quranic reminders, and Hadiths.\n(Settings and navigation remain in English.)"
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // English Option
                 val isEn = selectedLang == "en"
-                GlowCard(
-                    active = isEn,
-                    tone = if (isEn) CardTone.ACCENT else CardTone.DEFAULT,
+                NordicMicroGridCard(
                     onClick = {
                         selectedLang = "en"
                         repo.setPopupLanguage("en")
@@ -111,7 +126,7 @@ fun OnboardingScreen(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .clip(CircleShape)
-                                    .border(2.dp, if (isEn) CyberAccent else CyberTextSub, CircleShape),
+                                    .border(2.dp, if (isEn) NordicColors.AccentPrimary else NordicColors.TextSecondary, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isEn) {
@@ -119,16 +134,16 @@ fun OnboardingScreen(
                                         modifier = Modifier
                                             .size(10.dp)
                                             .clip(CircleShape)
-                                            .background(CyberAccent)
+                                            .background(NordicColors.AccentPrimary)
                                     )
                                 }
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "English",
-                                color = Color.White,
-                                fontSize = 16.5.sp,
-                                fontWeight = FontWeight.Bold
+                                color = NordicColors.TextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
 
@@ -140,8 +155,8 @@ fun OnboardingScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Displays verses & reminders in English:\n“Tell the believing men to lower their gaze…” (24:30)",
-                        color = CyberTextSub,
+                        text = "Reminders and popup warnings will be shown in English:\n\"Tell the believing men to reduce [some] of their vision...\" (24:30)",
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
@@ -151,9 +166,7 @@ fun OnboardingScreen(
 
                 // Bengali Option
                 val isBn = selectedLang == "bn"
-                GlowCard(
-                    active = isBn,
-                    tone = if (isBn) CardTone.ACCENT else CardTone.DEFAULT,
+                NordicMicroGridCard(
                     onClick = {
                         selectedLang = "bn"
                         repo.setPopupLanguage("bn")
@@ -170,7 +183,7 @@ fun OnboardingScreen(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .clip(CircleShape)
-                                    .border(2.dp, if (isBn) CyberAccent else CyberTextSub, CircleShape),
+                                    .border(2.dp, if (isBn) NordicColors.AccentPrimary else NordicColors.TextSecondary, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isBn) {
@@ -178,16 +191,16 @@ fun OnboardingScreen(
                                         modifier = Modifier
                                             .size(10.dp)
                                             .clip(CircleShape)
-                                            .background(CyberAccent)
+                                            .background(NordicColors.AccentPrimary)
                                     )
                                 }
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "বাংলা (Bengali)",
-                                color = Color.White,
-                                fontSize = 16.5.sp,
-                                fontWeight = FontWeight.Bold
+                                color = NordicColors.TextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
 
@@ -200,7 +213,7 @@ fun OnboardingScreen(
 
                     Text(
                         text = "কোরআনের আয়াত ও সতর্কবার্তা বাংলায় দেখানো হবে:\n“মুমিন পুরুষদের বলুন, তারা যেন তাদের দৃষ্টি অবনত রাখে…” (২৪:৩০)",
-                        color = CyberTextSub,
+                        color = NordicColors.TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
@@ -221,17 +234,17 @@ fun OnboardingScreen(
                 SectionHeader(
                     title = "System Permissions",
                     icon = CyberIcons.ShieldCheck,
-                    subtitle = "Grant the following permissions to enable airtight protection and zero-latency content filtering."
+                    subtitle = "Grant permissions to activate zero-latency content filtering and airtight anti-uninstall protection."
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 1. Device Administrator (First so user can enable before accessibility)
+                // 1. Device Administrator (Direct system redirect to PrachirDeviceAdminReceiver)
                 PermissionItemCard(
                     title = "Device admin",
                     icon = CyberIcons.ShieldCheck,
                     why = "Prevents Blocker from being uninstalled while protection is active.",
-                    how = "Tap Activate this device admin app.",
+                    buttonLabel = "Set Device Admin",
                     isGranted = perms.deviceAdmin,
                     onGrant = { repo.openPermissionSettings(context, "deviceAdmin") }
                 )
@@ -242,8 +255,8 @@ fun OnboardingScreen(
                 PermissionItemCard(
                     title = "Usage access",
                     icon = CyberIcons.Apps,
-                    why = "Lets Blocker monitor foreground app usage and enforce limits.",
-                    how = "Select Blocker and allow usage access.",
+                    why = "Lets Blocker monitor foreground app usage and enforce daily limits.",
+                    buttonLabel = "Grant",
                     isGranted = perms.usageAccess,
                     onGrant = { repo.openPermissionSettings(context, "usageAccess") }
                 )
@@ -254,32 +267,32 @@ fun OnboardingScreen(
                 PermissionItemCard(
                     title = "Display over other apps",
                     icon = CyberIcons.Layers,
-                    why = "Shows blocking HUD warnings immediately over restricted content.",
-                    how = "Allow display over other apps for Blocker.",
+                    why = "Shows blocking HUD warnings and reminder overlays over restricted content.",
+                    buttonLabel = "Grant",
                     isGranted = perms.overlay,
                     onGrant = { repo.openPermissionSettings(context, "overlay") }
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 4. Accessibility Service (At the very end, just before battery optimization)
+                // 4. Accessibility Service
                 PermissionItemCard(
                     title = "Accessibility service",
                     icon = CyberIcons.Eye,
-                    why = "Reads the browser address bar and detects blocked apps in 0ms.",
-                    how = "Installed apps → Blocker → turn on.",
+                    why = "Reads browser address bar URLs and detects blocked apps in 0ms.",
+                    buttonLabel = "Enable",
                     isGranted = perms.accessibility,
                     onGrant = { repo.openPermissionSettings(context, "accessibility") }
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 5. Optional Background Battery Optimization
+                // 5. Unrestricted Battery Execution
                 PermissionItemCard(
-                    title = "Background execution",
+                    title = "Unrestricted battery",
                     icon = CyberIcons.Battery,
-                    why = "Ensures the Android system does not kill the watchdog in background.",
-                    how = "Allow unrestricted battery usage.",
+                    why = "Exempts Blocker from OEM battery killers so protection never stops.",
+                    buttonLabel = "Unrestricted Battery",
                     isGranted = perms.batteryOptimizationsIgnored,
                     onGrant = { repo.openPermissionSettings(context, "battery") }
                 )
@@ -300,13 +313,13 @@ fun OnboardingScreen(
                 SectionHeader(
                     title = "Confirm Initial Defenses",
                     icon = CyberIcons.Lock,
-                    subtitle = "Verify starting security policies before entering the app."
+                    subtitle = "Verify starting security policies before entering Blocker."
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Master Protection Toggle
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                // Master Protection Toggle Card
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -315,17 +328,18 @@ fun OnboardingScreen(
                         Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                             Text(
                                 text = "Master Protection",
-                                color = Color.White,
+                                color = NordicColors.TextPrimary,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.SemiBold
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Block 9,357+ adult/gambling websites and restricted apps.",
-                                color = CyberTextSub,
+                                text = "Block 9,350+ adult websites, porn domains, and restricted apps.",
+                                color = NordicColors.TextSecondary,
                                 fontSize = 12.sp
                             )
                         }
-                        CyberSwitch(
+                        NordicSwitch(
                             checked = enableProtection,
                             onCheckedChange = { enableProtection = it }
                         )
@@ -334,8 +348,8 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Anti-Tamper Shield Toggle
-                GlowCard(modifier = Modifier.fillMaxWidth()) {
+                // Anti-Tamper Shield Toggle Card
+                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -344,17 +358,18 @@ fun OnboardingScreen(
                         Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                             Text(
                                 text = "Anti-Tamper & Uninstall Guard",
-                                color = Color.White,
+                                color = NordicColors.TextPrimary,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.SemiBold
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Locks Settings, launcher shortcuts, and device admin deactivation.",
-                                color = CyberTextSub,
+                                color = NordicColors.TextSecondary,
                                 fontSize = 12.sp
                             )
                         }
-                        CyberSwitch(
+                        NordicSwitch(
                             checked = enableShield,
                             onCheckedChange = { enableShield = it }
                         )
@@ -384,7 +399,7 @@ private fun PermissionItemCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     why: String,
-    how: String,
+    buttonLabel: String = "Grant",
     isGranted: Boolean,
     onGrant: () -> Unit
 ) {
@@ -400,19 +415,19 @@ private fun PermissionItemCard(
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isGranted) CyberOkWell else CyberAccentWell)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(NordicColors.CardSurfaceHero)
                     .border(
                         1.dp,
-                        if (isGranted) CyberOk.copy(alpha = 0.5f) else CyberAccent.copy(alpha = 0.4f),
-                        RoundedCornerShape(12.dp)
+                        if (isGranted) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
+                        RoundedCornerShape(11.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (isGranted) CyberOkGlow else Color(0xFFC084FC),
+                    tint = if (isGranted) NordicColors.AccentPrimary else NordicColors.TextSecondary,
                     modifier = Modifier.size(19.dp)
                 )
             }
@@ -422,13 +437,14 @@ private fun PermissionItemCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = Color.White,
+                    color = NordicColors.TextPrimary,
                     fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = why,
-                    color = CyberTextSub,
+                    color = NordicColors.TextSecondary,
                     fontSize = 11.5.sp,
                     lineHeight = 15.sp
                 )
@@ -438,7 +454,7 @@ private fun PermissionItemCard(
 
             if (!isGranted) {
                 Btn(
-                    label = "Grant",
+                    label = buttonLabel,
                     onClick = onGrant,
                     kind = BtnKind.PRIMARY
                 )

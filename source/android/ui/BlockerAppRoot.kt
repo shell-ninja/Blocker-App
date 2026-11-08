@@ -13,17 +13,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.data.BlockerRepository
+import com.blocker.ui.components.BrandTopBar
 import com.blocker.ui.components.CyberIcons
-import com.blocker.ui.components.TopHeader
+import com.blocker.ui.components.NordicTexturedScaffold
 import com.blocker.ui.screens.*
-import com.blocker.ui.theme.*
+import com.blocker.ui.theme.NordicColors
 
 enum class NavTab(val label: String, val icon: ImageVector) {
     HOME("Home", CyberIcons.Home),
@@ -49,68 +49,65 @@ fun BlockerAppRoot(
     var showOnboarding by remember { mutableStateOf(!isOnboardingDone && !perms.accessibility) }
     val isAppLocked = securityLock.isParentLockEnabled && !securityLock.isAppUnlocked
 
-    // Intercept back button during study/focus lock or app lock
+    // Back button interception during active lockouts
     BackHandler(enabled = study.active || focus.active || isAppLocked) {
-        // Prevent exiting or backing out during active phone lockout or parental lock
+        // Prevent exiting during active lockout
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = Color.Transparent,
-        bottomBar = {
-            if (!showOnboarding && !study.active && !isAppLocked) {
-                CyberBottomNav(
-                    selectedTab = currentTab,
-                    onTabSelected = { currentTab = it },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(CyberMeshBackground)
-                .padding(innerPadding)
-        ) {
-            when {
-                isAppLocked -> {
-                    ParentLockScreen(repo = repo)
-                }
-                showOnboarding -> {
-                    OnboardingScreen(
-                        repo = repo,
-                        onComplete = {
-                            repo.setOnboardingCompleted(true)
-                            showOnboarding = false
-                        }
+    NordicTexturedScaffold(modifier = modifier) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            bottomBar = {
+                if (!showOnboarding && !study.active && !isAppLocked) {
+                    CyberBottomNav(
+                        selectedTab = currentTab,
+                        onTabSelected = { currentTab = it },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
-                study.active -> {
-                    // Lock directly to Focus Screen during study session
-                    FocusScreen(repo = repo)
-                }
-                else -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                    ) {
-                        TopHeader(
-                            isLive = protection.isActive,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                when {
+                    isAppLocked -> {
+                        ParentLockScreen(repo = repo)
+                    }
+                    showOnboarding -> {
+                        OnboardingScreen(
+                            repo = repo,
+                            onComplete = {
+                                repo.setOnboardingCompleted(true)
+                                showOnboarding = false
+                            }
                         )
-                        Box(modifier = Modifier.weight(1f)) {
-                            Crossfade(
-                                targetState = currentTab,
-                                animationSpec = tween(120),
-                                label = "tab_fade"
-                            ) { tab ->
-                                when (tab) {
-                                    NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })
-                                    NavTab.FOCUS -> FocusScreen(repo = repo)
-                                    NavTab.APPS -> AppBlockerScreen(repo = repo)
-                                    NavTab.WEB -> BlocklistScreen(repo = repo)
-                                    NavTab.SETTINGS -> SettingsScreen(repo = repo)
+                    }
+                    study.active -> {
+                        FocusScreen(repo = repo)
+                    }
+                    else -> {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            BrandTopBar(
+                                isProtected = protection.isActive,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(modifier = Modifier.weight(1f)) {
+                                Crossfade(
+                                    targetState = currentTab,
+                                    animationSpec = tween(120),
+                                    label = "tab_fade"
+                                ) { tab ->
+                                    when (tab) {
+                                        NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })
+                                        NavTab.FOCUS -> FocusScreen(repo = repo)
+                                        NavTab.APPS -> AppBlockerScreen(repo = repo)
+                                        NavTab.WEB -> BlocklistScreen(repo = repo)
+                                        NavTab.SETTINGS -> SettingsScreen(repo = repo)
+                                    }
                                 }
                             }
                         }
@@ -132,24 +129,8 @@ fun CyberBottomNav(
         modifier = modifier
             .fillMaxWidth()
             .clip(navShape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF0F1528),
-                        Color(0xFF090D1A)
-                    )
-                )
-            )
-            .border(
-                1.dp,
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0x407C3AED),
-                        Color(0x187C3AED)
-                    )
-                ),
-                navShape
-            )
+            .background(NordicColors.CardSurface)
+            .border(1.dp, NordicColors.HairlineBorder, navShape)
             .padding(horizontal = 6.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically
@@ -169,7 +150,7 @@ fun CyberBottomNav(
                         .size(width = 46.dp, height = 28.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(
-                            if (isSelected) CyberAccent.copy(alpha = 0.28f)
+                            if (isSelected) NordicColors.AccentPrimary
                             else Color.Transparent
                         ),
                     contentAlignment = Alignment.Center
@@ -177,16 +158,16 @@ fun CyberBottomNav(
                     Icon(
                         imageVector = tab.icon,
                         contentDescription = tab.label,
-                        tint = if (isSelected) Color(0xFFC084FC) else CyberTextSub,
-                        modifier = Modifier.size(20.dp)
+                        tint = if (isSelected) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                        modifier = Modifier.size(19.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = tab.label,
-                    color = if (isSelected) Color.White else CyberTextSub,
+                    color = if (isSelected) NordicColors.TextPrimary else NordicColors.TextSecondary,
                     fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                 )
             }
         }

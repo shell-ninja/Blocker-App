@@ -38,7 +38,7 @@ fun BlocklistScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(CyberMeshBackground)
+            .background(NordicColors.CanvasBg)
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
@@ -51,7 +51,7 @@ fun BlocklistScreen(
         Spacer(modifier = Modifier.height(14.dp))
 
         // Categories: Default block list
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -62,14 +62,14 @@ fun BlocklistScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(RoundedCornerShape(11.dp))
-                            .background(CyberAccentWell)
-                            .border(1.dp, CyberAccent.copy(alpha = 0.4f), RoundedCornerShape(11.dp)),
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = CyberIcons.Shield,
                             contentDescription = null,
-                            tint = Color(0xFFC084FC),
+                            tint = NordicColors.AccentPrimary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -79,13 +79,13 @@ fun BlocklistScreen(
                     Column {
                         Text(
                             text = "Default block list",
-                            color = Color.White,
+                            color = NordicColors.TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "9,357 sites, 62 keywords and 4 web endings active",
-                            color = CyberTextSub,
+                            color = NordicColors.TextSecondary,
                             fontSize = 11.5.sp
                         )
                     }
@@ -98,17 +98,17 @@ fun BlocklistScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         // Custom Domain Adder
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Add Custom Blocked Website",
-                color = Color.White,
+                color = NordicColors.TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Enter domain name (e.g. example.com or badsite.org)",
-                color = CyberTextSub,
+                color = NordicColors.TextSecondary,
                 fontSize = 12.sp
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -120,17 +120,17 @@ fun BlocklistScreen(
                 OutlinedTextField(
                     value = domainInput,
                     onValueChange = { domainInput = it },
-                    placeholder = { Text("domain.com", color = CyberTextSub, fontSize = 13.sp) },
+                    placeholder = { Text("domain.com", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = CyberCardSurface,
-                        unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = CyberAccent,
-                        unfocusedBorderColor = CyberCardBorder
+                        focusedContainerColor = NordicColors.CardSurfaceHero,
+                        unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                        focusedTextColor = NordicColors.TextPrimary,
+                        unfocusedTextColor = NordicColors.TextPrimary,
+                        focusedBorderColor = NordicColors.AccentPrimary,
+                        unfocusedBorderColor = NordicColors.HairlineBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -150,7 +150,7 @@ fun BlocklistScreen(
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = "Blocked Domains (${domains.size})",
-                    color = CyberTextSub,
+                    color = NordicColors.TextSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -161,16 +161,17 @@ fun BlocklistScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(CyberCardSurface)
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(8.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = dom, color = Color.White, fontSize = 13.sp)
+                            Text(text = dom, color = NordicColors.TextPrimary, fontSize = 13.sp)
                             Icon(
                                 imageVector = CyberIcons.Delete,
                                 contentDescription = null,
-                                tint = CyberDanger,
+                                tint = NordicColors.AlertMuted,
                                 modifier = Modifier
                                     .size(18.dp)
                                     .clickable { repo.removeDomain(dom) }
@@ -184,17 +185,17 @@ fun BlocklistScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         // Custom Keyword Adder
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Add Custom Restricted Keyword",
-                color = Color.White,
+                color = NordicColors.TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Restricts matching web pages, search terms, and URL paths",
-                color = CyberTextSub,
+                color = NordicColors.TextSecondary,
                 fontSize = 12.sp
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -206,17 +207,17 @@ fun BlocklistScreen(
                 OutlinedTextField(
                     value = keywordInput,
                     onValueChange = { keywordInput = it },
-                    placeholder = { Text("keyword or phrase", color = CyberTextSub, fontSize = 13.sp) },
+                    placeholder = { Text("keyword or phrase", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = CyberCardSurface,
-                        unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = CyberAccent,
-                        unfocusedBorderColor = CyberCardBorder
+                        focusedContainerColor = NordicColors.CardSurfaceHero,
+                        unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                        focusedTextColor = NordicColors.TextPrimary,
+                        unfocusedTextColor = NordicColors.TextPrimary,
+                        focusedBorderColor = NordicColors.AccentPrimary,
+                        unfocusedBorderColor = NordicColors.HairlineBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -236,7 +237,7 @@ fun BlocklistScreen(
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = "Restricted Keywords (${keywords.size})",
-                    color = CyberTextSub,
+                    color = NordicColors.TextSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -247,16 +248,17 @@ fun BlocklistScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(CyberCardSurface)
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(8.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = kw, color = Color.White, fontSize = 13.sp)
+                            Text(text = kw, color = NordicColors.TextPrimary, fontSize = 13.sp)
                             Icon(
                                 imageVector = CyberIcons.Delete,
                                 contentDescription = null,
-                                tint = CyberDanger,
+                                tint = NordicColors.AlertMuted,
                                 modifier = Modifier
                                     .size(18.dp)
                                     .clickable { repo.removeKeyword(kw) }
@@ -270,17 +272,17 @@ fun BlocklistScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         // URL Verification Sandbox
-        GlowCard(modifier = Modifier.fillMaxWidth()) {
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Block Engine Simulator",
-                color = Color.White,
+                color = NordicColors.TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "Test a URL against the binary C++ engine and custom rules",
-                color = CyberTextSub,
+                color = NordicColors.TextSecondary,
                 fontSize = 12.sp
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -295,17 +297,17 @@ fun BlocklistScreen(
                         testInput = it
                         testResult = null
                     },
-                    placeholder = { Text("https://example.com/page", color = CyberTextSub, fontSize = 13.sp) },
+                    placeholder = { Text("https://example.com/page", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = CyberCardSurface,
-                        unfocusedContainerColor = CyberCardSurface,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = CyberAccent,
-                        unfocusedBorderColor = CyberCardBorder
+                        focusedContainerColor = NordicColors.CardSurfaceHero,
+                        unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                        focusedTextColor = NordicColors.TextPrimary,
+                        unfocusedTextColor = NordicColors.TextPrimary,
+                        focusedBorderColor = NordicColors.AccentPrimary,
+                        unfocusedBorderColor = NordicColors.HairlineBorder
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -328,8 +330,12 @@ fun BlocklistScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (isBlk) CyberDangerSoft else CyberOkSoft)
-                        .border(1.dp, if (isBlk) CyberDanger else CyberOk, RoundedCornerShape(10.dp))
+                        .background(NordicColors.CardSurfaceHero)
+                        .border(
+                            1.dp,
+                            if (isBlk) NordicColors.AlertMuted else NordicColors.AccentPrimary,
+                            RoundedCornerShape(10.dp)
+                        )
                         .padding(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -337,13 +343,13 @@ fun BlocklistScreen(
                         Icon(
                             imageVector = if (isBlk) CyberIcons.Ban else CyberIcons.Check,
                             contentDescription = null,
-                            tint = if (isBlk) CyberDanger else CyberOkGlow,
+                            tint = if (isBlk) NordicColors.AlertMuted else NordicColors.AccentPrimary,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (isBlk) "$testInput is BLOCKED" else "$testInput is ALLOWED",
-                            color = if (isBlk) CyberDanger else CyberOkGlow,
+                            color = if (isBlk) NordicColors.AlertMuted else NordicColors.AccentPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.5.sp
                         )

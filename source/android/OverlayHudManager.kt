@@ -69,16 +69,16 @@ object OverlayHudManager {
             setPadding(dp(18), dp(10), dp(18), dp(10))
 
             background = GradientDrawable().apply {
-                setColor(0xEE0A0618.toInt()) // Deep obsidian with slight translucency
+                setColor(0xEE110D22.toInt()) // Elevated Dark Violet-Obsidian
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), 0x998B5CF6.toInt()) // Accent violet outline
+                setStroke(dp(1), 0xFF4C3B87.toInt()) // TopEdgeHighlight violet rim
             }
             elevation = dp(8).toFloat()
         }
 
         val iconIv = android.widget.ImageView(context).apply {
             setImageResource(R.drawable.ic_shield_cyber)
-            setColorFilter(0xFFA78BFA.toInt())
+            setColorFilter(0xFF8B5CF6.toInt()) // Vibrant Royal Purple
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply {
                 setMargins(0, 0, dp(8), 0)
             }
@@ -86,7 +86,7 @@ object OverlayHudManager {
 
         val messageTv = TextView(context).apply {
             text = ""
-            setTextColor(0xFFEDE9FE.toInt()) // Lavender white
+            setTextColor(0xFFF5F3FF.toInt()) // Crisp Pale Lavender Off-White
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
@@ -123,8 +123,10 @@ object OverlayHudManager {
 
         // Pre-attach the HUD view to WindowManager in advance with View.GONE!
         try {
-            wm?.addView(container, wmParams)
-            isAttached = true
+            if (container.parent == null && !container.isAttachedToWindow) {
+                wm?.addView(container, wmParams)
+                isAttached = true
+            }
         } catch (_: Throwable) {}
     }
 
@@ -146,15 +148,15 @@ object OverlayHudManager {
 
             tv.text = message
 
-            if (!isAttached) {
-                try {
-                    wm.addView(container, params)
-                    isAttached = true
-                } catch (t: Throwable) {
-                    try {
+            if (!isAttached || container.parent == null || !container.isAttachedToWindow) {
+                runCatching {
+                    if (container.parent == null && !container.isAttachedToWindow) {
+                        wm.addView(container, params)
+                        isAttached = true
+                    } else {
                         wm.updateViewLayout(container, params)
                         isAttached = true
-                    } catch (_: Throwable) {}
+                    }
                 }
             }
 
