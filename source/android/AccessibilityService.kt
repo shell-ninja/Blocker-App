@@ -791,9 +791,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val hasUninstallRisk = ("do you want to uninstall" in t || "uninstallation" in t || "uninstalling" in t ||
             (("uninstall" in t || "delete" in t) && ("ok" in t || "cancel" in t)))
         if (hasUninstallRisk && shieldEngaged()) {
-            val recentlyLongPressedSelf = (SystemClock.elapsedRealtime() - lastBlockerLongPressElapsed < 5000L)
-            val recentlyBlocker = recentlyLongPressedSelf || isOurApp
-            if (recentlyBlocker && !isInstallOrUpdateDialog(root = root)) {
+            if (isOurApp && !isInstallOrUpdateDialog(root = root)) {
                 viewingBlockerSettingsUntil = nowForUninstall + 30_000L
                 autoCancelDialog(root)
                 kickFromAppInfo()
@@ -3071,8 +3069,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        val isOurApp = matchesSelfIdentity(t) || isSelfMentioned(ev) ||
-            (nowElapsed - lastBlockerLongPressElapsed < 5000L)
+        val isOurApp = matchesSelfIdentity(t) || isSelfMentioned(ev)
 
         // If this is PackageInstaller or an install/update dialog, strictly distinguish between Uninstall vs Update/Install:
         if (isInstallerPkg(pkg) || isInstallerPkg(rootPkg) || (!isSettingsPkg(pkg) && isInstallOrUpdateDialog(ev, root))) {
@@ -3085,8 +3082,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                 // ALWAYS ALLOW IT! Never block or auto-cancel updates!
                 return false
             }
-            if (!isOurApp && !isBlockedAppTarget(t, root)) {
-                // Scoped identity check: Not targeting Blocker or a protected app, ALLOW uninstalling freely!
+            if (!isOurApp) {
+                // Scoped identity check: Not targeting Blocker, ALLOW uninstalling freely!
                 return false
             }
         }
@@ -3118,7 +3115,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 1. Uninstall attempt (package installer or confirmation dialog)
         val isUninstallDialog = ("do you want to uninstall" in t || "uninstall this app" in t ||
             ("uninstall" in t && ("cancel" in t || "ok" in t || "app" in t || "delete" in t || "বাতিল" in t))) && !isDeviceAdminActivation
-        val isUninstall = isUninstallDialog && (isOurApp || isBlockedAppTarget(t, root))
+        val isUninstall = isUninstallDialog && isOurApp
         if (isUninstall) {
             viewingBlockerSettingsUntil = now + 45_000L
             autoCancelDialog(root)
@@ -3449,37 +3446,21 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             val src = runCatching { ev.source }.getOrNull()
             if (src != null) {
-                if (src.packageName?.toString() != packageName) {
-                    if (matchesSelfIdentity(src.text) || matchesSelfIdentity(src.contentDescription)) return true
-                    val parent = src.parent
-                    if (parent != null) {
-                        if (matchesSelfIdentity(parent.text) || matchesSelfIdentity(parent.contentDescription)) return true
+                try {
+                    if (src.packageName?.toString() != packageName) {
+                        if (matchesSelfIdentity(src.text) || matchesSelfIdentity(src.contentDescription)) return true
+                        val parent = src.parent
+                        if (parent != null) {
+                            try {
+                                if (matchesSelfIdentity(parent.text) || matchesSelfIdentity(parent.contentDescription)) return true
+                            } finally {
+                                runCatching { parent.safeRecycle() }
+                            }
+                        }
                     }
+                } finally {
+                    runCatching { src.safeRecycle() }
                 }
-            }
-        }
-
-        val root = runCatching { rootInActiveWindow }.getOrNull()
-        if (root != null && root.packageName?.toString() != packageName) {
-            val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(150))
-            val t = sb.toString()
-            if (matchesSelfIdentity(t)) return true
-        }
-
-        val wins = runCatching { windows }.getOrNull()
-        if (wins != null) {
-            for (w in wins) {
-                if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    if (matchesSelfIdentity(w.title)) return true
-                }
-                val wr = runCatching { w.root }.getOrNull() ?: continue
-                if (wr.packageName?.toString() == packageName) continue
-                val sb = StringBuilder()
-                collectText(wr, sb, 0, intArrayOf(80))
-                val wt = sb.toString()
-                if (matchesSelfIdentity(wt)) return true
             }
         }
 
@@ -3598,8 +3579,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                     clickText.contains("অ্যাপ তথ্য")
 
                 if (isDestructiveShortcut) {
-                    val recentlyLongPressedSelf = (nowElapsed - lastBlockerLongPressElapsed < 5000L)
-                    val isTargetSelf = recentlyLongPressedSelf || isSelfMentioned(ev)
+                    val recentlyLongPressedSelf = (nowElapsed - lastBlockerLongPressElapsed < 3000L)
+                    val isTargetSelf = isSelfMentioned(ev) || (recentlyLongPressedSelf && isTargetBlocker(ev, appLabel))
                     if (isTargetSelf) {
                         lastBlockerLongPressElapsed = nowElapsed
                         viewingBlockerSettingsUntil = System.currentTimeMillis() + 45_000L
@@ -3614,7 +3595,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             // Case 1C: Launcher popup window state changed after long press on self
             if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                if (nowElapsed - lastBlockerLongPressElapsed < 4000L) {
+                if (nowElapsed - lastBlockerLongPressElapsed < 2500L) {
                     val cls = ev.className?.toString()?.lowercase().orEmpty()
                     if (cls.contains("popup") || cls.contains("shortcut") || cls.contains("action") || cls.contains("menu")) {
                         performGlobalAction(GLOBAL_ACTION_BACK)
@@ -3779,9 +3760,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                     ("আনইনস্টল" in dialogText && ("বাতিল" in dialogText || "ঠিক আছে" in dialogText))
 
                 if (isUninstallDialog) {
-                    val recentlyLongPressedSelf = (nowElapsed - lastBlockerLongPressElapsed < 8000L)
                     val nameLower = if (appLabel.isNotBlank()) appLabel.lowercase() else "blocker"
-                    val targetIsSelf = isSelfMentioned(ev) || recentlyLongPressedSelf ||
+                    val targetIsSelf = isSelfMentioned(ev) ||
                         matchesSelfIdentity(dialogText) || "blocker" in dialogText || "prachir" in dialogText ||
                         "com.blocker" in dialogText || "com.prachir.app" in dialogText || "ব্লকার" in dialogText || "প্রাচীর" in dialogText ||
                         (nameLower.isNotEmpty() && nameLower in dialogText)
@@ -4350,8 +4330,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Case B: Destructive shortcut clicked on launcher (App info, Uninstall, Disable)
         if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 5000L)
-            val recentlyLeftBlocker = (nowUp - lastBlockerExitTime < 35_000L)
+            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 3000L)
             fun isDestructiveWord(cs: CharSequence?): Boolean {
                 if (cs.isNullOrBlank()) return false
                 val lower = cs.toString().lowercase()
@@ -4373,26 +4352,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             if (isDestructiveShortcut) {
-                var isTarget = recentlyLeftBlocker || recentlyLongPressed ||
-                    matchesBlockerFast(ev.text.joinToString(" ")) ||
+                val isTarget = matchesBlockerFast(ev.text.joinToString(" ")) ||
                     matchesBlockerFast(ev.contentDescription) ||
-                    System.currentTimeMillis() < viewingBlockerSettingsUntil
-
-                if (!isTarget) {
-                    val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-                    if (root != null) {
-                        try {
-                            val sb = StringBuilder()
-                            collectText(root, sb, 0, intArrayOf(50))
-                            val screenT = sb.toString()
-                            if (matchesBlockerFast(screenT)) {
-                                isTarget = true
-                            }
-                        } finally {
-                            runCatching { root.safeRecycle() }
-                        }
-                    }
-                }
+                    (recentlyLongPressed && isTargetBlocker(ev, name))
 
                 if (isTarget) {
                     lastBlockerLongPressUp = nowUp
@@ -4410,7 +4372,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         main.post {
                             showOverlay(
                                 if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
-                                if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকারের অ্যাপ ইনফো ও আনইনস্টল শর্টকাট লক করা রয়েছে।\n\n“এবং অঙ্গীকার পূর্ণ করো। নিশ্চয়ই অঙ্গীকার সম্পর্কে জবাবদিহি করতে হবে।” — সূরা আল-ইসরা (১৭:৩৪)" else "Blocker's app info and uninstallation shortcuts are locked while Protection Mode is active.\n\n“And fulfill your covenants. Indeed, covenants will be questioned.” — Surah Al-Isra (17:34)",
+                                formatTamperCovenantBody(if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকার আনইনস্টল করা সম্ভব নয়।" else "Blocker cannot be uninstalled while Protection Mode is active."),
                                 5000,
                                 getProtectionActiveSubheading(),
                                 getUnderstoodButton()
@@ -4424,7 +4386,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Case C: Launcher popup window state changed after long press
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
+            val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 2500L)
             if (recentlyLongPressed) {
                 val cls = ev.className?.toString()?.lowercase().orEmpty()
                 if (cls.contains("popup") || cls.contains("shortcut") || cls.contains("action") || cls.contains("menu")) {
@@ -4454,17 +4416,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (!isDestructive) return false
 
         val now = System.currentTimeMillis()
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val recentlyLongPressedSelf = (nowElapsed - lastBlockerLongPressElapsed < 5000L)
-        var isOurApp = recentlyLongPressedSelf || matchesSelfIdentity(clickText) || isSelfMentioned(ev)
-        if (!isOurApp) {
-            val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-            if (root != null) {
-                try {
-                    isOurApp = isBlockerAppInfoScreen(root, ev)
-                } finally {
-                    runCatching { root.safeRecycle() }
-                }
+        val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
+        var isOurApp = matchesSelfIdentity(clickText)
+        if (!isOurApp && root != null) {
+            try {
+                isOurApp = isBlockerAppInfoScreen(root, ev)
+            } finally {
+                runCatching { root.safeRecycle() }
             }
         }
 
@@ -4566,9 +4524,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             if (isDestructiveAction && isLauncher && shieldEngaged()) {
                 val nowUp = SystemClock.uptimeMillis()
-                val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 4000L)
+                val recentlyLongPressed = (nowUp - lastBlockerLongPressUp < 3000L)
                 val isTarget = isTargetBlocker(ev, name)
-                if (isTarget || recentlyLongPressed) {
+                if (isTarget || (recentlyLongPressed && isTargetBlocker(ev, name))) {
                     performGlobalAction(GLOBAL_ACTION_BACK)
                     kickToHome()
                     if (now - lastHideKick > 1000L) {

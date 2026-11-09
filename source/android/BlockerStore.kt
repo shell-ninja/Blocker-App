@@ -182,7 +182,7 @@ object SecureTime {
 object BlockerStore {
     const val APP_VERSION = "1.0.6.7"
     const val DISPLAY_VERSION = "1.0.6.7"
-    const val BUILD_NUMBER = 92
+    const val BUILD_NUMBER = 100
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
     const val GUARD_WINDOW_MS = 10 * 60_000L
