@@ -6,48 +6,60 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ## v1.0.6.7 (Current Release)
 
-**Release Date:** November 2026  
+**Release Date:** November 9, 2026  
 **Version:** 1.0.6.7  
-**Build:** 67  
+**Build:** 100  
 
 ### Major Fixes & Enhancements:
-- **Silent, Non-Intrusive Distraction Ejection (No Popups, In-App Return):**
-  - **No Annoying Popups:** Completely eliminated warning popup overlays when blocking Facebook Reels, Instagram Reels, Instagram Explore/Search, and YouTube Shorts.
-  - **In-App Page Ejection (Never Kick to Android Launcher):** Users are thrown back to the app's Home / Feeds page directly via instant `GLOBAL_ACTION_BACK` and automated Home tab redirection (`findHomeTabNode`, `findInstaHomeTabNode`, `findYtHomeTabNode`). Users are never kicked out to the Android phone launcher.
+- **Precision Scoped Tamper Guard (Free Uninstallation & Long-Press for Other Apps):**
+  - **Scoped Launcher Interception:** Resolved the issue where long-pressing or opening shortcut menus on other apps (e.g. WhatsApp, Telegram, Camera) was erroneously blocked.
+  - **Node-Targeted Identity Matching:** Scoped `isSelfMentioned(ev)` strictly to the touched node, its label, and its immediate parent—eliminating desktop-wide `rootInActiveWindow` sweeps that previously matched Blocker's desktop icon.
+  - **Package Installer Scoped Gate:** System `PackageInstaller` dialog interception now verifies that Blocker (`com.blocker`) is the specific uninstall target (`targetIsSelf`), allowing all other apps to be uninstalled, updated, or inspected 100% freely.
+- **Device Administrator Direct Redirect & Smart Allow-Gate:**
+  - **Direct System Activation Redirect:** Tapping "Set Device Admin" on Startup / Onboarding or the Home health card immediately launches Android's system Device Administrator activation screen (`DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN`).
+  - **Dynamic Activation vs. Deactivation Gate:** Evaluates `dpm.isAdminActive()` on every event. When Device Admin is not yet active, activation screens are 100% allowed so users can activate Device Admin seamlessly. Once active, any attempt to reach deactivation screens remains locked down.
+- **Auto-Close & Background Removal on Minimize:**
+  - **Zero Background Footprint:** Whenever Blocker is minimized (via Home button, back gesture, or task switcher), `MainActivity` immediately invokes `finishAndRemoveTask()`.
+  - **Android Recents Protection:** Closes the UI and removes the task from Android Recents completely, preventing access to App Info or Settings via the multitasking overview screen.
+- **Seamless In-Place APK Upgrade Architecture:**
+  - **Monotonic Version Code:** Configured monotonic `versionCode` progression (`1006810` for debug, `1106810` for release) to guarantee seamless in-place APK upgrades over locked devices without requiring uninstallation or encountering `INSTALL_FAILED_VERSION_DOWNGRADE`.
+- **1-Minute Debug Unlock Timer & Auto-Clamping:**
+  - **Debug Timer Enforcement:** Debug builds strictly enforce a 60-second (1-minute) unlock delay and cooldown across all toggles (master toggle, settings, daily schedules, usage limits).
+  - **Startup Auto-Clamping:** Automatically inspects persisted DataStore and SharedPreferences unlock timestamps on startup; any existing 24-hour locks are clamped down to 60 seconds upon upgrading.
+- **Surgical Facebook Newsfeed & Video Ejection (Zero Home Kicking):**
+  - **Fluid Newsfeed Browsing:** Users can browse the Facebook Newsfeed freely without interruption or false-positive kicks.
+  - **In-App Newsfeed Return:** When a user clicks a Reel or video to open a full-screen player, Blocker performs an in-app `GLOBAL_ACTION_BACK` ejection returning the user directly to the Newsfeed—never kicking them out to the Android launcher (`GLOBAL_ACTION_HOME`).
+- **Opt-In Granular Distraction Shields (Default OFF):**
+  - Granular distraction toggles (Facebook Reels, YouTube Shorts, Instagram Reels, Instagram Search) default to `OFF` upon initial installation, allowing users to enable shields selectively.
+- **Silent, Non-Intrusive Distraction Ejection:**
+  - Completely eliminated warning popup overlays when blocking Facebook Reels, Instagram Reels, Instagram Explore/Search, and YouTube Shorts.
+  - Users are smoothly redirected to the app's Home / Feeds page directly via instant in-app navigation (`findHomeTabNode`, `findInstaHomeTabNode`, `findYtHomeTabNode`).
 - **Official Blocker App Icon Restoration:**
   - Restored the official high-resolution Blocker shield logo icon across the entire application, replacing generic SVGs.
   - Featured in the app Header squircle well, startup splash screen, error recovery screen, onboarding welcome header, and Settings footer branding.
 - **Maximum Lightness & 60/120fps Buttery Smooth Performance:**
-  - **Fast-Path Facebook Node Inspection:** Inverted check order in `isFacebookVideoOrReels` to verify Home newsfeed status before running node scans, and slashed node scan budget from 3,000 nodes down to 200 characters on newsfeed scroll. Facebook scrolls buttery smooth with zero stutter.
+  - **Fast-Path Facebook Node Inspection:** Inverted check order in `isFacebookVideoOrReels` to verify Home newsfeed status before running node scans, and slashed node scan budget from 3,000 nodes down to 200 characters on newsfeed scroll.
   - **Zero IPC / Binder Memory Leaks:** Wrapped all accessibility node queries in `try ... finally { runCatching { root.recycle() } }` across `checkGranularInterception` and `checkRedditInterception`.
-  - **Instant Tab Switching (0ms Input Lag):** Replaced 270ms tab switch delay in `App.tsx` with instantaneous tab switching and a snappy 110ms hardware-accelerated transition.
-  - **Eliminated Dead JS-Thread Animations:** Removed inactive continuous animation loops running on the JavaScript thread in `GlowCard`.
+  - **Instant Tab Switching (0ms Input Lag):** Instantaneous tab switching with a snappy 110ms hardware-accelerated transition.
   - **Memoized Background Grid Canvas:** Wrapped `DotMatrixBackground` and `AppBackground` in `React.memo` to eliminate redundant SVG re-renders.
 - **Comprehensive Cyber Design System Overhaul:**
-  - **Deep Obsidian-Midnight Canvas:** Deep dark canvas (`#070913`) layered with a subtle, low-opacity violet/indigo dot-matrix grid pattern (`CyberBackground`).
-  - **Elevated 3D Bento Cards:** Dark slate-navy squircle surfaces (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights.
-  - **Luminous Accents & Status Badges:** High-vibrancy emerald green (`#10B981` / `#00E676`) for active switches, checkmarks, and translucent pill badges; electric purple/violet (`#7C3AED` / `#9333EA`) for brand shield icons, icon wells, and active bottom navigation indicators.
-  - **Hardware-Accelerated Motion:** Ambient breathing glow pulses on active status pill badges, live rolling numeric counter animations, fluid spring-animated toggle switches, and tactile press physics (0.96x spring scale-down on press with crisp rebound).
-- **Facebook Reels & Video Precision Guard (Scroll vs. Click Separation):**
-  - **Newsfeed Scrolling Preserved:** Resolved issue where users were kicked out of Facebook simply when scrolling past horizontal "Reels and short videos" preview carousels or inline video posts on their Home newsfeed.
-  - **Cleaned Feed Identifiers (`FB_NEWSFEED_IDS`):** Purged generic toolbar IDs (`tab_bar`, `search_button`, `messages_jewel`) that previously caused dedicated Reels tabs to be falsely classified as Home newsfeed.
-  - **Physical Click-Only Interception (`isFacebookVideoOrReelClick`):** Strictly targets physical user clicks (`TYPE_VIEW_CLICKED`) on Reel cards, play buttons, or Reels navigation tabs.
+  - Deep Obsidian-Midnight Canvas (`#070913`) layered with a subtle, low-opacity dot-matrix grid pattern (`CyberBackground`).
+  - Elevated 3D Bento Cards (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights.
+  - Luminous accents & status badges: high-vibrancy emerald green (`#10B981` / `#00E676`) and royal electric purple/violet (`#7C3AED` / `#9333EA`).
+  - Tactile press physics (0.96x spring scale-down on press with crisp rebound) and live rolling counter animations.
 - **Focus Mode Daily Schedule Duration Indicator:**
   - Added duration badge preview ("Duration: Xh Ym") directly on each daily schedule card in Focus Mode so users instantly see how long protection will remain active.
 - **UI Alignment & Polish:**
   - Perfectly aligned bottom navigation bar fonts and icons (`CyberBottomBar`).
-  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link now align cleanly in a unified row.
+  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link align cleanly in a unified row.
 - **Startup Resilience & Crash Immunity:**
   - Eliminated infinite re-render loops and startup blank screens.
-  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes or blank screens.
-- **Default Granular Distraction Shields Default to OFF (Opt-In):**
-  - Resolved issue where Facebook Reels, YouTube Shorts, Instagram Reels, and Instagram Search were blocked by default upon app initialization.
-  - All granular social media shields now default to `false` across Kotlin SharedPreferences (`BlockerStore.granularToggle`), TypeScript protection manager (`DEFAULT_GRANULAR`), and React Native UI screens.
+  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes.
 - **Maximum Anti-Tamper & Anti-Uninstall Lockdown (Airtight Fortress):**
   - Permanently removed all accessibility pausing, bypasses, or temporary exemption loopholes. Blocker operates with strict, non-negotiable 24/7 enforcement.
-  - **Zero-ms Launcher Interceptor:** Press-and-hold (long-press) on the Blocker launcher icon, drag-to-uninstall, and app shortcut menus are intercepted and cancelled within 0 milliseconds across all Android OEM launchers (HiOS, XOS, OneUI, Pixel, MIUI, Nova, Lawnchair).
+  - **Zero-ms Launcher Interceptor:** Press-and-hold (long-press) on the Blocker launcher icon, drag-to-uninstall, and app shortcut menus are intercepted and cancelled within 0 milliseconds across all Android OEM launchers.
   - **Settings & App Info Lockdown:** Any attempt to reach Blocker's App Info, Clear Storage, Force Stop, or Device Admin deactivation screens inside Android Settings is immediately intercepted with sub-millisecond node scanning and kicked to Home.
-  - **Package Installer Ejection Watchdog:** `BlockerForegroundService` runs a continuous background watchdog using `UsageStatsManager` that kicks any sideload, uninstaller, or package manager dialogs to Home in 200ms.
+  - **Package Installer Ejection Watchdog:** `BlockerForegroundService` runs a continuous background watchdog using `UsageStatsManager` that kicks any unauthorized package manager or sideload dialogs targeting Blocker to Home in 200ms.
   - **Device Administrator OS Invariant:** Enforces Android Device Administrator policy preventing direct uninstallation at the OS level (`"This app is an active device administrator and must be deactivated before uninstalling"`).
   - **Device Owner Permanent Lockdown:** Integrates `dpm.setUninstallBlocked(admin, packageName, true)` and `UserManager.DISALLOW_UNINSTALL_APPS` for unbreakable, hardware-enforced uninstallation blocking when provisioned as Device Owner.
   - **Zero-Overlay Idle Architecture:** Detaches overlay windows from Android WindowManager when idle so legitimate apps encounter no touch-filtering or tapjacking interference.
