@@ -104,8 +104,9 @@ fun FocusScreen(
     var newStartMin by remember { mutableStateOf(540) } // 9:00 AM default
     var newEndMin by remember { mutableStateOf(1020) }  // 5:00 PM default
 
-    // Essential Apps Search
+    // Essential Apps Search & Filter
     var appSearchQuery by remember { mutableStateOf("") }
+    var appFilterTab by remember { mutableStateOf(0) } // 0: User Apps, 1: System Apps, 2: All Apps
 
     Column(
         modifier = modifier
@@ -235,13 +236,37 @@ fun FocusScreen(
                             color = NordicColors.TextSecondary,
                             fontSize = 12.sp
                         )
-                        Spacer(modifier = Modifier.height(18.dp))
-                        Btn(
-                            label = "End Focus Early",
-                            icon = CyberIcons.Stop,
-                            onClick = { repo.endQuickFocus() },
-                            kind = BtnKind.SECONDARY
-                        )
+                        val hasPendingUnlock = focus.pendingUnlockUntil > 0L
+                        val unlockRemMs = (focus.pendingUnlockUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+                        if (hasPendingUnlock) {
+                            val totalSec = (unlockRemMs / 1000).coerceAtLeast(0)
+                            val h = totalSec / 3600
+                            val m = (totalSec % 3600) / 60
+                            val s = totalSec % 60
+                            val unlockTimeStr = String.format("%02d:%02d:%02d", h, m, s)
+                            Spacer(modifier = Modifier.height(14.dp))
+                            StatusPillBadge(
+                                label = "Unlocking in $unlockTimeStr",
+                                tone = BadgeTone.WARN,
+                                breathing = true,
+                                icon = CyberIcons.Clock
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Btn(
+                                label = "Cancel Unlock",
+                                icon = CyberIcons.Close,
+                                onClick = { repo.cancelFocusUnlock() },
+                                kind = BtnKind.GHOST
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Btn(
+                                label = "End Focus Early",
+                                icon = CyberIcons.Stop,
+                                onClick = { repo.requestEndQuickFocus() },
+                                kind = BtnKind.SECONDARY
+                            )
+                        }
                     }
                 }
             } else {
@@ -553,23 +578,54 @@ fun FocusScreen(
                                         )
                                     }
 
+                                    val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
+                                    val hasSchedPending = schedPendingUntil > 0L
+                                    val schedRemMs = (schedPendingUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+                                    val action = focus.pendingScheduleActions[s.id] ?: "delete"
+
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(
-                                            onClick = { repo.deleteSchedule(s.id) },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = CyberIcons.Delete,
-                                                contentDescription = "Delete",
-                                                tint = NordicColors.AlertMuted,
-                                                modifier = Modifier.size(16.dp)
+                                        if (hasSchedPending) {
+                                            val totalSec = (schedRemMs / 1000).coerceAtLeast(0)
+                                            val h = totalSec / 3600
+                                            val m = (totalSec % 3600) / 60
+                                            val sec = totalSec % 60
+                                            val timeStr = String.format("%02d:%02d:%02d", h, m, sec)
+                                            val actionLabel = if (action == "delete") "Deleting" else "Disabling"
+                                            StatusPillBadge(
+                                                label = "$actionLabel $timeStr",
+                                                tone = BadgeTone.WARN,
+                                                small = true
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            IconButton(
+                                                onClick = { repo.cancelScheduleUnlock(s.id) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = CyberIcons.Close,
+                                                    contentDescription = "Abort",
+                                                    tint = NordicColors.AlertMuted,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else {
+                                            IconButton(
+                                                onClick = { repo.requestDeleteSchedule(s.id) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = CyberIcons.Delete,
+                                                    contentDescription = "Delete",
+                                                    tint = NordicColors.AlertMuted,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            NordicSwitch(
+                                                checked = s.enabled,
+                                                onCheckedChange = { repo.requestToggleScheduleEnabled(s.id, it) }
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        NordicSwitch(
-                                            checked = s.enabled,
-                                            onCheckedChange = { repo.toggleScheduleEnabled(s.id, it) }
-                                        )
                                     }
                                 }
                             }
@@ -691,6 +747,39 @@ fun FocusScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                // 3-Tab Filter Chips: User Apps | System Apps | All Apps
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("User Apps", "System Apps", "All Apps").forEachIndexed { idx, title ->
+                        val selected = appFilterTab == idx
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                .border(
+                                    1.dp,
+                                    if (selected) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { appFilterTab = idx }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = title,
+                                color = if (selected) Color.White else NordicColors.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 // Search box
                 Box(
                     modifier = Modifier
@@ -715,16 +804,20 @@ fun FocusScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                val filteredApps = remember(apps, appSearchQuery, focus.allowedApps) {
+                val filteredApps = remember(apps, appSearchQuery, focus.allowedApps, appFilterTab) {
                     val q = appSearchQuery.trim().lowercase()
-                    val userApps = apps.filter { !it.isSystem }
-                    userApps
+                    val baseList = when (appFilterTab) {
+                        0 -> apps.filter { !it.isSystem }
+                        1 -> apps.filter { it.isSystem }
+                        else -> apps
+                    }
+                    baseList
                         .filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
                         .sortedWith(
                             compareByDescending<com.blocker.data.AppItem> { focus.allowedApps.contains(it.packageName) }
                                 .thenBy { it.label.lowercase() }
                         )
-                        .take(15)
+                        .take(30)
                 }
 
                 if (filteredApps.isEmpty()) {
@@ -749,12 +842,30 @@ fun FocusScreen(
                                 ) {
                                     AppIconView(drawable = app.icon, modifier = Modifier.size(32.dp))
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = app.label,
-                                        color = NordicColors.TextPrimary,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = app.label,
+                                                color = NordicColors.TextPrimary,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (app.isSystem) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                StatusPillBadge(
+                                                    label = "System",
+                                                    tone = BadgeTone.ACCENT,
+                                                    small = true
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = app.packageName,
+                                            color = NordicColors.TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                                 NordicSwitch(
                                     checked = isAllowed,

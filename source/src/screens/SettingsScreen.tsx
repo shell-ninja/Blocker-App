@@ -244,7 +244,7 @@ export default function SettingsScreen() {
         <Sub>
           {p.perms?.isDeviceOwner
             ? 'Hardware-level device ownership is active and tamper-proof.'
-            : 'For advanced hardware-level anti-tamper protection, set Device Owner via ADB: adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver'}
+            : 'For advanced hardware-level anti-tamper protection, set Device Owner via ADB: adb shell dpm set-device-owner com.blocker/.BlockerDeviceAdminReceiver'}
         </Sub>
         <LockBar lockKey="device_owner" />
 

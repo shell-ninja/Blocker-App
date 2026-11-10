@@ -239,7 +239,7 @@ fun OnboardingScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 1. Device Administrator (Direct system redirect to PrachirDeviceAdminReceiver)
+                // 1. Device Administrator (Direct system redirect to BlockerDeviceAdminReceiver)
                 PermissionItemCard(
                     title = "Device admin",
                     icon = CyberIcons.ShieldCheck,

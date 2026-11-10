@@ -24,6 +24,7 @@ object OverlayHudManager {
     private var hudContainer: FrameLayout? = null
     private var hudPill: LinearLayout? = null
     private var hudText: TextView? = null
+    private var hudReasonText: TextView? = null
     private var hudParams: WindowManager.LayoutParams? = null
     private var isAttached = false
 
@@ -84,17 +85,33 @@ object OverlayHudManager {
             }
         }
 
+        val textCol = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
         val messageTv = TextView(context).apply {
             text = ""
             setTextColor(0xFFF5F3FF.toInt()) // Crisp Pale Lavender Off-White
-            textSize = 14f
+            textSize = 13.5f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 2
         }
 
+        val reasonTv = TextView(context).apply {
+            text = ""
+            setTextColor(0xFFA78BFA.toInt()) // Soft Lavender-Purple
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT
+            visibility = View.GONE
+            setPadding(0, dp(2), 0, 0)
+        }
+
+        textCol.addView(messageTv)
+        textCol.addView(reasonTv)
+
         pillLayout.addView(iconIv)
-        pillLayout.addView(messageTv)
+        pillLayout.addView(textCol)
 
         val pillParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -119,6 +136,7 @@ object OverlayHudManager {
         hudContainer = container
         hudPill = pillLayout
         hudText = messageTv
+        hudReasonText = reasonTv
         hudParams = wmParams
 
         // Pre-attach the HUD view to WindowManager in advance with View.GONE!
@@ -130,7 +148,12 @@ object OverlayHudManager {
         } catch (_: Throwable) {}
     }
 
-    fun show(service: AccessibilityService, message: CharSequence, reasonId: Int = 0) {
+    fun show(
+        service: AccessibilityService,
+        message: CharSequence,
+        reasonId: Int = 0,
+        blockReason: BlockReason? = null
+    ) {
         if (reasonId > 0 && !NativeBlockerBridge.checkHudRateLimit(reasonId)) {
             return
         }
@@ -143,10 +166,20 @@ object OverlayHudManager {
             val container = hudContainer ?: return@Runnable
             val pill = hudPill ?: return@Runnable
             val tv = hudText ?: return@Runnable
+            val reasonTv = hudReasonText
             val params = hudParams ?: return@Runnable
             val wm = windowManager ?: (service.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@Runnable
 
             tv.text = message
+            if (blockReason != null) {
+                val isBn = BlockerStore.popupLanguage(service) == "bn"
+                reasonTv?.apply {
+                    text = blockReason.toHudText(isBn)
+                    visibility = View.VISIBLE
+                }
+            } else {
+                reasonTv?.visibility = View.GONE
+            }
 
             if (!isAttached || container.parent == null || !container.isAttachedToWindow) {
                 runCatching {
@@ -208,6 +241,7 @@ object OverlayHudManager {
             hudContainer = null
             hudPill = null
             hudText = null
+            hudReasonText = null
             hudParams = null
             windowManager = null
         }

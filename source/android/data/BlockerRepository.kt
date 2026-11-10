@@ -21,7 +21,6 @@ import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
 import com.blocker.FocusSchedule
 import com.blocker.MainActivity
-import com.blocker.MyDeviceAdminReceiver
 import com.blocker.SecureTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +36,8 @@ data class ProtectionState(
     val isActive: Boolean = false,
     val isShieldActive: Boolean = true,
     val preventPowerOff: Boolean = false,
+    val powerShieldCooldownUntil: Long = 0L,
+    val powerShieldCooldownRemainingMs: Long = 0L,
     val delayDays: Int = 1,
     val pendingUntil: Long = 0L,
     val guardOpenUntil: Long = 0L,
@@ -62,7 +63,11 @@ data class FocusState(
     val focusUntil: Long = 0L,
     val remainingMs: Long = 0L,
     val schedules: List<FocusSchedule> = emptyList(),
-    val allowedApps: Set<String> = emptySet()
+    val allowedApps: Set<String> = emptySet(),
+    val pendingUnlockUntil: Long = 0L,
+    val pendingUnlockRemainingMs: Long = 0L,
+    val pendingScheduleUnlocks: Map<String, Long> = emptyMap(),
+    val pendingScheduleActions: Map<String, String> = emptyMap()
 )
 
 data class StudyState(
@@ -106,7 +111,8 @@ data class StatsState(
     val tamperCount: Int = 0,
     val nsfwCount: Int = 0,
     val reelsCount: Int = 0,
-    val appBlockCount: Int = 0
+    val appBlockCount: Int = 0,
+    val dailyHistory: List<BlockerStore.DailyBlockPoint> = emptyList()
 )
 
 class BlockerRepository(private val context: Context) {
@@ -220,10 +226,22 @@ class BlockerRepository(private val context: Context) {
         val autoPause = BlockerStore.isAutoPauseBanking(appContext)
         val reels = BlockerStore.granularToggle(appContext, "block_facebook_reels")
 
+        val now = SecureTime.now(appContext)
+        val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
+        val pCooldownRem = (pCooldownUntil - now).coerceAtLeast(0L)
+        if (pCooldownUntil > 0L && now >= pCooldownUntil) {
+            BlockerStore.prefs(appContext).edit()
+                .putBoolean("prevent_power_off", false)
+                .remove("pending_power_off_cooldown")
+                .apply()
+        }
+
         _protectionState.value = ProtectionState(
             isActive = active,
             isShieldActive = shield,
             preventPowerOff = power,
+            powerShieldCooldownUntil = pCooldownUntil,
+            powerShieldCooldownRemainingMs = pCooldownRem,
             delayDays = delayDays,
             pendingUntil = pending,
             guardOpenUntil = open,
@@ -245,10 +263,8 @@ class BlockerRepository(private val context: Context) {
 
         // Device Admin
         val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-        val prachirAdmin = ComponentName(appContext, com.blocker.PrachirDeviceAdminReceiver::class.java)
         val blockerAdmin = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
-        val myAdmin = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
-        val adm = dpm?.isAdminActive(prachirAdmin) == true || dpm?.isAdminActive(blockerAdmin) == true || dpm?.isAdminActive(myAdmin) == true
+        val adm = dpm?.isAdminActive(blockerAdmin) == true
 
         // Usage Access
         val appOps = appContext.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
@@ -272,18 +288,63 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun refreshFocusAndStudy() {
+        val now = SecureTime.now(appContext)
         val fActive = BlockerStore.focusActive(appContext)
         val fUntil = BlockerStore.focusUntil(appContext)
         val fRem = BlockerStore.focusRemainingMs(appContext)
         val scheds = BlockerStore.schedules(appContext)
         val allowed = BlockerStore.focusApps(appContext)
 
+        val fUnlockUntil = BlockerStore.pendingFocusUnlockUntil(appContext)
+        val fUnlockRem = (fUnlockUntil - now).coerceAtLeast(0L)
+        if (fUnlockUntil > 0L && now >= fUnlockUntil) {
+            BlockerStore.prefs(appContext).edit()
+                .putLong("focus_until", 0L)
+                .remove("pending_focus_unlock")
+                .apply()
+        }
+
+        val allPrefs = BlockerStore.prefs(appContext).all
+        val schedUnlocks = mutableMapOf<String, Long>()
+        val schedActions = mutableMapOf<String, String>()
+        for ((k, v) in allPrefs) {
+            if (k.startsWith("pending_sched_unlock_")) {
+                val schedId = k.removePrefix("pending_sched_unlock_")
+                val target = (v as? Number)?.toLong() ?: continue
+                if (target > 0L && now >= target) {
+                    val action = allPrefs["pending_sched_action_$schedId"] as? String ?: "delete"
+                    val currentScheds = BlockerStore.schedules(appContext).toMutableList()
+                    if (action == "delete") {
+                        currentScheds.removeAll { it.id == schedId }
+                    } else if (action == "disable") {
+                        val idx = currentScheds.indexOfFirst { it.id == schedId }
+                        if (idx >= 0) {
+                            currentScheds[idx] = currentScheds[idx].copy(enabled = false)
+                        }
+                    }
+                    BlockerStore.putSchedules(appContext, currentScheds)
+                    BlockerStore.prefs(appContext).edit()
+                        .remove(k)
+                        .remove("pending_sched_action_$schedId")
+                        .apply()
+                } else if (target > 0L) {
+                    schedUnlocks[schedId] = target
+                    val action = allPrefs["pending_sched_action_$schedId"] as? String ?: "delete"
+                    schedActions[schedId] = action
+                }
+            }
+        }
+
         _focusState.value = FocusState(
             active = fActive,
             focusUntil = fUntil,
             remainingMs = fRem,
             schedules = scheds,
-            allowedApps = allowed
+            allowedApps = allowed,
+            pendingUnlockUntil = fUnlockUntil,
+            pendingUnlockRemainingMs = fUnlockRem,
+            pendingScheduleUnlocks = schedUnlocks,
+            pendingScheduleActions = schedActions
         )
 
         val sActive = BlockerStore.studyActive(appContext)
@@ -324,7 +385,8 @@ class BlockerRepository(private val context: Context) {
             tamperCount = BlockerStore.stat(appContext, "tamper"),
             nsfwCount = BlockerStore.stat(appContext, "nsfw"),
             reelsCount = BlockerStore.stat(appContext, "reels"),
-            appBlockCount = BlockerStore.stat(appContext, "app_block")
+            appBlockCount = BlockerStore.stat(appContext, "app_block"),
+            dailyHistory = BlockerStore.get7DayBlockStats(appContext)
         )
     }
 
@@ -399,12 +461,13 @@ class BlockerRepository(private val context: Context) {
                 _studyState.value = _studyState.value.copy(remainingMs = rem)
             }
         }
-        if (_focusState.value.active) {
+        if (_focusState.value.active || _focusState.value.pendingUnlockUntil > 0L || _focusState.value.pendingScheduleUnlocks.isNotEmpty()) {
             val rem = BlockerStore.focusRemainingMs(appContext)
             _focusState.value = _focusState.value.copy(remainingMs = rem)
+            refreshFocusAndStudy()
         }
         val prot = _protectionState.value
-        if (prot.pendingUntil > 0L || prot.guardOpenUntil > 0L) {
+        if (prot.pendingUntil > 0L || prot.guardOpenUntil > 0L || prot.powerShieldCooldownUntil > 0L) {
             refreshProtection()
         }
     }
@@ -452,10 +515,8 @@ class BlockerRepository(private val context: Context) {
             // Programmatically deactivate Device Admin so user can uninstall freely
             val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
             if (dpm != null) {
-                val admin1 = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
-                val admin2 = ComponentName(appContext, MyDeviceAdminReceiver::class.java)
-                runCatching { dpm.removeActiveAdmin(admin1) }
-                runCatching { dpm.removeActiveAdmin(admin2) }
+                val admin = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
+                runCatching { dpm.removeActiveAdmin(admin) }
             }
             p.edit()
                 .putBoolean("active", false)
@@ -548,7 +609,27 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun setPreventPowerOff(enable: Boolean) {
-        BlockerStore.setPreventPowerOff(appContext, enable)
+        val now = SecureTime.now(appContext)
+        if (enable) {
+            BlockerStore.setPreventPowerOff(appContext, true)
+            BlockerStore.cancelPowerOffCooldown(appContext)
+            refreshProtection()
+        } else {
+            val cooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
+            if (cooldownUntil > 0L && now >= cooldownUntil) {
+                BlockerStore.setPreventPowerOff(appContext, false)
+                BlockerStore.cancelPowerOffCooldown(appContext)
+                refreshProtection()
+            } else {
+                val cooldownDuration = if (BlockerStore.isTimerDebug()) 60_000L else 2L * 60L * 60L * 1000L
+                BlockerStore.setPowerOffCooldown(appContext, now + cooldownDuration)
+                refreshProtection()
+            }
+        }
+    }
+
+    fun cancelPowerOffCooldown() {
+        BlockerStore.cancelPowerOffCooldown(appContext)
         refreshProtection()
     }
 
@@ -715,11 +796,36 @@ class BlockerRepository(private val context: Context) {
         val now = SecureTime.now(appContext)
         val until = now + minutes * 60_000L
         BlockerStore.prefs(appContext).edit().putLong("focus_until", until).apply()
+        BlockerStore.cancelPendingFocusUnlock(appContext)
         refreshFocusAndStudy()
     }
 
     fun endQuickFocus() {
         BlockerStore.prefs(appContext).edit().putLong("focus_until", 0L).apply()
+        BlockerStore.cancelPendingFocusUnlock(appContext)
+        refreshFocusAndStudy()
+    }
+
+    fun requestEndQuickFocus() {
+        val now = SecureTime.now(appContext)
+        val fActive = BlockerStore.focusActive(appContext)
+        val protActive = BlockerStore.active(appContext)
+        if (fActive || protActive) {
+            val pending = BlockerStore.pendingFocusUnlockUntil(appContext)
+            if (pending > 0L && now >= pending) {
+                endQuickFocus()
+            } else if (pending == 0L) {
+                val delayMs = BlockerStore.delayMs(appContext)
+                BlockerStore.setPendingFocusUnlock(appContext, now + delayMs)
+                refreshFocusAndStudy()
+            }
+        } else {
+            endQuickFocus()
+        }
+    }
+
+    fun cancelFocusUnlock() {
+        BlockerStore.cancelPendingFocusUnlock(appContext)
         refreshFocusAndStudy()
     }
 
@@ -758,9 +864,59 @@ class BlockerRepository(private val context: Context) {
         saveSchedules(current)
     }
 
+    fun requestToggleScheduleEnabled(id: String, enabled: Boolean) {
+        if (enabled) {
+            toggleScheduleEnabled(id, true)
+            BlockerStore.cancelScheduleUnlock(appContext, id)
+            refreshFocusAndStudy()
+        } else {
+            val now = SecureTime.now(appContext)
+            val protActive = BlockerStore.active(appContext)
+            val fActive = BlockerStore.focusActive(appContext)
+            if (protActive || fActive) {
+                val pending = BlockerStore.scheduleUnlockTarget(appContext, id)
+                if (pending > 0L && now >= pending) {
+                    toggleScheduleEnabled(id, false)
+                    BlockerStore.cancelScheduleUnlock(appContext, id)
+                    refreshFocusAndStudy()
+                } else if (pending == 0L) {
+                    val delayMs = BlockerStore.delayMs(appContext)
+                    BlockerStore.setScheduleUnlockTarget(appContext, id, now + delayMs, "disable")
+                    refreshFocusAndStudy()
+                }
+            } else {
+                toggleScheduleEnabled(id, false)
+            }
+        }
+    }
+
     fun deleteSchedule(id: String) {
         val current = _focusState.value.schedules.filter { it.id != id }
+        BlockerStore.cancelScheduleUnlock(appContext, id)
         saveSchedules(current)
+    }
+
+    fun requestDeleteSchedule(id: String) {
+        val now = SecureTime.now(appContext)
+        val protActive = BlockerStore.active(appContext)
+        val fActive = BlockerStore.focusActive(appContext)
+        if (protActive || fActive) {
+            val pending = BlockerStore.scheduleUnlockTarget(appContext, id)
+            if (pending > 0L && now >= pending) {
+                deleteSchedule(id)
+            } else if (pending == 0L) {
+                val delayMs = BlockerStore.delayMs(appContext)
+                BlockerStore.setScheduleUnlockTarget(appContext, id, now + delayMs, "delete")
+                refreshFocusAndStudy()
+            }
+        } else {
+            deleteSchedule(id)
+        }
+    }
+
+    fun cancelScheduleUnlock(id: String) {
+        BlockerStore.cancelScheduleUnlock(appContext, id)
+        refreshFocusAndStudy()
     }
 
     fun isScheduleActiveNow(s: FocusSchedule): Boolean = BlockerStore.scheduleIsActiveNow(s, appContext)
@@ -787,7 +943,7 @@ class BlockerRepository(private val context: Context) {
         MainActivity.isLaunchingExternal = true
 
         if (kind == "deviceAdmin") {
-            val adminComponent = ComponentName(context, com.blocker.PrachirDeviceAdminReceiver::class.java)
+            val adminComponent = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                 putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
                 putExtra(

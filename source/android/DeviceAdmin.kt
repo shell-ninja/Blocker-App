@@ -21,16 +21,7 @@ object DeviceOwnerHelper {
         !BlockerStore.guardOpen(context, "protection") && !BlockerStore.guardOpen(context, "shield")
 
     fun getAdminComponent(context: Context): ComponentName {
-        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-        val prachirAdmin = ComponentName(context, PrachirDeviceAdminReceiver::class.java)
-        val myAdmin = ComponentName(context, MyDeviceAdminReceiver::class.java)
-        val blockerAdmin = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
-        return when {
-            dpm?.isAdminActive(prachirAdmin) == true -> prachirAdmin
-            dpm?.isAdminActive(myAdmin) == true -> myAdmin
-            dpm?.isAdminActive(blockerAdmin) == true -> blockerAdmin
-            else -> prachirAdmin
-        }
+        return ComponentName(context, BlockerDeviceAdminReceiver::class.java)
     }
 
     fun isDeviceOwner(context: Context): Boolean {
@@ -51,35 +42,28 @@ object DeviceOwnerHelper {
         try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
             if (dpm.isDeviceOwnerApp(context.packageName)) {
-                val candidates = listOf(
-                    ComponentName(context, PrachirDeviceAdminReceiver::class.java),
-                    ComponentName(context, MyDeviceAdminReceiver::class.java),
-                    ComponentName(context, BlockerDeviceAdminReceiver::class.java)
-                )
+                val admin = getAdminComponent(context)
                 val guardOn = guardEngaged(context)
-                for (admin in candidates) {
-                    try {
-                        if (guardOn) {
-                            dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
-                        } else {
-                            dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
-                        }
-                    } catch (_: Exception) {}
-                    try {
-                        dpm.setUninstallBlocked(admin, context.packageName, guardOn)
-                    } catch (_: Exception) {}
-                    // Freeze / hide scheduled power-off packages so RTC hardware alarms cannot trigger
-                    val scheduledPowerPackages = listOf(
-                        "com.mediatek.schpwronoff",
-                        "com.coloros.oppopowermanager",
-                        "com.vivo.scheduledpower"
-                    )
-                    for (p in scheduledPowerPackages) {
-                        try {
-                            dpm.setApplicationHidden(admin, p, guardOn)
-                        } catch (_: Exception) {}
+                try {
+                    if (guardOn) {
+                        dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                    } else {
+                        dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
                     }
-                    break
+                } catch (_: Exception) {}
+                try {
+                    dpm.setUninstallBlocked(admin, context.packageName, guardOn)
+                } catch (_: Exception) {}
+                // Freeze / hide scheduled power-off packages so RTC hardware alarms cannot trigger
+                val scheduledPowerPackages = listOf(
+                    "com.mediatek.schpwronoff",
+                    "com.coloros.oppopowermanager",
+                    "com.vivo.scheduledpower"
+                )
+                for (p in scheduledPowerPackages) {
+                    try {
+                        dpm.setApplicationHidden(admin, p, guardOn)
+                    } catch (_: Exception) {}
                 }
             }
         } catch (_: Exception) {}
@@ -101,25 +85,19 @@ object DeviceOwnerHelper {
     fun clearDisallowSafeBoot(context: Context) {
         try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
-            val candidates = listOf(
-                ComponentName(context, PrachirDeviceAdminReceiver::class.java),
-                ComponentName(context, MyDeviceAdminReceiver::class.java),
-                ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+            val admin = getAdminComponent(context)
+            try {
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+            } catch (_: Exception) {}
+            val scheduledPowerPackages = listOf(
+                "com.mediatek.schpwronoff",
+                "com.coloros.oppopowermanager",
+                "com.vivo.scheduledpower"
             )
-            for (admin in candidates) {
+            for (p in scheduledPowerPackages) {
                 try {
-                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                    dpm.setApplicationHidden(admin, p, false)
                 } catch (_: Exception) {}
-                val scheduledPowerPackages = listOf(
-                    "com.mediatek.schpwronoff",
-                    "com.coloros.oppopowermanager",
-                    "com.vivo.scheduledpower"
-                )
-                for (p in scheduledPowerPackages) {
-                    try {
-                        dpm.setApplicationHidden(admin, p, false)
-                    } catch (_: Exception) {}
-                }
             }
         } catch (_: Exception) {}
     }
@@ -140,18 +118,12 @@ object DeviceOwnerHelper {
 
         // 2. Clear any additional restrictions and uninstall block
         try {
-            val candidates = listOf(
-                ComponentName(context, PrachirDeviceAdminReceiver::class.java),
-                ComponentName(context, MyDeviceAdminReceiver::class.java),
-                ComponentName(context, BlockerDeviceAdminReceiver::class.java)
-            )
-            for (admin in candidates) {
-                try {
-                    dpm.setUninstallBlocked(admin, context.packageName, false)
-                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
-                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_APPS_CONTROL)
-                } catch (_: Exception) {}
-            }
+            val admin = getAdminComponent(context)
+            try {
+                dpm.setUninstallBlocked(admin, context.packageName, false)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_APPS_CONTROL)
+            } catch (_: Exception) {}
         } catch (_: Exception) {}
 
         // 3. Clear device owner status in Android OS

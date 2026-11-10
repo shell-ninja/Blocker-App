@@ -859,7 +859,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                             formatBlockedAppBody(activePkg),
                             getFearAllahSubheading(),
                             activePkg,
-                            getAstaghfirullahButton()
+                            getAstaghfirullahButton(),
+                            BlockReason(BlockCategory.BLOCKED_APP, labelOf(activePkg))
                         )
                     }
                 }
@@ -1210,6 +1211,44 @@ class BlockerAccessibilityService : AccessibilityService() {
             "remove device admin" in t ||
             "নিষ্ক্রিয় করুন" in t || "নিষ্ক্রিয় করুন" in t ||
             ("deactivate" in t && ("admin" in t || "device" in t))
+    }
+
+    private fun isDeviceAdminListScreen(root: AccessibilityNodeInfo?, cls: String): Boolean {
+        val c = cls.lowercase()
+        val rootC = root?.className?.toString()?.lowercase().orEmpty()
+        return c.contains("deviceadminsettings") || rootC.contains("deviceadminsettings") ||
+            c.contains("adminsettings") || rootC.contains("adminsettings") ||
+            DEVICE_ADMIN_LIST_CLASSES.any { c.contains(it.lowercase()) || rootC.contains(it.lowercase()) }
+    }
+
+    private fun isDeviceAdminDetailScreen(root: AccessibilityNodeInfo?, cls: String, text: String): Boolean {
+        val c = cls.lowercase()
+        val rootC = root?.className?.toString()?.lowercase().orEmpty()
+        if (c.contains("deviceadminadd") || rootC.contains("deviceadminadd") ||
+            c.contains("deviceadmindetail") || rootC.contains("deviceadmindetail") ||
+            DEVICE_ADMIN_DETAIL_CLASSES.any { c.contains(it.lowercase()) || rootC.contains(it.lowercase()) }) {
+            return true
+        }
+        val t = text.lowercase()
+        return "deactivate this device admin" in t || "activate this device admin" in t ||
+            "activate this device administrator" in t || "deactivate this device administrator" in t ||
+            "remove active admin" in t || "deactivate admin app" in t || "uninstall app" in t
+    }
+
+    private fun isBlockerDeviceAdminDetail(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
+        val nameLower = if (appLabel.isNotBlank()) appLabel.lowercase() else "blocker"
+        val sb = StringBuilder(text.lowercase())
+        if (ev != null) {
+            for (t in ev.text) sb.append(' ').append(t)
+            ev.contentDescription?.let { sb.append(' ').append(it) }
+        }
+        if (root != null) {
+            collectText(root, sb, 0, intArrayOf(150))
+        }
+        val t = sb.toString().lowercase()
+        return matchesSelfIdentity(t) || "blocker" in t || "prachir" in t ||
+            "com.blocker" in t || "com.prachir.app" in t || "ব্লকার" in t || "প্রাচীর" in t ||
+            (nameLower.isNotEmpty() && nameLower in t)
     }
 
     private fun isLegitimatePermissionTitle(title: String): Boolean {
@@ -1635,7 +1674,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                 formatAppUsageLimitBody(pkg, limitStr),
                 getFearAllahSubheading(),
                 pkg,
-                getAstaghfirullahButton()
+                getAstaghfirullahButton(),
+                BlockReason(BlockCategory.BLOCKED_APP, labelOf(pkg))
             )
             return true
         }
@@ -2016,7 +2056,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                     formatBlockedAppBody(pkg),
                     getFearAllahSubheading(),
                     pkg,
-                    getAstaghfirullahButton()
+                    getAstaghfirullahButton(),
+                    BlockReason(BlockCategory.BLOCKED_APP, labelOf(pkg))
                 )
                 return
             }
@@ -2274,7 +2315,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                     formatBlockedAppBody(pkg),
                     getFearAllahSubheading(),
                     pkg,
-                    getAstaghfirullahButton()
+                    getAstaghfirullahButton(),
+                    BlockReason(BlockCategory.BLOCKED_APP, labelOf(pkg))
                 )
                 return
             }
@@ -2417,7 +2459,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             formatFocusModeBody(leftText()),
             if (isBangla()) "কল্যাণকর কাজে সময় ব্যয় করুন" else "Guard your time for what benefits you",
             pkg,
-            getUnderstoodButton()
+            getUnderstoodButton(),
+            BlockReason(BlockCategory.STUDY_LOCKDOWN, labelOf(pkg))
         )
         return true
     }
@@ -2505,24 +2548,37 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastCheckedUrlHash = currentHash
 
         var rule: String? = null
+        var isDomain = false
         // C++ Zero-Heap mmap engine check (sub-microsecond)
         if (NativeBlockerBridge.isEngineReady()) {
             if (NativeBlockerBridge.matchUrlFast(reusableCharBuffer, len)) {
                 rule = "Harmful URL"
+                isDomain = true
             }
         }
         if (rule == null) {
             val str = text.toString()
-            if (str.isNotBlank()) rule = matchAddress(str)
+            if (str.isNotBlank()) {
+                rule = matchAddress(str)
+                val h = hostOf(str.trim().lowercase())
+                isDomain = (h != null && (rule in domains || tlds.any { (h ?: "").endsWith(it) }))
+            }
         }
 
         if (rule != null) {
+            val host = hostOf(text.toString().trim().lowercase()) ?: rule
+            val reason = if (isDomain) {
+                BlockReason(BlockCategory.DOMAIN_URL, host)
+            } else {
+                BlockReason(BlockCategory.KEYWORD, rule)
+            }
             redirectBrowser(
                 pkg,
                 "sites",
                 getFearAllahHeading(),
                 formatBlockedUrlBody(rule),
-                getFearAllahSubheading()
+                getFearAllahSubheading(),
+                reason
             )
             return true
         }
@@ -2700,6 +2756,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun screenHit(pkg: String, kw: String) {
         quietUntil[pkg] = System.currentTimeMillis() + 600L
+        val reason = BlockReason(BlockCategory.KEYWORD, kw)
         if (pkg in BROWSER_URL_IDS) {
             BlockerStore.incr(this, "screen")
             showOverlay(
@@ -2707,7 +2764,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                 formatScreenHitBrowserBody(),
                 5000,
                 getFearAllahSubheading(),
-                getAstaghfirullahButton()
+                getAstaghfirullahButton(),
+                reason
             )
             performGlobalAction(GLOBAL_ACTION_BACK)
             main.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 80)
@@ -2719,17 +2777,25 @@ class BlockerAccessibilityService : AccessibilityService() {
             formatScreenHitOtherAppBody(pkg),
             5000,
             getFearAllahSubheading(),
-            getAstaghfirullahButton()
+            getAstaghfirullahButton(),
+            reason
         )
         performGlobalAction(GLOBAL_ACTION_HOME)
     }
 
     /** Immediately ejects the blocked browser tab and displays the opaque protection shield in 0ms. */
-    private fun redirectBrowser(pkg: String, kind: String, heading: String, body: String, subheading: String? = null) {
+    private fun redirectBrowser(
+        pkg: String,
+        kind: String,
+        heading: String,
+        body: String,
+        subheading: String? = null,
+        blockReason: BlockReason? = null
+    ) {
         lastCheckedUrlHash = 0L
         quietUntil[pkg] = System.currentTimeMillis() + 600L
         BlockerStore.incr(this, kind)
-        showOverlay(heading, body, 5000, subheading, getAstaghfirullahButton())
+        showOverlay(heading, body, 5000, subheading, getAstaghfirullahButton(), blockReason)
         performGlobalAction(GLOBAL_ACTION_BACK)
         main.postDelayed({
             performGlobalAction(GLOBAL_ACTION_BACK)
@@ -2744,10 +2810,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun isOurAdminActive(): Boolean = runCatching {
         val dpm = getSystemService(DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager ?: return false
-        val prachirAdmin = android.content.ComponentName(this, PrachirDeviceAdminReceiver::class.java)
         val blockerAdmin = android.content.ComponentName(this, BlockerDeviceAdminReceiver::class.java)
-        val myAdmin = android.content.ComponentName(this, MyDeviceAdminReceiver::class.java)
-        dpm.isAdminActive(prachirAdmin) || dpm.isAdminActive(blockerAdmin) || dpm.isAdminActive(myAdmin)
+        dpm.isAdminActive(blockerAdmin)
     }.getOrDefault(false)
 
     private fun delayTimerWindowOpen(): Boolean =
@@ -3100,16 +3164,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // Exempt legitimate Device Admin Activation screen
+        // Exempt legitimate Device Admin Activation screen and other apps' Device Admin
         val isDeviceAdminActivation = isDeviceAdminScreenOrSetup(root, rootCls, t)
         val hasActivate = "activate" in t || "turn on" in t || "সক্রিয়" in t || "সক্রিয়" in t
         if (isDeviceAdminActivation) {
-            if (isOurAdminActive() && isExplicitDeviceAdminDeactivation(root, t)) {
+            if (isOurAdminActive() && isExplicitDeviceAdminDeactivation(root, t) && isBlockerDeviceAdminDetail(root, ev, t)) {
                 autoCancelDialog(root)
                 lockOutOfSettings("Device Admin settings are locked while Protection Mode is active.")
                 return true
             }
-            return false // Legitimate device admin setup / activation! NEVER block!
+            return false // Legitimate device admin setup / activation OR other app deactivation! NEVER block!
         }
 
         // 1. Uninstall attempt (package installer or confirmation dialog)
@@ -3148,12 +3212,12 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // 3. Device Admin deactivation attempt (strictly requires our admin active and explicit deactivation action)
-        val isAdminDeactivate = isOurAdminActive() && (
+        // 3. Device Admin deactivation attempt (strictly requires our admin active, targeting Blocker, and explicit deactivation action)
+        val isAdminDeactivate = isOurAdminActive() && isBlockerDeviceAdminDetail(root, ev, t) && (
             "deactivate this device admin" in t || "deactivate this device administrator" in t ||
             "deactivate admin app" in t || "remove device admin" in t ||
             ("deactivate" in t && ("admin" in t || "device" in t) && !hasActivate)
-        ) && (isOurApp || "admin" in t)
+        )
         if (isAdminDeactivate && !isLegitimatePermissionScreen(root, t)) {
             autoCancelDialog(root)
             lockOutOfSettings("Device Admin settings are locked while Protection Mode is active.")
@@ -3607,7 +3671,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
 
         // =========================================================================
-        // VECTOR 1D: Device Administrator Smart Gate (Allow Activation, Block Deactivation)
+        // VECTOR 1D: Device Administrator Smart Gate (Allow Other Apps, Protect Blocker Only)
         // =========================================================================
         if (isSettings) {
             val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
@@ -3615,37 +3679,73 @@ class BlockerAccessibilityService : AccessibilityService() {
             val rootCls = runCatching { root?.className?.toString().orEmpty() }.getOrDefault(evCls)
             val winTitle = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
 
-            val isDeviceAdmin = isDeviceAdminScreenOrSetup(root, evCls, winTitle) ||
-                isDeviceAdminScreenOrSetup(root, rootCls, winTitle)
+            val isListScreen = isDeviceAdminListScreen(root, evCls) || isDeviceAdminListScreen(root, rootCls)
+            val isDetailScreen = isDeviceAdminDetailScreen(root, evCls, winTitle) || isDeviceAdminDetailScreen(root, rootCls, winTitle)
+            val isDeviceAdmin = isListScreen || isDetailScreen ||
+                isDeviceAdminScreenOrSetup(root, evCls, winTitle) || isDeviceAdminScreenOrSetup(root, rootCls, winTitle)
 
             if (isDeviceAdmin) {
-                // Dynamically check dpm.isAdminActive on every event:
-                if (!isOurAdminActive()) {
-                    // IF dpm.isAdminActive == false:
-                    // The user is on DeviceAdminAdd or DeviceAdminSettings to ACTIVATE Device Admin!
-                    // Return ALLOW (false) so the user can click "Activate this device admin app" without being blocked.
+                // Case 1: General "Device Admin Apps" List Screen (DeviceAdminSettings)
+                if (isListScreen && !isDetailScreen) {
+                    if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                        // Inspect ONLY the clicked node and its immediate row container
+                        val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
+                        val isBlockerRowClick = isTargetBlocker(ev, name)
+                        if (isBlockerRowClick && isOurAdminActive() && !delayTimerWindowOpen()) {
+                            TamperShieldManager.showInstantShield(this)
+                            performGlobalAction(GLOBAL_ACTION_BACK)
+                            performGlobalAction(GLOBAL_ACTION_HOME)
+                            kickToHome()
+                            BlockerStore.incr(this, "tamper")
+                            OverlayHudManager.show(this, if (isBangla()) "ডিভাইস অ্যাডমিন সুরক্ষিত" else "Device Admin Protected", 2, BlockReason(BlockCategory.TAMPER_GUARD, "Device Admin"))
+                            return true
+                        }
+                    }
+                    // Viewing, scrolling, or clicking ANY other app row in the Device Admin list is 100% ALLOWED!
                     return false
                 }
 
-                // IF dpm.isAdminActive == true:
-                // Device Admin is already active!
-                if (!delayTimerWindowOpen()) {
-                    // Block any screen matching DeviceAdminAdd / DeviceAdminSettings that mentions Prachir or "Deactivate"
-                    val isDeactAttempt = isExplicitDeviceAdminDeactivation(root, winTitle) ||
-                        "deactivate" in winTitle || "নিষ্ক্রিয়" in winTitle ||
-                        isSelfMentioned(ev) || matchesSelfIdentity(winTitle) ||
-                        evCls.contains("DeviceAdminAdd", ignoreCase = true) || rootCls.contains("DeviceAdminAdd", ignoreCase = true)
+                // Case 2: Device Admin Detail / Activation / Deactivation Screen (DeviceAdminAdd)
+                if (isDetailScreen) {
+                    val isBlockerDetail = isBlockerDeviceAdminDetail(root, ev, winTitle)
+                    if (!isBlockerDetail) {
+                        // Viewing, activating, or deactivating Device Admin for OTHER apps: ALLOW 100%!
+                        return false
+                    }
 
-                    if (isDeactAttempt) {
+                    // This detail screen belongs to Blocker:
+                    if (!isOurAdminActive()) {
+                        // User is ACTIVATING Blocker's Device Admin: ALLOW 100%!
+                        return false
+                    }
+
+                    // Blocker's Device Admin is already active, and user is viewing its detail/deactivation screen:
+                    if (!delayTimerWindowOpen()) {
                         TamperShieldManager.showInstantShield(this)
                         performGlobalAction(GLOBAL_ACTION_BACK)
                         performGlobalAction(GLOBAL_ACTION_HOME)
                         kickToHome()
                         BlockerStore.incr(this, "tamper")
-                        OverlayHudManager.show(this, if (isBangla()) "ডিভাইস অ্যাডমিন সুরক্ষিত" else "Device Admin Protected", 2)
+                        OverlayHudManager.show(this, if (isBangla()) "ডিভাইস অ্যাডমিন সুরক্ষিত" else "Device Admin Protected", 2, BlockReason(BlockCategory.TAMPER_GUARD, "Device Admin"))
                         return true
                     }
+                    return false
                 }
+
+                // Case 3: Other Device Admin Screens / Setup
+                if (!isOurAdminActive()) {
+                    return false // Always allow activation
+                }
+                if (isBlockerDeviceAdminDetail(root, ev, winTitle) && !delayTimerWindowOpen()) {
+                    TamperShieldManager.showInstantShield(this)
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    OverlayHudManager.show(this, if (isBangla()) "ডিভাইস অ্যাডমিন সুরক্ষিত" else "Device Admin Protected", 2)
+                    return true
+                }
+                return false
             }
         }
 
@@ -3692,7 +3792,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                     kickToHome()
                     BlockerStore.incr(this, "tamper")
-                    OverlayHudManager.show(this, if (isBangla()) "ব্লকার পরিবর্তন সুরক্ষিত" else "Blocker settings are protected", 2)
+                    OverlayHudManager.show(this, if (isBangla()) "ব্লকার পরিবর্তন সুরক্ষিত" else "Blocker settings are protected", 2, BlockReason(BlockCategory.TAMPER_GUARD, "App Info Protection"))
                     return true
                 }
 
@@ -3712,7 +3812,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                         performGlobalAction(GLOBAL_ACTION_HOME)
                         kickToHome()
                         BlockerStore.incr(this, "tamper")
-                        OverlayHudManager.show(this, if (isBangla()) "ব্লকার পরিবর্তন সুরক্ষিত" else "Blocker cannot be modified", 2)
+                        OverlayHudManager.show(this, if (isBangla()) "ব্লকার পরিবর্তন সুরক্ষিত" else "Blocker cannot be modified", 2, BlockReason(BlockCategory.TAMPER_GUARD, "App Info Protection"))
                         return true
                     }
                 }
@@ -3771,13 +3871,15 @@ class BlockerAccessibilityService : AccessibilityService() {
                         performGlobalAction(GLOBAL_ACTION_HOME)
                         kickToHome()
                         BlockerStore.incr(this, "tamper")
-                        OverlayHudManager.show(this, if (isBangla()) "ব্লকার আনইনস্টল সুরক্ষিত" else "Blocker uninstall is protected", 2)
+                        val reason = BlockReason(BlockCategory.TAMPER_GUARD, "Uninstall Protection")
+                        OverlayHudManager.show(this, if (isBangla()) "ব্লকার আনইনস্টল সুরক্ষিত" else "Blocker uninstall is protected", 2, reason)
                         showOverlay(
                             if (isBangla()) "আনইনস্টল সুরক্ষা" else "Uninstall Protected",
                             formatTamperCovenantBody(if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকা অবস্থায় ব্লকার আনইনস্টল করা সম্ভব নয়।" else "Blocker cannot be uninstalled while Protection Mode is active."),
                             5000,
                             getProtectionActiveSubheading(),
-                            getUnderstoodButton()
+                            getUnderstoodButton(),
+                            reason
                         )
                         return true
                     } else {
@@ -3843,8 +3945,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             lastWindowOpenUp = nowUp
             val cls = ev.className?.toString()?.lowercase().orEmpty()
             if (settingsLike && DEVICE_ADMIN_CLASS_HINTS.any { it in cls } && isOurAdminActive() && isExplicitDeviceAdminDeactivation(rootNow, "")) {
-                pollKick("Device Admin settings are locked while Protection Mode is active.")
-                return
+                if (isBlockerDeviceAdminDetail(rootNow, ev, "")) {
+                    pollKick("Device Admin settings are locked while Protection Mode is active.")
+                    return
+                }
             }
             if (isDeviceAdminScreenOrSetup(rootNow, cls, currentSettingsScreenTitle)) {
                 return // Exclude Device Admin screens! NEVER kick during setup or activation!
@@ -5267,7 +5371,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             OverlayHudManager.show(
                 this,
                 if (isBangla()) "ফেসবুক রিলস/ভিডিও ব্লক করা হয়েছে" else "Facebook Video/Reels blocked",
-                6
+                6,
+                BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Reels")
             )
             return
         }
@@ -5276,6 +5381,12 @@ class BlockerAccessibilityService : AccessibilityService() {
         lastGranularHit[pkg] = now
         // 1. Immediately send Back action
         performGlobalAction(GLOBAL_ACTION_BACK)
+        OverlayHudManager.show(
+            this,
+            if (isBangla()) "$featureName ব্লক করা হয়েছে" else "$featureName blocked",
+            6,
+            BlockReason(BlockCategory.SHORT_FORM_VIDEO, featureName)
+        )
 
         // 2. Return user safely to the app's Home feed / tab without kicking off the app
         main.postDelayed({
@@ -6567,14 +6678,15 @@ class BlockerAccessibilityService : AccessibilityService() {
         msg: String = "",
         subheading: String? = getFearAllahSubheading(),
         targetPkg: String? = null,
-        btnText: String? = null
+        btnText: String? = null,
+        blockReason: BlockReason? = null
     ) {
         val now = System.currentTimeMillis()
 
         // 1. Immediately display instant shield & overlay BEFORE triggering heavy launcher transitions!
         TamperShieldManager.showInstantShield(this)
         val btn = btnText ?: getAstaghfirullahButton()
-        showOverlay(heading, msg, 5000, subheading, btn)
+        showOverlay(heading, msg, 5000, subheading, btn, blockReason)
 
         // 2. Unconditionally kick out of the blocked app
         performGlobalAction(GLOBAL_ACTION_BACK)
@@ -6619,6 +6731,9 @@ class BlockerAccessibilityService : AccessibilityService() {
     private var preInflatedButton: Button? = null
     private var preInflatedProgressFill: View? = null
     private var preInflatedCard: LinearLayout? = null
+    private var preInflatedReasonBox: LinearLayout? = null
+    private var preInflatedReasonEn: TextView? = null
+    private var preInflatedReasonBn: TextView? = null
     private var isOverlayAttached = false
     private var isOverlayVisible = false
 
@@ -6688,6 +6803,32 @@ class BlockerAccessibilityService : AccessibilityService() {
         trackWrap.addView(progressTrack, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
         trackWrap.addView(progressFill, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
 
+        val reasonBox = LinearLayout(svc).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = GradientDrawable().apply {
+                setColor(0xFF1B1536.toInt()) // CardSurfaceSecondary
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), 0xFF4C3B87.toInt()) // TopEdgeHighlight
+            }
+            visibility = View.GONE
+        }
+
+        val reasonTvEn = TextView(svc).apply {
+            setTextColor(0xFFF5F3FF.toInt()) // Crisp Pale Lavender Off-White
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
+        val reasonTvBn = TextView(svc).apply {
+            setTextColor(0xFF9E94C4.toInt()) // Muted Lavender-Gray
+            textSize = 12f
+            setPadding(0, dp(4), 0, 0)
+        }
+
+        reasonBox.addView(reasonTvEn)
+        reasonBox.addView(reasonTvBn)
+
         val btn = Button(svc).apply {
             text = "Astaghfirullah"
             setAllCaps(false)
@@ -6717,6 +6858,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         card.addView(headingRow)
         card.addView(subheadingTv)
         card.addView(bodyTv)
+        card.addView(reasonBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(14)
+        })
         card.addView(trackWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
             bottomMargin = dp(16)
         })
@@ -6752,6 +6896,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         preInflatedButton = btn
         preInflatedProgressFill = progressFill
         preInflatedCard = card
+        preInflatedReasonBox = reasonBox
+        preInflatedReasonEn = reasonTvEn
+        preInflatedReasonBn = reasonTvBn
 
         // Pre-attach the container view to WindowManager in advance with View.GONE!
         runCatching {
@@ -6768,7 +6915,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         body: String,
         ms: Long = 4000L,
         subheading: String? = null,
-        buttonText: String = "Astaghfirullah"
+        buttonText: String = "Astaghfirullah",
+        blockReason: BlockReason? = null
     ) {
         val displayMs = ms.coerceIn(2500L, 5000L)
         val action = Runnable {
@@ -6806,6 +6954,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             preInflatedBody?.text = body
+
+            if (blockReason != null) {
+                preInflatedReasonBox?.visibility = View.VISIBLE
+                preInflatedReasonEn?.text = blockReason.toEnglish()
+                preInflatedReasonBn?.text = blockReason.toBangla()
+            } else {
+                preInflatedReasonBox?.visibility = View.GONE
+            }
+
             val resolvedButtonText = when {
                 isBangla() && (buttonText == "Astaghfirullah" || buttonText == "আস্তাগফিরুল্লাহ") -> "আস্তাগফিরুল্লাহ"
                 isBangla() && (buttonText == "Understood" || buttonText == "বুঝেছি") -> "বুঝেছি"
@@ -6815,9 +6972,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             preInflatedButton?.text = resolvedButtonText
 
             preInflatedCard?.background = GradientDrawable().apply {
-                setColor(0xFF1C1F2B.toInt())
+                setColor(0xFF110D22.toInt())
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), if (isFearAllah) 0xFFBF616A.toInt() else 0xFF2A2E3D.toInt())
+                setStroke(dp(1), if (isFearAllah) 0xFF88F43F5E.toInt() else 0xFF4C3B87.toInt())
             }
 
             if (!isOverlayAttached || container.parent == null || !container.isAttachedToWindow) {

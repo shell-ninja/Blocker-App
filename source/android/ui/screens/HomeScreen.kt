@@ -119,7 +119,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // 7-Day Protection Activity Wave Graph Card
+        // 7-Day Protection Activity Graph Card
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -135,7 +135,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Protection Activity",
+                        text = "Daily Blocked Activity",
                         color = NordicColors.TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
@@ -143,16 +143,16 @@ fun HomeScreen(
                 }
 
                 StatusPillBadge(
-                    label = "7-Day Shield",
+                    label = "Last 7 Days",
                     tone = BadgeTone.OK,
                     small = true
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            HomeDottedWaveActivityGraph(
-                activeDayIndex = 6
+            DailyBlockedActivityGraph(
+                history = stats.dailyHistory
             )
         }
 
@@ -280,50 +280,200 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Prevent Power Off Card
+        val hasPowerCooldown = protection.powerShieldCooldownUntil > 0L
+        val powerCooldownRem = (protection.powerShieldCooldownUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+        val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
+
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(NordicColors.CardSurfaceHero)
-                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = CyberIcons.Power,
-                            contentDescription = null,
-                            tint = NordicColors.AccentPrimary,
-                            modifier = Modifier.size(19.dp)
-                        )
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = CyberIcons.Power,
+                                contentDescription = null,
+                                tint = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.AccentPrimary,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Prevent Power Off",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (hasPowerCooldown && !isCooldownFinished) {
+                                    val totalSec = (powerCooldownRem / 1000).coerceAtLeast(0)
+                                    val h = totalSec / 3600
+                                    val m = (totalSec % 3600) / 60
+                                    val s = totalSec % 60
+                                    val timeStr = String.format("%02d:%02d:%02d", h, m, s)
+                                    "Cooldown: $timeStr before unlock"
+                                } else if (isCooldownFinished) {
+                                    "Cooldown complete — Tap toggle to turn off"
+                                } else {
+                                    "Blocks power menu tampering while protected"
+                                },
+                                color = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.TextSecondary,
+                                fontSize = 11.5.sp
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Prevent Power Off",
-                            color = NordicColors.TextPrimary,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Blocks power menu tampering while protected",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 11.5.sp
+                    NordicSwitch(
+                        checked = protection.preventPowerOff,
+                        onCheckedChange = { repo.setPreventPowerOff(it) }
+                    )
+                }
+
+                if (hasPowerCooldown && !isCooldownFinished) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Btn(
+                            label = "Cancel Cooldown",
+                            icon = CyberIcons.Close,
+                            onClick = { repo.cancelPowerOffCooldown() },
+                            kind = BtnKind.GHOST
                         )
                     }
                 }
-                NordicSwitch(
-                    checked = protection.preventPowerOff,
-                    onCheckedChange = { repo.setPreventPowerOff(it) }
-                )
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+fun DailyBlockedActivityGraph(
+    history: List<com.blocker.BlockerStore.DailyBlockPoint>,
+    modifier: Modifier = Modifier
+) {
+    if (history.isEmpty()) return
+
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    val maxCount = (history.maxOfOrNull { it.count } ?: 0).coerceAtLeast(1)
+
+    // Callout pill if selected
+    val selectedItem = selectedIndex?.let { history.getOrNull(it) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (selectedItem != null) {
+            Surface(
+                color = NordicColors.CardSurfaceSecondary,
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, NordicColors.AccentPrimary)
+            ) {
+                Text(
+                    text = "${selectedItem.count} blocks on ${selectedItem.dayLabel} (${selectedItem.dateIso})",
+                    color = NordicColors.TextPrimary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        } else {
+            Spacer(modifier = Modifier.height(26.dp))
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            history.forEachIndexed { index, point ->
+                val isSelected = selectedIndex == index
+                val isToday = point.isToday
+                val barFraction = if (maxCount > 0) {
+                    (point.count.toFloat() / maxCount.toFloat()).coerceIn(0.06f, 1f)
+                } else {
+                    0.06f
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable {
+                            selectedIndex = if (selectedIndex == index) null else index
+                        },
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    // Count above bar
+                    Text(
+                        text = "${point.count}",
+                        color = when {
+                            isSelected -> NordicColors.TextPrimary
+                            isToday -> NordicColors.AccentSecondary
+                            point.count > 0 -> NordicColors.TextSecondary
+                            else -> NordicColors.TextSecondary.copy(alpha = 0.5f)
+                        },
+                        fontSize = 10.sp,
+                        fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    // Vertical Bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.55f)
+                            .fillMaxHeight(barFraction * 0.72f)
+                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+                            .background(
+                                when {
+                                    isSelected -> NordicColors.TextPrimary
+                                    isToday -> NordicColors.AccentPrimary
+                                    point.count > 0 -> Color(0xFF4C3B87)
+                                    else -> Color(0xFF231B45)
+                                }
+                            )
+                            .then(
+                                if (isToday) {
+                                    Modifier.border(
+                                        1.dp,
+                                        NordicColors.AccentSecondary,
+                                        RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 3.dp, bottomEnd = 3.dp)
+                                    )
+                                } else Modifier
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Day label at bottom
+                    Text(
+                        text = if (isToday) "Today" else point.dayLabel,
+                        color = if (isToday) NordicColors.AccentPrimary else NordicColors.TextSecondary,
+                        fontSize = 10.5.sp,
+                        fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
     }
 }

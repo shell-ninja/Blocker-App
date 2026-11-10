@@ -343,6 +343,42 @@ object BlockerStore {
         updateIntegrityHmac(c)
     }
 
+    fun powerOffCooldownUntil(c: Context): Long = prefs(c).getLong("pending_power_off_cooldown", 0L)
+    fun setPowerOffCooldown(c: Context, target: Long) {
+        prefs(c).edit().putLong("pending_power_off_cooldown", target).apply()
+        updateIntegrityHmac(c)
+    }
+    fun cancelPowerOffCooldown(c: Context) {
+        prefs(c).edit().remove("pending_power_off_cooldown").apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun pendingFocusUnlockUntil(c: Context): Long = prefs(c).getLong("pending_focus_unlock", 0L)
+    fun setPendingFocusUnlock(c: Context, target: Long) {
+        prefs(c).edit().putLong("pending_focus_unlock", target).apply()
+        updateIntegrityHmac(c)
+    }
+    fun cancelPendingFocusUnlock(c: Context) {
+        prefs(c).edit().remove("pending_focus_unlock").apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun scheduleUnlockTarget(c: Context, id: String): Long = prefs(c).getLong("pending_sched_unlock_$id", 0L)
+    fun setScheduleUnlockTarget(c: Context, id: String, target: Long, action: String = "delete") {
+        prefs(c).edit()
+            .putLong("pending_sched_unlock_$id", target)
+            .putString("pending_sched_action_$id", action)
+            .apply()
+        updateIntegrityHmac(c)
+    }
+    fun cancelScheduleUnlock(c: Context, id: String) {
+        prefs(c).edit()
+            .remove("pending_sched_unlock_$id")
+            .remove("pending_sched_action_$id")
+            .apply()
+        updateIntegrityHmac(c)
+    }
+
     fun popupLanguage(c: Context): String = prefs(c).getString("popup_language", "en") ?: "en"
 
     fun setPopupLanguage(c: Context, lang: String) {
@@ -757,10 +793,62 @@ object BlockerStore {
     }
 
     private fun day() = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+    private fun dayIso() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
     fun incr(c: Context, kind: String) {
-        val k = "stat_${kind}_${day()}"
+        val d = day()
+        val dIso = dayIso()
+        val k = "stat_${kind}_$d"
+        val kTotal = "stat_daily_total_$dIso"
         val p = prefs(c)
-        p.edit().putInt(k, p.getInt(k, 0) + 1).apply()
+        val editor = p.edit()
+        editor.putInt(k, p.getInt(k, 0) + 1)
+        if (kind != "tamper") {
+            editor.putInt(kTotal, p.getInt(kTotal, 0) + 1)
+        }
+        editor.apply()
+    }
+
+    data class DailyBlockPoint(
+        val dateIso: String,
+        val dayLabel: String,
+        val count: Int,
+        val isToday: Boolean
+    )
+
+    fun get7DayBlockStats(c: Context): List<DailyBlockPoint> {
+        val p = prefs(c)
+        val result = mutableListOf<DailyBlockPoint>()
+        val isoFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val dayNameFmt = SimpleDateFormat("EEE", Locale.US)
+        val dayKeyFmt = SimpleDateFormat("yyyyMMdd", Locale.US)
+
+        val dates = mutableListOf<Calendar>()
+        for (i in 6 downTo 0) {
+            val d = Calendar.getInstance().apply {
+                timeInMillis = SecureTime.now(c)
+                add(Calendar.DAY_OF_YEAR, -i)
+            }
+            dates.add(d)
+        }
+
+        for (i in dates.indices) {
+            val d = dates[i]
+            val iso = isoFmt.format(d.time)
+            val dKey = dayKeyFmt.format(d.time)
+            val isToday = (i == dates.size - 1)
+            val label = if (isToday) "Today" else dayNameFmt.format(d.time)
+
+            var total = p.getInt("stat_daily_total_$iso", -1)
+            if (total < 0) {
+                val nsfw = p.getInt("stat_nsfw_$dKey", 0)
+                val apps = p.getInt("stat_app_block_$dKey", 0)
+                val reels = p.getInt("stat_reels_$dKey", 0)
+                total = nsfw + apps + reels
+            }
+            result.add(DailyBlockPoint(dateIso = iso, dayLabel = label, count = total.coerceAtLeast(0), isToday = isToday))
+        }
+        return result
     }
     fun stat(c: Context, kind: String): Int {
         val k = "stat_${kind}_${day()}"

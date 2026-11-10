@@ -186,29 +186,7 @@ if "BlockerAccessibilityService" not in t:
     </service>
 
     <receiver
-        android:name=".PrachirDeviceAdminReceiver"
-        android:label="@string/app_name"
-        android:exported="true"
-        android:permission="android.permission.BIND_DEVICE_ADMIN">
-        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_policies"/>
-        <intent-filter>
-            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
-        </intent-filter>
-    </receiver>
-
-    <receiver
         android:name=".BlockerDeviceAdminReceiver"
-        android:label="@string/app_name"
-        android:exported="true"
-        android:permission="android.permission.BIND_DEVICE_ADMIN">
-        <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin"/>
-        <intent-filter>
-            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
-        </intent-filter>
-    </receiver>
-
-    <receiver
-        android:name=".MyDeviceAdminReceiver"
         android:label="@string/app_name"
         android:exported="true"
         android:permission="android.permission.BIND_DEVICE_ADMIN">
@@ -330,9 +308,12 @@ if 'android:name=".MainActivity"' in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:resizeableActivity="false"', 1)
     if 'android:noHistory="true"' in t:
         t = t.replace('        android:noHistory="true"\n', '')
-if 'android:name=".PrachirDeviceAdminReceiver"' not in t:
-    prachir_rec = """    <receiver
-        android:name=".PrachirDeviceAdminReceiver"
+# Clean up duplicate/legacy DeviceAdminReceiver entries so strictly one exists
+for legacy_rec in [r"\.PrachirDeviceAdminReceiver", r"\.MyDeviceAdminReceiver"]:
+    t = re.sub(rf'\s*<receiver[^>]*android:name="{legacy_rec}"[^>]*>.*?</receiver>', '', t, flags=re.DOTALL)
+if 'android:name=".BlockerDeviceAdminReceiver"' not in t:
+    blocker_rec = """    <receiver
+        android:name=".BlockerDeviceAdminReceiver"
         android:label="@string/app_name"
         android:exported="true"
         android:permission="android.permission.BIND_DEVICE_ADMIN">
@@ -342,7 +323,7 @@ if 'android:name=".PrachirDeviceAdminReceiver"' not in t:
         </intent-filter>
     </receiver>
 """
-    t = t.replace("</application>", prachir_rec + "</application>", 1)
+    t = t.replace("</application>", blocker_rec + "</application>", 1)
 write(mf, t)
 
 # 5. app/build.gradle

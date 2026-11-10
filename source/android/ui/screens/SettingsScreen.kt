@@ -38,6 +38,14 @@ import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 
+private fun formatCountdown(ms: Long): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0)
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return String.format("%02d:%02d:%02d", h, m, s)
+}
+
 @Composable
 fun SettingsScreen(
     repo: BlockerRepository,
@@ -347,47 +355,74 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Prevent Power Off
+        val hasPowerCooldown = protection.powerShieldCooldownUntil > 0L
+        val powerCooldownRem = (protection.powerShieldCooldownUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+        val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
+
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(NordicColors.CardSurfaceHero)
-                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = CyberIcons.Power,
-                            contentDescription = null,
-                            tint = NordicColors.AccentPrimary,
-                            modifier = Modifier.size(19.dp)
-                        )
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = CyberIcons.Power,
+                                contentDescription = null,
+                                tint = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.AccentPrimary,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Prevent Power Off",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (hasPowerCooldown && !isCooldownFinished) {
+                                    "Cooldown active: ${formatCountdown(powerCooldownRem)} remaining before Power Shield can be disabled"
+                                } else if (isCooldownFinished) {
+                                    "Cooldown complete — Tap toggle to turn off"
+                                } else {
+                                    "Blocks device power down attempts while protected"
+                                },
+                                color = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.TextSecondary,
+                                fontSize = 11.5.sp
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Prevent Power Off",
-                            color = NordicColors.TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Blocks device power down attempts while protected",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 11.5.sp
+                    NordicSwitch(
+                        checked = protection.preventPowerOff,
+                        onCheckedChange = { repo.setPreventPowerOff(it) }
+                    )
+                }
+
+                if (hasPowerCooldown && !isCooldownFinished) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Btn(
+                            label = "Cancel Cooldown",
+                            icon = CyberIcons.Close,
+                            onClick = { repo.cancelPowerOffCooldown() },
+                            kind = BtnKind.GHOST
                         )
                     }
                 }
-                NordicSwitch(
-                    checked = protection.preventPowerOff,
-                    onCheckedChange = { repo.setPreventPowerOff(it) }
-                )
             }
         }
 
