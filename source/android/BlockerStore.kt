@@ -260,7 +260,7 @@ object BlockerStore {
     fun autoClampStuckTimers(c: Context) {
         if (!isTimerDebug()) return
         val p = prefs(c)
-        val now = SecureTime.now(c)
+        val now = System.currentTimeMillis()
         var changed = false
         val editor = p.edit()
         val all = p.all
@@ -268,7 +268,9 @@ object BlockerStore {
             if (key.startsWith("pending_") || key.contains("unlock") || key.contains("cooldown")) {
                 val target = (value as? Number)?.toLong() ?: continue
                 val remaining = target - now
-                if (remaining > 60_000L) {
+                // ONLY clamp old stuck 24h/cooldown timers (remaining > 65 seconds)!
+                // NEVER clamp or overwrite an active countdown timer that is <= 60 seconds!
+                if (remaining > 65_000L) {
                     editor.putLong(key, now + 60_000L)
                     changed = true
                 }
@@ -281,8 +283,7 @@ object BlockerStore {
     }
 
     fun checkAndApplyExpiredDelayTimers(c: Context) {
-        autoClampStuckTimers(c)
-        val now = SecureTime.now(c)
+        val now = System.currentTimeMillis()
         val p = prefs(c)
         var changed = false
         val editor = p.edit()
@@ -345,6 +346,8 @@ object BlockerStore {
 
     fun powerOffCooldownUntil(c: Context): Long = prefs(c).getLong("pending_power_off_cooldown", 0L)
     fun setPowerOffCooldown(c: Context, target: Long) {
+        val current = prefs(c).getLong("pending_power_off_cooldown", 0L)
+        if (current > 0L && current > System.currentTimeMillis()) return
         prefs(c).edit().putLong("pending_power_off_cooldown", target).apply()
         updateIntegrityHmac(c)
     }
@@ -355,6 +358,8 @@ object BlockerStore {
 
     fun pendingFocusUnlockUntil(c: Context): Long = prefs(c).getLong("pending_focus_unlock", 0L)
     fun setPendingFocusUnlock(c: Context, target: Long) {
+        val current = prefs(c).getLong("pending_focus_unlock", 0L)
+        if (current > 0L && current > System.currentTimeMillis()) return
         prefs(c).edit().putLong("pending_focus_unlock", target).apply()
         updateIntegrityHmac(c)
     }
@@ -365,6 +370,8 @@ object BlockerStore {
 
     fun scheduleUnlockTarget(c: Context, id: String): Long = prefs(c).getLong("pending_sched_unlock_$id", 0L)
     fun setScheduleUnlockTarget(c: Context, id: String, target: Long, action: String = "delete") {
+        val current = prefs(c).getLong("pending_sched_unlock_$id", 0L)
+        if (current > 0L && current > System.currentTimeMillis()) return
         prefs(c).edit()
             .putLong("pending_sched_unlock_$id", target)
             .putString("pending_sched_action_$id", action)
@@ -376,6 +383,21 @@ object BlockerStore {
             .remove("pending_sched_unlock_$id")
             .remove("pending_sched_action_$id")
             .apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun settingUnlockTarget(c: Context, key: String): Long =
+        prefs(c).getLong("pending_setting_$key", 0L)
+
+    fun setSettingUnlockTarget(c: Context, key: String, target: Long) {
+        val current = prefs(c).getLong("pending_setting_$key", 0L)
+        if (current > 0L && current > System.currentTimeMillis()) return
+        prefs(c).edit().putLong("pending_setting_$key", target).apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun cancelSettingUnlockTarget(c: Context, key: String) {
+        prefs(c).edit().remove("pending_setting_$key").apply()
         updateIntegrityHmac(c)
     }
 

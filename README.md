@@ -32,119 +32,26 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## What's New in v1.0.6.7
 
-- **Silent, In-App Distraction Ejection (No Popups, No Launcher Ejection):**
-  - **No Warning Popups:** Warning popup overlays are completely suppressed when blocking Facebook Reels, Instagram Reels, Instagram Explore/Search, and YouTube Shorts.
-  - **Throw Out of Page (Stay In-App):** Users are thrown back to the app's Home feed directly via instant back actions and automated Home tab redirection (`findHomeTabNode`, `findInstaHomeTabNode`, `findYtHomeTabNode`). Users are never kicked out to the Android phone launcher.
-
-- **Official Blocker App Icon Restored:**
-  - Brought back the official high-resolution Blocker shield logo icon across the entire app, replacing generic SVGs.
-  - Featured in the app Header squircle well, startup splash screen, error recovery screen, onboarding welcome header, and Settings footer branding.
-
-- **Buttery Smooth 60/120fps Performance & Maximum Lightness:**
-  - **Optimized Facebook Node Inspection:** Fast-path Home feed check reduces node traversal from 3,000 nodes down to 200 characters on newsfeed scroll, eliminating all scroll stutter.
-  - **Zero IPC / Binder Memory Leaks:** Recycled accessibility Binder proxy nodes in `finally` blocks across all granular checks, preventing IPC leaks and app lag.
-  - **Instant Tab Switching (0ms Input Lag):** Tab transitions now switch instantly upon tap with a 110ms hardware-accelerated entry animation.
-  - **Cleaned JS Thread:** Inactive continuous animation loops removed from `GlowCard`, and background SVG canvas memoized with `React.memo`.
-
-- **Comprehensive Cyber Design System Overhaul:**
-  - **Deep Obsidian Canvas & Dot-Matrix Glow:** Pure deep dark canvas (`#070913`) layered with a subtle violet/indigo dot-matrix background pattern.
-  - **Elevated 3D Bento Card Layout:** Dark slate-navy squircle card surfaces (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights and emerald-mint / electric-purple status accents.
-  - **Hardware-Accelerated Motion:**
-    - Ambient breathing glow pulses on active protection pill badges and primary hero shield icons.
-    - Live rolling numeric counter roll-up animations whenever stat card metrics change or load.
-    - Fluid spring-animated toggle switches with smooth state morphing.
-    - Tactile press physics (0.96x spring scale-down on press with crisp rebound) on interactive cards, buttons, and navigation tabs.
-  - **High-Contrast Typography:** Crisp bold white headings and bold tabular numerals paired with cool muted slate subtitles (`#8B97B0`).
-
-- **Facebook Reels & Video Precision Guard (Scroll vs. Click Separation):**
-  - **Newsfeed Scrolling Preserved:** Resolved issue where users were kicked out of Facebook simply when scrolling past horizontal "Reels and short videos" preview carousels or inline video posts on their Home newsfeed.
-  - **Cleaned Feed Identifiers (`FB_NEWSFEED_IDS`):** Purged generic toolbar IDs (`tab_bar`, `search_button`, `messages_jewel`) that previously caused dedicated Reels tabs to be falsely classified as Home newsfeed.
-  - **Physical Click-Only Interception (`isFacebookVideoOrReelClick`):** Strictly targets physical user clicks (`TYPE_VIEW_CLICKED`) on Reel cards, play buttons, or Reels navigation tabs. Passive scroll events are completely ignored.
-  - **Facebook Stories Whitelisting:** Comprehensive story detection (`isFacebookStory`, `isFacebookStoryClick`, `FB_STORY_IDS`) ensures personal Stories are strictly whitelisted and never blocked.
-
-- **Focus Mode Daily Schedule Duration Indicator:**
-  - Added duration badge preview ("Duration: Xh Ym") directly on each daily schedule card in Focus Mode so users instantly see how long protection will remain active.
-
-- **UI Alignment & Polish:**
-  - Perfectly aligned bottom navigation bar fonts and icons (`CyberBottomBar`).
-  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link now align cleanly in a unified row.
-
-- **Startup Resilience & Crash Immunity:**
-  - Eliminated infinite re-render loops and startup blank screens.
-  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes or blank screens.
-
-- **Maximum Anti-Tamper & Anti-Uninstall Lockdown (Airtight Fortress):**
-  - Permanently removed all accessibility pausing, bypasses, or temporary exemption loopholes. Blocker operates with strict, non-negotiable 24/7 enforcement.
-  - Zero-ms launcher interceptor against long-press uninstallation shortcuts.
-  - Instant App Info and device admin deactivation screen deflection.
-  - Continuous package installer watchdog and permanent Device Owner uninstallation lockdown.
-
----
-
-## What's New in v1.0.6.5
-
-- **Bilingual Blocker Popup Overlays (English & বাংলা):**
-  - **Setup Prompt (Step 0):** On initial app launch, before configuring permissions or defaults, the user is asked whether they want blocker popup messages in English or বাংলা.
-  - **Authentic Islamic Translations in Bengali:** Blocker popup overlays display reverent Quranic verses and Hadiths in authentic Bengali:
-    - Main Alert: `"আল্লাহকে ভয় করুন"` (*Fear Allah*)
-    - Subheading: `"আপনার আখিরাত ধ্বংস করবেন না"` (*Do not destroy your Akhirah*)
-    - Action Buttons: `"আস্তাগফিরুল্লাহ"` (*Astaghfirullah*) / `"বুঝেছি"` (*Understood*) / `"পড়াশোনায় ফিরুন"` (*Back to Study*)
-    - Surah Al-Alaq (96:14), Surah Al-Isra (17:36), Surah An-Nur (24:30), Surah An-Nisa (4:1), Surah Al-Isra (17:34), and Sahih al-Bukhari (6412).
-  - **Dedicated Settings Card:** Users can change their popup language at any time in Settings.
-  - **Scope Restriction:** Localization applies exclusively to the blocker popup overlays and warning dialogs; the main application UI and navigation remain in English.
-  - **Zero Font Overhead:** Utilizes standard Android `TextView` HarfBuzz conjunct shaping with native system fonts.
-
-- **Zero-Latency Press-and-Hold Defense (BlockerHero Philosophy):**
-  - Blocks press-and-hold (long-press) exclusively for the Blocker app icon across all Android launchers (Transsion HiOS/XOS, Samsung OneUI, Pixel, MIUI, Nova, Lawnchair, etc.) to prevent dragging to uninstall or opening App Info shortcuts.
-  - Other apps on the device remain 100% interactive (can be long-pressed, rearranged, uninstalled, or inspected normally).
-  - Normal single-tap to open Blocker works instantly without hindrance.
-  - Reduced `android:notificationTimeout` from `50ms` to `0ms` and enabled `TYPE_VIEW_LONG_CLICKED` in service configuration.
-  - Instantaneous dual `GLOBAL_ACTION_BACK` + `GLOBAL_ACTION_HOME` aborts launcher context menus in sub-millisecond execution.
-  - Intercepts clicks on "App info", "Uninstall", "Disable", "Force stop", and "Clear storage" in 0ms without debounce delay.
-
-- **Instant Zero-Latency Browser Interception (BlockerHero Benchmark):**
-  - **Pre-bundled Binary Blocklist Asset (`blocklist.bin`):** Pre-compiles all 9,355 adult domains and 59 keywords into an 81.6 KB flat binary embedded in APK assets. Extracted and memory-mapped (`mmap`) into C++ memory in 0.5ms on service start.
-  - **Stage 0 Browser Gatekeeper:** Browser URL inspection runs at line 1 of `onAccessibilityEvent` ahead of any 75ms throttles, usage logging, or settings checks.
-  - **Zero-IPC Event Source Fast Path (`ev.source`):** Directly reads the address bar node from the event source on URL updates, bypassing the expensive 15–35ms `rootInActiveWindow` Binder IPC traversal.
-  - **100% Solid Obsidian Blackout Shield (`0xFF070512`):** Covers the entire screen in pure opaque obsidian in 0ms on the current VSYNC, eliminating photon bleed and transparency leaks.
-  - **Zero-Delay Tab Ejection:** Immediate `GLOBAL_ACTION_BACK` at 0ms and a backup ejection at 80ms to eject blocked tabs instantly.
-  - **600ms Transient Cooldown:** Absorbs browser transitions without leaving subsequent adult tabs unguarded.
-
-- **Headless Native C++ Engine & Minimal Memory Footprint:**
-  - Branchless FNV-1a 64-bit binary search and flat Aho-Corasick automaton with zero heap allocations on hot path.
-  - React Native JS runtime (`reactNativeHost`) is lazily instantiated, keeping background RAM usage under 8MB on 1GB RAM devices.
-
----
-
-## What's New in v1.0.6.4
-
-- **Hardware Anti-Tamper Enforcement (`DISALLOW_SAFE_BOOT`):**
-  - Fixes an anti-tamper loophole where restricted boot modes could be leveraged to bypass accessibility services and uninstall the app.
-  - When provisioned as Device Owner (`adb shell dpm set-device-owner com.blocker/.MyDeviceAdminReceiver`), Blocker enforces `UserManager.DISALLOW_SAFE_BOOT` across startup, reboots, and service connections.
-- **Scheduled Power Off Prevention & Auto-Cancellation:**
-  - Prevents setting scheduled shutdowns (e.g. 1 minute later) to bypass locks or restart restrictions.
-  - Intercepts and blocks access to "Scheduled power on/off", "Auto power off", and "Auto restart" settings across OEM skins (Infinix XOS, MediaTek, Samsung, Xiaomi, ColorOS).
-  - Actively intercepts scheduled shutdown countdown dialogs, automatically presses "Cancel" / "Dismiss", and kicks to home to keep the phone powered on.
-  - Freezes and hides scheduled power packages via Device Owner to stop RTC hardware alarms from triggering.
-- **Prevent Power off & Restart Shield (2-Hour Cooldown):**
-  - Actively intercepts and dismisses the on-screen Power Menu (Global Actions dialog) across OEM skins (Infinix XOS, Samsung OneUI, Pixel, MIUI, ColorOS), preventing impulsive power offs and restarts.
-  - Can be toggled on immediately from Settings. Disabling requires waiting for a **2-hour delay timer** before the change can be confirmed.
-- **Deactivate Device Owner with Delay Lock Protection:**
-  - View Device Owner status directly in Settings.
-  - Deactivate Device Owner when needed, protected behind the anti-tamper countdown delay timer if master protection, shield, or any lock is active. Cleanly clears restrictions and unregisters device ownership.
-
----
-
-## What's New in v1.0.6.3
-
-- **Unconditional App & Game Kick Defense:**
-  - Fixed a bypass where rapidly launching a blocked app or game from recents or home screen could slip past due to the 700ms debounce guard. Kicking to home and back actions (`GLOBAL_ACTION_BACK` + `kickToHome()`) now run **unconditionally on 100% of detection events** with 0ms debounce.
-- **Background Process Termination:**
-  - Terminating background processes of blocked applications via `ActivityManager.killBackgroundProcesses(pkg)` immediately after kicking, preventing heavy native games (OpenGL/Vulkan/Unity) from remaining active in RAM or background.
-- **Continuous Active-Window Watchdog:**
-  - Added a 350ms continuous polling watchdog inspecting `rootInActiveWindow` and foreground packages, guaranteeing instant kicks even if a full-screen hardware-accelerated game silences accessibility event dispatches.
-- **Top-Priority Accessibility Interception:**
-  - Blocked app detection now takes immediate top priority in `onAccessibilityEvent` directly after interactive checks, avoiding any 75ms throttling or downstream view processing delays.
+- **Real-Time 1-Second Countdown Ticker & Anti-Tamper Delay Locks:**
+  - Active delay unlock timers tick down visibly every second (`00:59` → `00:58` … → `00:00`) driven by a shared, synchronized reactive state engine.
+  - Strict countdown delays are enforced across Distraction Shields, Daily Schedule modifications, Focus Mode toggle-off, and Web/Keyword blocklist deletions whenever Protection Mode or Focus Mode is armed.
+- **Device Admin Smart Allow-Gate:**
+  - Android's "Device admin apps" list screen can now be browsed and inspected freely. Users can activate and manage other administrator apps (e.g. Find My Device, Google Play Protect) without being kicked to Home.
+  - Attempting to deactivate Blocker's Device Administrator remains strictly blocked in 0ms.
+- **Exact Trigger Reporting in Popups & Floating HUD:**
+  - Overlay reminders and floating HUD banners now display the exact blocked URL (e.g. `Blocked URL: m.example.com` / `ব্লককৃত লিংক: m.example.com`) or restricted keyword phrase (`Blocked Keyword: "phrase"` / `নিষিদ্ধ কীওয়ার্ড: "phrase"`).
+- **Soft Keyboard Auto-Scroll & Input Clearance:**
+  - Configured `adjustResize` soft input mode and `BringIntoViewRequester` with IME padding on the Web & Keywords page, ensuring input fields smoothly scroll above the Android keyboard upon focus.
+- **Default Content Hardening & GitHub Privacy Encryption:**
+  - Bundled `redgifs.com` and restricted terms (`redgifs`, `futanari`, `pawg`, `erotic`) directly into the default binary filtering engine.
+  - Full end-to-end repository encryption (`encrypted-blocklist` and base64 obfuscation) guarantees that no plaintext adult URLs or keywords are exposed when viewing repository files on GitHub.
+- **Surgical Distraction Ejection & Newsfeed Protection:**
+  - Passive Facebook Newsfeed scrolling is 100% preserved. Full-screen Reels or video taps trigger an in-app Back action that returns the user straight to the Newsfeed without launcher ejections (`GLOBAL_ACTION_HOME`).
+  - Warning popups are completely silenced during short-form video blocking for a seamless, distraction-free flow.
+- **Auto-Close & Background Removal on Minimize:**
+  - Minimized app tasks invoke `finishAndRemoveTask()`, immediately clearing the app from Android Recents to prevent bypasses via the multitasking overview screen.
+- **Bilingual Islamic Reminder Dialogs:**
+  - Reverent Quranic verses and Hadiths available in authentic English and বাংলা, with dedicated language selection in Settings.
 
 ---
 

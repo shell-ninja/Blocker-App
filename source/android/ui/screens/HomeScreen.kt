@@ -32,6 +32,7 @@ fun HomeScreen(
     val protection by repo.protectionState.collectAsState()
     val perms by repo.permissionsState.collectAsState()
     val stats by repo.statsState.collectAsState()
+    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val scrollState = rememberScrollState()
 
     val isHealthy = perms.allGranted
@@ -47,6 +48,7 @@ fun HomeScreen(
             LockBar(
                 pendingUntil = protection.pendingUntil,
                 guardOpenUntil = protection.guardOpenUntil,
+                nowMillis = nowMillis,
                 onConfirm = { repo.confirmProtectionOff() },
                 onCancel = { repo.cancelProtectionRequest() },
                 modifier = Modifier.padding(bottom = 14.dp)
@@ -281,7 +283,7 @@ fun HomeScreen(
 
         // Prevent Power Off Card
         val hasPowerCooldown = protection.powerShieldCooldownUntil > 0L
-        val powerCooldownRem = (protection.powerShieldCooldownUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+        val powerCooldownRem = (protection.powerShieldCooldownUntil - nowMillis).coerceAtLeast(0L)
         val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
 
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {

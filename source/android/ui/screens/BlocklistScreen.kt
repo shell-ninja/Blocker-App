@@ -1,9 +1,12 @@
 package com.blocker.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,7 +24,10 @@ import com.blocker.NativeBlockerBridge
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BlocklistScreen(
     repo: BlockerRepository,
@@ -28,7 +35,15 @@ fun BlocklistScreen(
 ) {
     val domains by repo.blockedDomains.collectAsState()
     val keywords by repo.blockedKeywords.collectAsState()
+    val protection by repo.protectionState.collectAsState()
+    val focus by repo.focusState.collectAsState()
+    val isLocked = protection.isActive || focus.active
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+
+    val domainBringIntoView = remember { BringIntoViewRequester() }
+    val keywordBringIntoView = remember { BringIntoViewRequester() }
+    val testBringIntoView = remember { BringIntoViewRequester() }
 
     var domainInput by remember { mutableStateOf("") }
     var keywordInput by remember { mutableStateOf("") }
@@ -39,6 +54,7 @@ fun BlocklistScreen(
         modifier = modifier
             .fillMaxSize()
             .background(NordicColors.CanvasBg)
+            .imePadding()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
@@ -122,7 +138,17 @@ fun BlocklistScreen(
                     onValueChange = { domainInput = it },
                     placeholder = { Text("domain.com", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .bringIntoViewRequester(domainBringIntoView)
+                        .onFocusEvent { focusState ->
+                            if (focusState.isFocused) {
+                                coroutineScope.launch {
+                                    delay(200L)
+                                    domainBringIntoView.bringIntoView()
+                                }
+                            }
+                        },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = NordicColors.CardSurfaceHero,
@@ -171,10 +197,10 @@ fun BlocklistScreen(
                             Icon(
                                 imageVector = CyberIcons.Delete,
                                 contentDescription = null,
-                                tint = NordicColors.AlertMuted,
+                                tint = if (isLocked) NordicColors.TextSecondary.copy(alpha = 0.35f) else NordicColors.AlertMuted,
                                 modifier = Modifier
                                     .size(18.dp)
-                                    .clickable { repo.removeDomain(dom) }
+                                    .clickable(enabled = !isLocked) { repo.removeDomain(dom) }
                             )
                         }
                     }
@@ -209,7 +235,17 @@ fun BlocklistScreen(
                     onValueChange = { keywordInput = it },
                     placeholder = { Text("keyword or phrase", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .bringIntoViewRequester(keywordBringIntoView)
+                        .onFocusEvent { focusState ->
+                            if (focusState.isFocused) {
+                                coroutineScope.launch {
+                                    delay(200L)
+                                    keywordBringIntoView.bringIntoView()
+                                }
+                            }
+                        },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = NordicColors.CardSurfaceHero,
@@ -258,10 +294,10 @@ fun BlocklistScreen(
                             Icon(
                                 imageVector = CyberIcons.Delete,
                                 contentDescription = null,
-                                tint = NordicColors.AlertMuted,
+                                tint = if (isLocked) NordicColors.TextSecondary.copy(alpha = 0.35f) else NordicColors.AlertMuted,
                                 modifier = Modifier
                                     .size(18.dp)
-                                    .clickable { repo.removeKeyword(kw) }
+                                    .clickable(enabled = !isLocked) { repo.removeKeyword(kw) }
                             )
                         }
                     }
@@ -299,7 +335,17 @@ fun BlocklistScreen(
                     },
                     placeholder = { Text("https://example.com/page", color = NordicColors.TextSecondary, fontSize = 13.sp) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .bringIntoViewRequester(testBringIntoView)
+                        .onFocusEvent { focusState ->
+                            if (focusState.isFocused) {
+                                coroutineScope.launch {
+                                    delay(200L)
+                                    testBringIntoView.bringIntoView()
+                                }
+                            }
+                        },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = NordicColors.CardSurfaceHero,
@@ -358,6 +404,6 @@ fun BlocklistScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(140.dp))
     }
 }

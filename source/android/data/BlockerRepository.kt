@@ -29,6 +29,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -98,7 +101,8 @@ data class DistractionShieldState(
     val blockYtShorts: Boolean = false,
     val blockInstaReels: Boolean = false,
     val blockInstaSearch: Boolean = false,
-    val blockFbReels: Boolean = true
+    val blockFbReels: Boolean = true,
+    val pendingUnlocks: Map<String, Long> = emptyMap()
 )
 
 data class SecurityLockState(
@@ -158,6 +162,13 @@ class BlockerRepository(private val context: Context) {
 
     val updateManager = UpdateManager(appContext)
     val updateState: StateFlow<UpdateState> = updateManager.updateState
+
+    val currentTimeMillisFlow: StateFlow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            kotlinx.coroutines.delay(1000L)
+        }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), System.currentTimeMillis())
 
     init {
         BlockerStore.autoClampStuckTimers(appContext)
@@ -452,6 +463,9 @@ class BlockerRepository(private val context: Context) {
     }
 
     private fun tickCountdowns() {
+        val now = System.currentTimeMillis()
+
+        // 1. Study Mode session
         if (_studyState.value.active) {
             val rem = BlockerStore.studyRemainingMs(appContext)
             if (rem <= 0L) {
@@ -461,11 +475,59 @@ class BlockerRepository(private val context: Context) {
                 _studyState.value = _studyState.value.copy(remainingMs = rem)
             }
         }
+
+        // 2. Focus Mode session & Pending Focus Unlock
+        val fUnlockUntil = BlockerStore.pendingFocusUnlockUntil(appContext)
+        if (fUnlockUntil > 0L && now >= fUnlockUntil) {
+            endQuickFocus()
+        }
+
+        // 3. Schedules Pending Unlocks
+        val schedUnlocks = _focusState.value.pendingScheduleUnlocks
+        for ((id, target) in schedUnlocks) {
+            if (target > 0L && now >= target) {
+                val action = _focusState.value.pendingScheduleActions[id] ?: "delete"
+                if (action == "delete") {
+                    deleteSchedule(id)
+                } else {
+                    toggleScheduleEnabled(id, false)
+                    BlockerStore.cancelScheduleUnlock(appContext, id)
+                    refreshFocusAndStudy()
+                }
+            }
+        }
+
         if (_focusState.value.active || _focusState.value.pendingUnlockUntil > 0L || _focusState.value.pendingScheduleUnlocks.isNotEmpty()) {
             val rem = BlockerStore.focusRemainingMs(appContext)
             _focusState.value = _focusState.value.copy(remainingMs = rem)
             refreshFocusAndStudy()
         }
+
+        // 4. Master Protection Pending Unlock
+        val p = BlockerStore.prefs(appContext)
+        val pendingProt = p.getLong("pending_protection", 0L)
+        if (pendingProt > 0L && now >= pendingProt) {
+            confirmProtectionOff()
+        }
+
+        // 5. Power Shield Cooldown
+        val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
+        if (pCooldownUntil > 0L && now >= pCooldownUntil) {
+            BlockerStore.setPreventPowerOff(appContext, false)
+            BlockerStore.cancelPowerOffCooldown(appContext)
+            refreshProtection()
+        }
+
+        // 6. Distraction Shield Pending Unlocks
+        for (key in listOf("block_yt_shorts", "block_insta_reels", "block_insta_search", "block_fb_reels")) {
+            val target = BlockerStore.settingUnlockTarget(appContext, key)
+            if (target > 0L && now >= target) {
+                BlockerStore.cancelSettingUnlockTarget(appContext, key)
+                BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
+                refreshDistractionShield()
+            }
+        }
+
         val prot = _protectionState.value
         if (prot.pendingUntil > 0L || prot.guardOpenUntil > 0L || prot.powerShieldCooldownUntil > 0L) {
             refreshProtection()
@@ -476,7 +538,7 @@ class BlockerRepository(private val context: Context) {
 
     fun toggleProtection(enable: Boolean) {
         val p = BlockerStore.prefs(appContext)
-        val now = SecureTime.now(appContext)
+        val now = System.currentTimeMillis()
         if (enable) {
             DeviceOwnerHelper.updateUninstallBlocked(appContext, true)
             p.edit()
@@ -492,16 +554,28 @@ class BlockerRepository(private val context: Context) {
             if (openUntil > 0L && now < openUntil) {
                 confirmProtectionOff()
             } else {
-                // Request countdown timer (strictly 24 hours)
-                val delayMs = BlockerStore.delayMs(appContext)
-                p.edit()
-                    .putLong("pending_protection", now + delayMs)
-                    .remove("open_protection")
-                    .apply()
-                BlockerStore.updateIntegrityHmac(appContext)
-                refreshProtection()
+                val currentPending = p.getLong("pending_protection", 0L)
+                if (currentPending == 0L || now >= currentPending) {
+                    val delayMs = BlockerStore.delayMs(appContext)
+                    p.edit()
+                        .putLong("pending_protection", now + delayMs)
+                        .remove("open_protection")
+                        .apply()
+                    BlockerStore.updateIntegrityHmac(appContext)
+                    refreshProtection()
+                }
             }
         }
+    }
+
+    fun cancelProtectionPending() {
+        val p = BlockerStore.prefs(appContext)
+        p.edit()
+            .remove("pending_protection")
+            .remove("open_protection")
+            .apply()
+        BlockerStore.updateIntegrityHmac(appContext)
+        refreshProtection()
     }
 
     fun confirmProtectionOff() {
@@ -656,6 +730,9 @@ class BlockerRepository(private val context: Context) {
     fun toggleAppBlock(pkg: String) {
         val current = _blockedApps.value.toMutableSet()
         if (current.contains(pkg)) {
+            if (BlockerStore.active(appContext) || BlockerStore.focusActive(appContext)) {
+                return
+            }
             current.remove(pkg)
         } else {
             current.add(pkg)
@@ -686,6 +763,9 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun removeDomain(domain: String) {
+        if (BlockerStore.active(appContext) || BlockerStore.focusActive(appContext)) {
+            return
+        }
         val current = _blockedDomains.value.toMutableSet()
         current.remove(domain)
         BlockerStore.putSet(appContext, "domains", current)
@@ -702,6 +782,9 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun removeKeyword(keyword: String) {
+        if (BlockerStore.active(appContext) || BlockerStore.focusActive(appContext)) {
+            return
+        }
         val current = _blockedKeywords.value.toMutableSet()
         current.remove(keyword)
         BlockerStore.putSet(appContext, "keywords", current)
@@ -830,16 +913,50 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun refreshDistractionShield() {
+        val p = BlockerStore.prefs(appContext)
+        val pendingMap = mutableMapOf<String, Long>()
+        for (k in listOf("block_yt_shorts", "block_insta_reels", "block_insta_search", "block_fb_reels")) {
+            val t = p.getLong("pending_setting_$k", 0L)
+            if (t > 0L) pendingMap[k] = t
+        }
         _distractionShield.value = DistractionShieldState(
             blockYtShorts = BlockerStore.granularToggle(appContext, "block_yt_shorts"),
             blockInstaReels = BlockerStore.granularToggle(appContext, "block_insta_reels"),
             blockInstaSearch = BlockerStore.granularToggle(appContext, "block_insta_search"),
-            blockFbReels = BlockerStore.granularToggle(appContext, "block_fb_reels")
+            blockFbReels = BlockerStore.granularToggle(appContext, "block_fb_reels"),
+            pendingUnlocks = pendingMap
         )
     }
 
     fun toggleDistraction(key: String, enabled: Boolean) {
-        BlockerStore.prefs(appContext).edit().putBoolean(key, enabled).apply()
+        val now = System.currentTimeMillis()
+        if (enabled) {
+            BlockerStore.cancelSettingUnlockTarget(appContext, key)
+            BlockerStore.prefs(appContext).edit().putBoolean(key, true).apply()
+            refreshDistractionShield()
+        } else {
+            val protActive = BlockerStore.active(appContext)
+            val fActive = BlockerStore.focusActive(appContext)
+            if (protActive || fActive) {
+                val target = BlockerStore.settingUnlockTarget(appContext, key)
+                if (target > 0L && now >= target) {
+                    BlockerStore.cancelSettingUnlockTarget(appContext, key)
+                    BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
+                    refreshDistractionShield()
+                } else if (target == 0L) {
+                    val delayMs = BlockerStore.delayMs(appContext)
+                    BlockerStore.setSettingUnlockTarget(appContext, key, now + delayMs)
+                    refreshDistractionShield()
+                }
+            } else {
+                BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
+                refreshDistractionShield()
+            }
+        }
+    }
+
+    fun cancelDistractionUnlock(key: String) {
+        BlockerStore.cancelSettingUnlockTarget(appContext, key)
         refreshDistractionShield()
     }
 

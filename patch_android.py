@@ -300,6 +300,8 @@ if "androidx.core.content.FileProvider" not in t:
 # 4c. Set excludeFromRecents, autoRemoveFromRecents, singleTask and resizeableActivity=false on MainActivity
 t = read(mf)
 if 'android:name=".MainActivity"' in t:
+    if 'android:windowSoftInputMode="adjustResize"' not in t:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:windowSoftInputMode="adjustResize"', 1)
     if 'android:excludeFromRecents="true"' not in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
     if 'android:autoRemoveFromRecents="true"' not in t:

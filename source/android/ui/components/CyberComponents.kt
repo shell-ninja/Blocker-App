@@ -311,20 +311,23 @@ fun CyberSwitch(
 fun LockBar(
     pendingUntil: Long,
     guardOpenUntil: Long = 0L,
+    nowMillis: Long = 0L,
     onConfirm: () -> Unit = {},
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (pendingUntil <= 0L && guardOpenUntil <= 0L) return
 
-    var currentNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    var localNow by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(pendingUntil, guardOpenUntil) {
         while (isActive) {
-            currentNow = System.currentTimeMillis()
+            localNow = System.currentTimeMillis()
             delay(500L)
         }
     }
+
+    val currentNow = if (nowMillis > 0L) nowMillis else localNow
 
     val isGuardOpen = guardOpenUntil > 0L && currentNow < guardOpenUntil
     val isPendingReady = pendingUntil > 0L && currentNow >= pendingUntil

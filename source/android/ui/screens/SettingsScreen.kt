@@ -55,6 +55,7 @@ fun SettingsScreen(
     val securityLock by repo.securityLockState.collectAsState()
     val permissions by repo.permissionsState.collectAsState()
     val updateState by repo.updateState.collectAsState()
+    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
@@ -356,7 +357,7 @@ fun SettingsScreen(
 
         // Prevent Power Off
         val hasPowerCooldown = protection.powerShieldCooldownUntil > 0L
-        val powerCooldownRem = (protection.powerShieldCooldownUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+        val powerCooldownRem = (protection.powerShieldCooldownUntil - nowMillis).coerceAtLeast(0L)
         val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
 
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {

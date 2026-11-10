@@ -82,6 +82,7 @@ fun FocusScreen(
     val study by repo.studyState.collectAsState()
     val distraction by repo.distractionShield.collectAsState()
     val apps by repo.installedApps.collectAsState()
+    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val scrollState = rememberScrollState()
     val context = LocalContext.current
 
@@ -237,13 +238,13 @@ fun FocusScreen(
                             fontSize = 12.sp
                         )
                         val hasPendingUnlock = focus.pendingUnlockUntil > 0L
-                        val unlockRemMs = (focus.pendingUnlockUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+                        val unlockRemMs = (focus.pendingUnlockUntil - nowMillis).coerceAtLeast(0L)
                         if (hasPendingUnlock) {
                             val totalSec = (unlockRemMs / 1000).coerceAtLeast(0)
                             val h = totalSec / 3600
                             val m = (totalSec % 3600) / 60
                             val s = totalSec % 60
-                            val unlockTimeStr = String.format("%02d:%02d:%02d", h, m, s)
+                            val unlockTimeStr = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
                             Spacer(modifier = Modifier.height(14.dp))
                             StatusPillBadge(
                                 label = "Unlocking in $unlockTimeStr",
@@ -580,7 +581,7 @@ fun FocusScreen(
 
                                     val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
                                     val hasSchedPending = schedPendingUntil > 0L
-                                    val schedRemMs = (schedPendingUntil - System.currentTimeMillis()).coerceAtLeast(0L)
+                                    val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
                                     val action = focus.pendingScheduleActions[s.id] ?: "delete"
 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -589,10 +590,10 @@ fun FocusScreen(
                                             val h = totalSec / 3600
                                             val m = (totalSec % 3600) / 60
                                             val sec = totalSec % 60
-                                            val timeStr = String.format("%02d:%02d:%02d", h, m, sec)
+                                            val timeStr = if (h > 0) String.format("%02d:%02d:%02d", h, m, sec) else String.format("%02d:%02d", m, sec)
                                             val actionLabel = if (action == "delete") "Deleting" else "Disabling"
                                             StatusPillBadge(
-                                                label = "$actionLabel $timeStr",
+                                                label = "$actionLabel in $timeStr",
                                                 tone = BadgeTone.WARN,
                                                 small = true
                                             )
@@ -651,6 +652,9 @@ fun FocusScreen(
                 subtitle = "Immediately ejects Shorts back to Home feed or subscription tab",
                 icon = CyberIcons.Movie,
                 checked = distraction.blockYtShorts,
+                pendingUnlockUntil = distraction.pendingUnlocks["block_yt_shorts"] ?: 0L,
+                nowMillis = nowMillis,
+                onCancelUnlock = { repo.cancelDistractionUnlock("block_yt_shorts") },
                 onCheckedChange = { repo.toggleDistraction("block_yt_shorts", it) }
             )
 
@@ -662,6 +666,9 @@ fun FocusScreen(
                 subtitle = "Immediately exits Reels back to your main timeline and messages",
                 icon = CyberIcons.Movie,
                 checked = distraction.blockInstaReels,
+                pendingUnlockUntil = distraction.pendingUnlocks["block_insta_reels"] ?: 0L,
+                nowMillis = nowMillis,
+                onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_reels") },
                 onCheckedChange = { repo.toggleDistraction("block_insta_reels", it) }
             )
 
@@ -673,6 +680,9 @@ fun FocusScreen(
                 subtitle = "Blocks discovery algorithm and search tab to prevent doom-scrolling",
                 icon = CyberIcons.Search,
                 checked = distraction.blockInstaSearch,
+                pendingUnlockUntil = distraction.pendingUnlocks["block_insta_search"] ?: 0L,
+                nowMillis = nowMillis,
+                onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_search") },
                 onCheckedChange = { repo.toggleDistraction("block_insta_search", it) }
             )
 
@@ -684,6 +694,9 @@ fun FocusScreen(
                 subtitle = "Exits Reels, Watch and video feeds (Stories and text posts stay open)",
                 icon = CyberIcons.Movie,
                 checked = distraction.blockFbReels,
+                pendingUnlockUntil = distraction.pendingUnlocks["block_fb_reels"] ?: 0L,
+                nowMillis = nowMillis,
+                onCancelUnlock = { repo.cancelDistractionUnlock("block_fb_reels") },
                 onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
             )
 
@@ -1377,54 +1390,88 @@ private fun DistractionItemCard(
     icon: ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    pendingUnlockUntil: Long = 0L,
+    nowMillis: Long = 0L,
+    onCancelUnlock: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isPending = pendingUnlockUntil > 0L
     NordicMicroGridCard(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        Column {
             Row(
-                modifier = Modifier.weight(1f).padding(end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(NordicColors.CardSurfaceHero)
-                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.weight(1f).padding(end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = NordicColors.AccentPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = NordicColors.AccentPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = title,
+                            color = NordicColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = subtitle,
+                            color = NordicColors.TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = title,
-                        color = NordicColors.TextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
+                NordicSwitch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange
+                )
+            }
+            if (isPending) {
+                val remSec = ((pendingUnlockUntil - nowMillis) / 1000L).coerceAtLeast(0L)
+                val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    StatusPillBadge(
+                        label = "Unlocking in $timeStr",
+                        tone = BadgeTone.WARN,
+                        small = true
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = subtitle,
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = onCancelUnlock,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Close,
+                            contentDescription = "Cancel",
+                            tint = NordicColors.AlertMuted,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
-            NordicSwitch(
-                checked = checked,
-                onCheckedChange = onCheckedChange
-            )
         }
     }
 }

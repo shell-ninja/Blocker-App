@@ -6,11 +6,29 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ## v1.0.6.7 (Current Release)
 
-**Release Date:** November 9, 2026  
+**Release Date:** November 10, 2026  
 **Version:** 1.0.6.7  
-**Build:** 100  
+**Build:** 101  
 
 ### Major Fixes & Enhancements:
+- **Real-Time 1-Second Countdown Ticker & Protected Settings Locks:**
+  - Resolved the frozen countdown timer issue by eliminating redundant timer clamping during polling and protecting all future epoch timestamps from being overwritten while active.
+  - Added a reactive 1-second ticker (`currentTimeMillisFlow`) in `BlockerRepository` that powers live, synchronized countdown displays across HomeScreen, FocusScreen, and SettingsScreen (`00:59` → `00:58` … → `00:00`).
+  - Strict countdown delay enforcement across Distraction Shields, Daily Schedule deletion/toggle-off, Focus Mode cancellation, and Custom Web/Keyword removal while Protection or Focus Mode is active.
+- **Device Admin Apps List Screen Smart Allow-Gate:**
+  - Disentangled the general Android "Device admin apps" list overview screen from detail and deactivation pages.
+  - Users can freely browse, scroll, and activate other system administrators (such as Google Find My Device and Play Protect) without being kicked to Home.
+  - Clicking on Blocker's Device Admin row while active remains strictly deflected in 0ms.
+- **Exact Blocked URL & Matched Keyword Reporting:**
+  - Native C++ engine (`matchUrlRule`) and regex gatekeepers now extract and return the exact blocked domain host (e.g. `Blocked URL: m.example.com` / `ব্লককৃত লিংক: m.example.com`) or restricted keyword substring (`Blocked Keyword: "phrase"` / `নিষিদ্ধ কীওয়ার্ড: "phrase"`).
+  - Wired exact triggers cleanly into both instant floating HUD banners and bilingual Islamic reminder dialogs.
+- **Soft Keyboard Auto-Scroll & Input Clearance:**
+  - Enabled `android:windowSoftInputMode="adjustResize"` for `MainActivity` in manifest patching.
+  - Applied `Modifier.imePadding()` to root Compose scaffolds and attached `BringIntoViewRequester` with a 200ms delay to domain, keyword, and simulator text fields, ensuring fields scroll smoothly above the keyboard.
+  - Added extra bottom clearance (`140.dp`) on the Web & Keywords page.
+- **Default Blocklist Hardening & GitHub Privacy Encryption:**
+  - Added `redgifs.com` (domain) and `redgifs`, `futanari`, `pawg`, `erotic` (keywords) to the default binary block engine (`blocklist.bin`).
+  - Obfuscated all repository list assets via `encrypted-blocklist` and base64 encoding (`userLists.ts`), ensuring zero plain-text adult strings or URLs are indexed or visible on GitHub.
 - **Precision Scoped Tamper Guard (Free Uninstallation & Long-Press for Other Apps):**
   - **Scoped Launcher Interception:** Resolved the issue where long-pressing or opening shortcut menus on other apps (e.g. WhatsApp, Telegram, Camera) was erroneously blocked.
   - **Node-Targeted Identity Matching:** Scoped `isSelfMentioned(ev)` strictly to the touched node, its label, and its immediate parent—eliminating desktop-wide `rootInActiveWindow` sweeps that previously matched Blocker's desktop icon.

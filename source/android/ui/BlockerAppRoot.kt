@@ -56,7 +56,7 @@ fun BlockerAppRoot(
 
     NordicTexturedScaffold(modifier = modifier) {
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().imePadding(),
             containerColor = Color.Transparent,
             bottomBar = {
                 if (!showOnboarding && !study.active && !isAppLocked) {
