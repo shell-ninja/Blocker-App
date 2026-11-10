@@ -1,11 +1,14 @@
 package com.blocker.ui.components
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,11 +16,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -29,6 +34,124 @@ import com.blocker.BlockerStore
 import com.blocker.ui.theme.NordicColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+
+/**
+ * Reusable press-scale tactile click modifier using InteractionSource + spring physics.
+ * Scales elements to 0.96f when pressed and springs back to 1.0f on release.
+ */
+fun Modifier.pressScaleClickable(
+    enabled: Boolean = true,
+    onClick: () -> Unit
+): Modifier = composed {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.96f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "press_scale"
+    )
+    this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            enabled = enabled,
+            onClick = onClick
+        )
+}
+
+/**
+ * Breathing / pulsing purple aura halo ring behind active protection shield.
+ * Scales from 1.0f to 1.18f with alpha fading 0.55f -> 0.0f over 2000ms.
+ */
+@Composable
+fun PulsingHaloShield(
+    isActive: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    if (!isActive) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            content()
+        }
+        return
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "halo_transition")
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "halo_scale"
+    )
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "halo_alpha"
+    )
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .border(
+                    width = 1.5.dp,
+                    color = NordicColors.AccentPrimary.copy(alpha = alpha),
+                    shape = RoundedCornerShape(14.dp)
+                )
+        )
+        content()
+    }
+}
+
+/**
+ * Animated rolling numbers for countdown timer digits & counters.
+ * Digits smoothly roll and fade vertically on change.
+ */
+@Composable
+fun RollingCounterText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = TextStyle(
+        color = NordicColors.TextPrimary,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold
+    )
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        text.forEachIndexed { idx, char ->
+            AnimatedContent(
+                targetState = char,
+                transitionSpec = {
+                    (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
+                },
+                label = "digit_$idx"
+            ) { targetChar ->
+                Text(
+                    text = targetChar.toString(),
+                    style = style
+                )
+            }
+        }
+    }
+}
 
 enum class CardTone {
     DEFAULT, OK, ACCENT, DANGER, WARN
@@ -179,13 +302,14 @@ fun BentoStatCard(
     onClick: (() -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(20.dp)
-    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    val clickModifier = if (onClick != null) Modifier.pressScaleClickable(onClick = onClick) else Modifier
 
     Column(
         modifier = modifier
             .clip(shape)
             .background(NordicColors.CardSurface)
             .border(1.dp, NordicColors.HairlineBorder, shape)
+            .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
             .then(clickModifier)
             .padding(18.dp)
     ) {
@@ -194,13 +318,14 @@ fun BentoStatCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            Text(
+            RollingCounterText(
                 text = "$value",
-                color = NordicColors.TextPrimary,
-                fontSize = 38.sp,
-                fontWeight = FontWeight.Normal,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-                lineHeight = 40.sp
+                style = TextStyle(
+                    color = NordicColors.TextPrimary,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.Normal,
+                    fontFeatureSettings = "tnum"
+                )
             )
 
             Box(
@@ -259,7 +384,7 @@ fun Btn(
             .clip(shape)
             .background(if (enabled) bgColor else NordicColors.CardSurface)
             .then(borderModifier)
-            .clickable(enabled = enabled, onClick = onClick)
+            .pressScaleClickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -351,6 +476,7 @@ fun LockBar(
                 .clip(shape)
                 .background(NordicColors.CardSurface)
                 .border(1.dp, NordicColors.SuccessMuted, shape)
+                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
                 .padding(16.dp)
         ) {
             Row(
@@ -429,7 +555,7 @@ fun LockBar(
             String.format("%02d:%02d", minutes, seconds)
         }
 
-        val totalSpan = if (BlockerStore.isTimerDebug()) 60_000f else 86_400_000f
+        val totalSpan = if (BlockerStore.isTimerDebug()) BlockerStore.resolveUnlockDelayDurationMs().toFloat() else 86_400_000f
         val progress = (1f - (remainingMs.toFloat() / totalSpan)).coerceIn(0f, 1f)
 
         Column(
@@ -438,6 +564,7 @@ fun LockBar(
                 .clip(shape)
                 .background(NordicColors.CardSurface)
                 .border(1.dp, NordicColors.HairlineBorder, shape)
+                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
                 .padding(16.dp)
         ) {
             Row(
@@ -467,12 +594,23 @@ fun LockBar(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "$timeStr remaining",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RollingCounterText(
+                            text = timeStr,
+                            style = TextStyle(
+                                color = NordicColors.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "remaining",
+                            color = NordicColors.TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
                 TextButton(
                     onClick = onCancel,

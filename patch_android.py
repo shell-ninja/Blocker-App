@@ -360,8 +360,8 @@ patch = digits[2] if len(digits) > 2 else 0
 hotfix = digits[3] if len(digits) > 3 else 0
 
 semver_base = (major * 1_000_000) + (minor * 100_000) + (patch * 1_000) + (hotfix * 100)
-# Minimum 1006810 ensures monotonic increase over any previous v1.0.6.8 (1006805) build to prevent INSTALL_FAILED_VERSION_DOWNGRADE
-version_code = max(1006810, semver_base + (build_number % 100) + 100)
+# Minimum 1006811 ensures monotonic increase over any previous v1.0.6.8 / v1.0.6.7 (1006810) build to prevent INSTALL_FAILED_VERSION_DOWNGRADE
+version_code = max(1006811, semver_base + (build_number % 100) + 100)
 g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {version_code}", g, count=1)
 g, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{app_version}"', g, count=1)
 if not n1 or not n2:
@@ -408,7 +408,7 @@ g = re.sub(r'abiFilters\s+"armeabi-v7a",\s*"arm64-v8a"(?!,\s*"x86_64")', 'abiFil
 if "buildConfig true" not in g:
     g = re.sub(r"(buildFeatures\s*\{[^}]*)", r'\1\n        buildConfig true', g, count=1)
 if 'buildConfigField "boolean", "IS_DEBUG_TIMER"' not in g:
-    g = re.sub(r"(debug\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "true"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "60000L"', g, count=1)
+    g = re.sub(r"(debug\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "true"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "3000L"', g, count=1)
     g = re.sub(r"(release\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "false"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "60000L"', g, count=1)
 
 write(gr, g)

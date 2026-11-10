@@ -1297,6 +1297,58 @@ class BlockerAccessibilityService : AccessibilityService() {
             (nameLower.isNotEmpty() && nameLower in t)
     }
 
+    private fun isDndPermissionScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        if (!isSettingsPkg(packageName)) return false
+        val cls = className.lowercase()
+        val t = allScreenText.lowercase()
+        val hasDndCls = cls.contains("zenaccess") ||
+            cls.contains("notificationaccess") ||
+            cls.contains("policyaccess") ||
+            cls.contains("managezenaccess")
+        val hasDndText = t.contains("do not disturb access") ||
+            t.contains("allow do not disturb") ||
+            t.contains("notification policy access") ||
+            t.contains("read, reply & control") ||
+            t.contains("do not disturb") ||
+            t.contains("zen")
+        return hasDndCls || hasDndText
+    }
+
+    private fun isBlockerDndDetailScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        if (!isDndPermissionScreen(packageName, className, allScreenText)) return false
+        val t = allScreenText.lowercase()
+        val hasBlocker = t.contains("blocker") || t.contains("prachir") ||
+            t.contains("com.blocker") || t.contains("com.prachir.app")
+        val isDetailAction = t.contains("allow do not disturb") || t.contains("read, reply & control")
+        return hasBlocker && isDetailAction
+    }
+
+    private fun isDndAccessGranted(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.isNotificationPolicyAccessGranted == true
+        } else true
+    } catch (_: Throwable) {
+        false
+    }
+
+    private fun shouldAllowDndScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        if (!isDndPermissionScreen(packageName, className, allScreenText)) return false
+        val isDndGranted = isDndAccessGranted()
+        val recentlyRequested = (SystemClock.elapsedRealtime() - PermissionFlowTracker.lastDndPermissionRequestMs) < 45_000L
+        if (!isDndGranted || recentlyRequested || PermissionFlowTracker.isLaunchingPermissionIntent) {
+            // User is granting DND access or recently requested it: ALWAYS ALLOW!
+            return true
+        }
+        // After granted, ALWAYS ALLOW the general DND apps list screen!
+        if (!isBlockerDndDetailScreen(packageName, className, allScreenText)) {
+            return true
+        }
+        // User opened Blocker's DND detail screen while already granted and not recently requested:
+        // Only block if protection or study mode is active to prevent toggling OFF
+        return !(selfProtectionActive() || BlockerStore.studyActive(this))
+    }
+
     private fun isLegitimatePermissionTitle(title: String): Boolean {
         if (title.isEmpty()) return false
         val t = title.lowercase()
@@ -1325,6 +1377,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val t = sb.toString().lowercase()
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
+
+        if (shouldAllowDndScreen("com.android.settings", rootCls, t)) {
+            return true
+        }
 
         // 0. Device Admin screens are legitimate permission screens unless it is an explicit deactivation
         if (isDeviceAdminScreenOrSetup(root, rootCls, t)) {
@@ -2230,6 +2286,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                 return
             }
 
+            // ── 0b. DND / Notification Policy Access Screen ────────────────────────
+            if (shouldAllowDndScreen(pkg, rootCls, winTitle) || shouldAllowDndScreen(pkg, evCls, winTitle)) {
+                return
+            }
+
             // ── 1. Device Admin list screen (OEM-agnostic by title) ─────────────────
             if (isDeviceAdminListScreen(rootNow, evCls, winTitle) || isDeviceAdminListScreen(rootNow, rootCls, winTitle)) {
                 // List screen: ALWAYS ALLOW here (individual item row clicks are handled specifically in checkSettings)
@@ -2462,6 +2523,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             return true
         }
 
+        // 4b. Allow legitimate permission granting screens (specifically DND settings for Study Mode)
+        if (isSettingsPkg(pkg)) {
+            val root = rootInActiveWindow ?: ev.source
+            val cls = root?.className?.toString().orEmpty().ifEmpty { ev.className?.toString().orEmpty() }
+            val sb = StringBuilder()
+            if (root != null) collectText(root, sb, 0, intArrayOf(150))
+            if (shouldAllowDndScreen(pkg, cls, sb.toString())) {
+                return false
+            }
+        }
+
         // 5. Unauthorized apps, Settings, Browsers, and Games:
         // Immediately kick off the screen back to Home, bring Blocker back to front, and show study lockout dialog.
         if (now - lastStudyRedirect >= 600L) {
@@ -2497,7 +2569,33 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
     private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
-        if (pkg in focusAllowed || pkg in BlockerStore.scheduleAllowedApps(this)) return false
+        // Essential system packages, launcher, IME, dialer/emergency, and Blocker itself are ALWAYS permitted
+        if (pkg == packageName || pkg in neverBlock || pkg in FOCUS_SYSTEM_PKGS || pkg in imePackages() || pkg in launcherPackages() || pkg in EMERGENCY_CALL_PKGS) {
+            return false
+        }
+
+        val isManualFocusActive = BlockerStore.focusUntil(this) > SecureTime.now(this)
+        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
+        val isScheduledFocusActive = activeSchedules.isNotEmpty()
+
+        // If manual focus is active, check manual focus allowed packages
+        if (isManualFocusActive) {
+            val manualAllowed = BlockerStore.focusApps(this)
+            if (pkg in manualAllowed) return false
+        }
+
+        // If scheduled focus is active, check that active schedule's allowedPackages
+        if (isScheduledFocusActive) {
+            for (s in activeSchedules) {
+                if (pkg in s.allowedApps || pkg in s.allowedPackages) return false
+            }
+        }
+
+        // If neither is active, not blocked
+        if (!isManualFocusActive && !isScheduledFocusActive) {
+            return false
+        }
+
         val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             rootInActiveWindow?.packageName?.toString() == pkg
         if (!trusted) return false
@@ -3200,6 +3298,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         val rootCls = root.className?.toString()?.lowercase().orEmpty()
         val evCls = ev.className?.toString()?.lowercase().orEmpty()
 
+        if (shouldAllowDndScreen(pkg, rootCls, t) || shouldAllowDndScreen(pkg, evCls, t)) {
+            return false
+        }
+
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
         val isOurApp = matchesSelfIdentity(t) || isSelfMentioned(ev)
@@ -3321,6 +3423,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         val cls = root.className?.toString().orEmpty()
         val evCls = ev.className?.toString().orEmpty()
         val evText = ev.text.joinToString(" ").lowercase()
+
+        if (shouldAllowDndScreen("com.android.settings", cls, evText) || shouldAllowDndScreen("com.android.settings", evCls, evText)) {
+            return
+        }
 
         if (shieldOn && isOurAdminActive() && !isLegitimatePermissionScreen(root, evText)) {
             if (cls in DEVICE_ADMIN_LIST_CLASSES) {
@@ -4799,6 +4905,12 @@ class BlockerAccessibilityService : AccessibilityService() {
                     kickFromA11yDetails()
                     return@post
                 }
+                val sbScan = StringBuilder()
+                collectText(root, sbScan, 0, intArrayOf(150))
+                val tScan = sbScan.toString().lowercase()
+                val rootClsScan = root.className?.toString().orEmpty()
+                if (shouldAllowDndScreen(pkg, rootClsScan, tScan)) return@post
+
                 if (!matchesBlockerAppInfo(root, deep)) return@post
                 val activePkg = rPkg.ifEmpty { pkg }
                 if (isActualSettingsPkg(activePkg)) {
@@ -4834,6 +4946,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 2. Legitimate permission screens / A11y main list / Installer
         if (isAccessibilityMainListScreen(root, t)) return false
         if (isInstallOrUpdateDialog(root = root)) return false
+        if (shouldAllowDndScreen(packageName, rootCls, t)) return false
 
         val name = if (appLabel.isNotEmpty()) appLabel else "Blocker"
         val ver = appVersionName      // only used to recognise "Name  version" shown inside a single node

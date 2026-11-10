@@ -295,17 +295,21 @@ if [ "$MODE" = "release" ]; then
   echo "Building release and debug APKs..."
   ./gradlew assembleRelease
   ./gradlew assembleDebug
-  OUT_RELEASE="$APK_DIR/Blocker-release-$APP_VER.apk"
-  OUT_DEBUG="$APK_DIR/Blocker-debug-$APP_VER.apk"
+  OUT_RELEASE="$APK_DIR/Blocker-release-v$APP_VER.apk"
+  OUT_DEBUG="$APK_DIR/Blocker-debug-v$APP_VER.apk"
   cp "app/build/outputs/apk/release/app-release.apk" "$OUT_RELEASE"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT_DEBUG"
+  # Also keep non-v alias for compatibility
+  cp -f "$OUT_RELEASE" "$APK_DIR/Blocker-release-$APP_VER.apk" 2>/dev/null || true
+  cp -f "$OUT_DEBUG" "$APK_DIR/Blocker-debug-$APP_VER.apk" 2>/dev/null || true
   OUT="$OUT_RELEASE"
 else
   # debug only
   echo "Building debug APK only..."
   ./gradlew assembleDebug
-  OUT="$APK_DIR/Blocker-debug-$APP_VER.apk"
+  OUT="$APK_DIR/Blocker-debug-v$APP_VER.apk"
   cp "app/build/outputs/apk/debug/app-debug.apk" "$OUT"
+  cp -f "$OUT" "$APK_DIR/Blocker-debug-$APP_VER.apk" 2>/dev/null || true
 fi
 
 step "Done"

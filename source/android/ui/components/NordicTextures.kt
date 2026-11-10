@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -17,74 +18,144 @@ import androidx.compose.ui.unit.dp
 import com.blocker.ui.theme.NordicColors
 
 /**
- * Procedural background texture applying:
- * 1. Base matte slate fill (0xFF171923).
- * 2. Crisp 1.dp dot grid spaced every 24.dp (0xFF252A3A, alpha = 0.55f).
- * 3. 5 smooth cubic Bezier topographic contour waves in top 40% (0xFF232838, alpha = 0.45f).
+ * Multi-layer procedural Royal Obsidian background:
+ * a) Base Layer: Deep Obsidian (0xFF070512).
+ * b) Ambient Royal Purple Glow Mesh:
+ *    - Top-right amethyst radial glow (center at 85% X, 12% Y, color 0x407C3AED fading to transparent)
+ *    - Bottom-left indigo-violet radial glow (center at 15% X, 85% Y, color 0x304C1D95 fading to transparent)
+ * c) Crisp Geometric & Topographic Pattern:
+ *    - Isometric hexagonal shield lattice + flowing topographic contour waves using 1.2.dp strokes in 0xFF36266E (alpha = 0.65f)
+ *    - Glowing intersection nodes/dots in 0xFF8B5CF6 (alpha = 0.45f).
  */
-fun Modifier.nordicBackgroundTexture(): Modifier = this.drawWithCache {
-    val spacing = 24.dp.toPx()
-    val dotRadius = 0.5.dp.toPx()
-    val dotColor = Color(0xFF1D163B).copy(alpha = 0.65f)
-    val contourColor = Color(0xFF231A47).copy(alpha = 0.50f)
-    val contourStroke = Stroke(width = 1.dp.toPx())
+fun Modifier.royalObsidianTexture(): Modifier = this.drawWithCache {
+    val baseColor = Color(0xFF070512)
+    val glowAmethyst = Color(0x407C3AED)
+    val glowIndigo = Color(0x304C1D95)
 
-    val top40 = size.height * 0.40f
-    val waveOffsets = listOf(0.12f, 0.28f, 0.48f, 0.68f, 0.88f)
+    val latticeColor = Color(0xFF36266E).copy(alpha = 0.65f)
+    val dotColor = Color(0xFF8B5CF6).copy(alpha = 0.45f)
+    val latticeStroke = Stroke(width = 1.2.dp.toPx())
+    val dotRadius = 2.2.dp.toPx()
 
-    val contourPaths = waveOffsets.map { ratio ->
-        val yBase = top40 * ratio
+    val w = size.width
+    val h = size.height
+
+    // Radial gradients
+    val amethystGlowBrush = Brush.radialGradient(
+        colors = listOf(glowAmethyst, Color.Transparent),
+        center = Offset(w * 0.85f, h * 0.12f),
+        radius = (w * 0.75f).coerceAtLeast(100f)
+    )
+
+    val indigoGlowBrush = Brush.radialGradient(
+        colors = listOf(glowIndigo, Color.Transparent),
+        center = Offset(w * 0.15f, h * 0.85f),
+        radius = (w * 0.75f).coerceAtLeast(100f)
+    )
+
+    // Flowing Topographic Contour Waves
+    val contourWaveRatios = listOf(0.10f, 0.22f, 0.38f, 0.52f, 0.68f, 0.82f, 0.94f)
+    val contourPaths = contourWaveRatios.map { ratio ->
+        val yBase = h * ratio
         Path().apply {
-            moveTo(0f, yBase)
+            moveTo(-20f, yBase)
             cubicTo(
-                size.width * 0.28f, yBase - 18.dp.toPx(),
-                size.width * 0.68f, yBase + 22.dp.toPx(),
-                size.width, yBase - 6.dp.toPx()
+                w * 0.28f, yBase - 24.dp.toPx(),
+                w * 0.68f, yBase + 28.dp.toPx(),
+                w + 20f, yBase - 8.dp.toPx()
             )
         }
     }
 
-    onDrawBehind {
-        // Base fill
-        drawRect(NordicColors.CanvasBg)
+    // Isometric Hexagonal Shield Lattice Paths
+    val hexRadius = 32.dp.toPx()
+    val hexPaths = mutableListOf<Path>()
+    val hexCenters = mutableListOf<Offset>()
 
-        // Architectural Dot-Matrix Grid
-        var x = 0f
-        while (x <= size.width) {
-            var y = 0f
-            while (y <= size.height) {
-                drawCircle(dotColor, dotRadius, Offset(x, y))
-                y += spacing
+    val colSpacing = hexRadius * 1.732f
+    val rowSpacing = hexRadius * 1.5f
+
+    var row = 0
+    var y = 20.dp.toPx()
+    while (y <= h + hexRadius) {
+        val xOffset = if (row % 2 == 1) colSpacing / 2f else 0f
+        var x = xOffset
+        while (x <= w + hexRadius) {
+            val center = Offset(x, y)
+            hexCenters.add(center)
+            val p = Path()
+            for (i in 0 until 6) {
+                val angleRad = Math.toRadians((60.0 * i - 30.0))
+                val px = center.x + hexRadius * Math.cos(angleRad).toFloat()
+                val py = center.y + hexRadius * Math.sin(angleRad).toFloat()
+                if (i == 0) p.moveTo(px, py) else p.lineTo(px, py)
             }
-            x += spacing
+            p.close()
+            hexPaths.add(p)
+            x += colSpacing
+        }
+        y += rowSpacing
+        row++
+    }
+
+    onDrawBehind {
+        // 1. Base Layer: Deep Obsidian
+        drawRect(baseColor)
+
+        // 2. Ambient Royal Purple Glow Mesh
+        drawRect(brush = amethystGlowBrush)
+        drawRect(brush = indigoGlowBrush)
+
+        // 3. Isometric Hex Lattice
+        for (hp in hexPaths) {
+            drawPath(hp, latticeColor, style = latticeStroke)
         }
 
-        // Topographic Contour Waves
-        for (path in contourPaths) {
-            drawPath(path, contourColor, style = contourStroke)
+        // 4. Flowing Topographic Contour Waves
+        for (cp in contourPaths) {
+            drawPath(cp, latticeColor, style = latticeStroke)
+        }
+
+        // 5. Glowing Intersection Nodes / Dots
+        for (hc in hexCenters) {
+            drawCircle(dotColor, dotRadius, hc)
         }
     }
 }
 
 /**
- * Full-screen container with procedural Dark Nordic textures.
+ * Full-screen container with procedural Royal Obsidian background textures.
  */
 @Composable
-fun NordicTexturedScaffold(
+fun RoyalObsidianBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .nordicBackgroundTexture(),
+            .royalObsidianTexture(),
         content = content
     )
 }
 
+/** Legacy alias pointing directly to RoyalObsidianBackground. */
+@Composable
+fun NordicTexturedScaffold(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    RoyalObsidianBackground(
+        modifier = modifier,
+        content = content
+    )
+}
+
+fun Modifier.nordicBackgroundTexture(): Modifier = this.royalObsidianTexture()
+
 /**
- * Flagship Hero Card with procedural monochrome botanical palm-leaf / architectural frond watermark
- * rendered across the right side in layered slate tones (0xFF1F2433, 0xFF262C3F, 0xFF2E354B).
+ * Flagship Hero Card with high-contrast geometric & botanical crest watermark artwork
+ * rendered across the right quadrant in textured amethyst and royal violet tones (0xFF4C3596 & 0xFF6D28D9 at alpha = 0.55f).
  * Clipped to RoundedCornerShape(24.dp) with 1.dp HairlineBorder and top rim highlight.
  */
 @Composable
@@ -100,9 +171,9 @@ fun NordicFoliageHeroCard(
         modifier = modifier
             .clip(cardShape)
             .drawWithCache {
-                val slateLayer1 = Color(0xFF1E163D)
-                val slateLayer2 = Color(0xFF281E52)
-                val slateLayer3 = Color(0xFF35276B)
+                val crestColorLayer1 = Color(0xFF4C3596).copy(alpha = 0.55f)
+                val crestColorLayer2 = Color(0xFF6D28D9).copy(alpha = 0.55f)
+                val stemColor = Color(0xFF8B5CF6).copy(alpha = 0.45f)
 
                 val w = size.width
                 val h = size.height
@@ -113,24 +184,24 @@ fun NordicFoliageHeroCard(
                     cubicTo(w * 0.92f, h * 0.65f, w * 0.85f, h * 0.35f, w * 0.72f, h * 0.08f)
                 }
 
-                // Botanical frond leaflets branching out leftward & upward
+                // High-contrast botanical frond / crest petals branching out
                 val frondPathsLayer1 = listOf(
                     Path().apply {
                         moveTo(w * 0.95f, h * 0.85f)
-                        cubicTo(w * 0.80f, h * 0.82f, w * 0.70f, h * 0.74f, w * 0.62f, h * 0.70f)
-                        cubicTo(w * 0.72f, h * 0.76f, w * 0.86f, h * 0.82f, w * 0.94f, h * 0.86f)
+                        cubicTo(w * 0.78f, h * 0.82f, w * 0.66f, h * 0.72f, w * 0.58f, h * 0.68f)
+                        cubicTo(w * 0.70f, h * 0.76f, w * 0.86f, h * 0.82f, w * 0.94f, h * 0.86f)
                         close()
                     },
                     Path().apply {
                         moveTo(w * 0.90f, h * 0.65f)
-                        cubicTo(w * 0.72f, h * 0.60f, w * 0.60f, h * 0.48f, w * 0.52f, h * 0.42f)
-                        cubicTo(w * 0.65f, h * 0.52f, w * 0.80f, h * 0.60f, w * 0.89f, h * 0.66f)
+                        cubicTo(w * 0.70f, h * 0.58f, w * 0.56f, h * 0.46f, w * 0.48f, h * 0.40f)
+                        cubicTo(w * 0.62f, h * 0.50f, w * 0.78f, h * 0.60f, w * 0.89f, h * 0.66f)
                         close()
                     },
                     Path().apply {
                         moveTo(w * 0.84f, h * 0.45f)
-                        cubicTo(w * 0.68f, h * 0.38f, w * 0.58f, h * 0.28f, w * 0.50f, h * 0.20f)
-                        cubicTo(w * 0.62f, h * 0.30f, w * 0.76f, h * 0.40f, w * 0.83f, h * 0.46f)
+                        cubicTo(w * 0.66f, h * 0.36f, w * 0.54f, h * 0.25f, w * 0.46f, h * 0.18f)
+                        cubicTo(w * 0.60f, h * 0.28f, w * 0.74f, h * 0.38f, w * 0.83f, h * 0.46f)
                         close()
                     }
                 )
@@ -138,20 +209,20 @@ fun NordicFoliageHeroCard(
                 val frondPathsLayer2 = listOf(
                     Path().apply {
                         moveTo(w * 0.96f, h * 0.75f)
-                        cubicTo(w * 0.82f, h * 0.72f, w * 0.74f, h * 0.62f, w * 0.68f, h * 0.58f)
-                        cubicTo(w * 0.76f, h * 0.66f, w * 0.88f, h * 0.72f, w * 0.95f, h * 0.76f)
+                        cubicTo(w * 0.80f, h * 0.70f, w * 0.70f, h * 0.60f, w * 0.64f, h * 0.55f)
+                        cubicTo(w * 0.74f, h * 0.64f, w * 0.88f, h * 0.72f, w * 0.95f, h * 0.76f)
                         close()
                     },
                     Path().apply {
                         moveTo(w * 0.88f, h * 0.55f)
-                        cubicTo(w * 0.74f, h * 0.48f, w * 0.64f, h * 0.38f, w * 0.56f, h * 0.30f)
-                        cubicTo(w * 0.68f, h * 0.42f, w * 0.80f, h * 0.50f, w * 0.87f, h * 0.56f)
+                        cubicTo(w * 0.72f, h * 0.46f, w * 0.60f, h * 0.35f, w * 0.52f, h * 0.28f)
+                        cubicTo(w * 0.66f, h * 0.40f, w * 0.78f, h * 0.48f, w * 0.87f, h * 0.56f)
                         close()
                     },
                     Path().apply {
                         moveTo(w * 0.80f, h * 0.35f)
-                        cubicTo(w * 0.66f, h * 0.26f, w * 0.58f, h * 0.16f, w * 0.52f, h * 0.08f)
-                        cubicTo(w * 0.62f, h * 0.20f, w * 0.74f, h * 0.30f, w * 0.79f, h * 0.36f)
+                        cubicTo(w * 0.64f, h * 0.24f, w * 0.55f, h * 0.14f, w * 0.48f, h * 0.06f)
+                        cubicTo(w * 0.60f, h * 0.18f, w * 0.72f, h * 0.28f, w * 0.79f, h * 0.36f)
                         close()
                     }
                 )
@@ -164,18 +235,18 @@ fun NordicFoliageHeroCard(
                     // Deep Charcoal Hero Surface
                     drawRect(NordicColors.CardSurfaceHero)
 
-                    // Layer 1 Slate Watermark
+                    // Layer 1 Amethyst Crest Watermark
                     for (p in frondPathsLayer1) {
-                        drawPath(p, slateLayer1)
+                        drawPath(p, crestColorLayer1)
                     }
 
-                    // Layer 2 Slate Watermark
+                    // Layer 2 Royal Violet Crest Watermark
                     for (p in frondPathsLayer2) {
-                        drawPath(p, slateLayer2)
+                        drawPath(p, crestColorLayer2)
                     }
 
                     // Stem stroke
-                    drawPath(stemPath, slateLayer3, style = Stroke(width = 1.5.dp.toPx()))
+                    drawPath(stemPath, stemColor, style = Stroke(width = 1.5.dp.toPx()))
 
                     // Top Edge Highlight along upper rim
                     drawLine(
@@ -211,7 +282,7 @@ fun NordicMicroGridCard(
             .clip(cardShape)
             .background(NordicColors.CardSurface)
             .drawWithCache {
-                val tickColor = Color(0xFF2B224D)
+                val tickColor = Color(0xFF36266E).copy(alpha = 0.55f)
                 val tickLen = 6.dp.toPx()
                 val tickStroke = 1.dp.toPx()
                 val pad = 10.dp.toPx()

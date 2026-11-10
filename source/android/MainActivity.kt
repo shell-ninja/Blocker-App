@@ -8,15 +8,19 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.BlockerAppRoot
+import com.blocker.ui.components.RoyalObsidianBackground
 import com.blocker.ui.theme.BlockerTheme
 import com.blocker.ui.theme.NordicColors
 
 object PermissionFlowTracker {
     @Volatile
     var isLaunchingPermissionIntent: Boolean = false
+    @Volatile
+    var lastDndPermissionRequestMs: Long = 0L
 }
 
 class MainActivity : ComponentActivity() {
@@ -40,11 +44,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BlockerTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = NordicColors.CanvasBg
-                ) {
-                    BlockerAppRoot(repo = repo)
+                RoyalObsidianBackground(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = Color.Transparent
+                    ) {
+                        BlockerAppRoot(repo = repo)
+                    }
                 }
             }
         }

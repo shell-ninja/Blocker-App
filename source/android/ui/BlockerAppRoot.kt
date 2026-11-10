@@ -1,7 +1,7 @@
 package com.blocker.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -96,10 +96,13 @@ fun BlockerAppRoot(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Box(modifier = Modifier.weight(1f)) {
-                                Crossfade(
+                                AnimatedContent(
                                     targetState = currentTab,
-                                    animationSpec = tween(120),
-                                    label = "tab_fade"
+                                    transitionSpec = {
+                                        (fadeIn(animationSpec = tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 18 })
+                                            .togetherWith(fadeOut(animationSpec = tween(150)))
+                                    },
+                                    label = "tab_transition"
                                 ) { tab ->
                                     when (tab) {
                                         NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })

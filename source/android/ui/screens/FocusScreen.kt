@@ -1,10 +1,13 @@
 package com.blocker.ui.screens
 
 import android.app.TimePickerDialog
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,7 +26,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.blocker.FocusSchedule
+import com.blocker.BlockerStore
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
@@ -80,6 +86,7 @@ fun FocusScreen(
 ) {
     val focus by repo.focusState.collectAsState()
     val study by repo.studyState.collectAsState()
+    val protection by repo.protectionState.collectAsState()
     val distraction by repo.distractionShield.collectAsState()
     val apps by repo.installedApps.collectAsState()
     val nowMillis by repo.currentTimeMillisFlow.collectAsState()
@@ -104,6 +111,9 @@ fun FocusScreen(
     var newScheduleLabel by remember { mutableStateOf("") }
     var newStartMin by remember { mutableStateOf(540) } // 9:00 AM default
     var newEndMin by remember { mutableStateOf(1020) }  // 5:00 PM default
+    var newScheduleAllowedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showNewScheduleAppPicker by remember { mutableStateOf(false) }
+    var editingScheduleForApps by remember { mutableStateOf<FocusSchedule?>(null) }
 
     // Essential Apps Search & Filter
     var appSearchQuery by remember { mutableStateOf("") }
@@ -112,7 +122,7 @@ fun FocusScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(NordicColors.CanvasBg)
+            .background(Color.Transparent)
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
@@ -197,7 +207,15 @@ fun FocusScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (selectedTab == 0) {
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 18 })
+                    .togetherWith(fadeOut(animationSpec = tween(150)))
+            },
+            label = "focus_study_tab_anim"
+        ) { currentTab ->
+            if (currentTab == 0) {
             // ==========================================
             // FOCUS MODE VIEW
             // ==========================================
@@ -506,6 +524,16 @@ fun FocusScreen(
                                 }
                             }
 
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Btn(
+                                label = "Select Allowed Apps (${newScheduleAllowedApps.size} selected)",
+                                icon = CyberIcons.Apps,
+                                onClick = { showNewScheduleAppPicker = true },
+                                kind = BtnKind.SECONDARY,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
                             Spacer(modifier = Modifier.height(14.dp))
 
                             Btn(
@@ -513,8 +541,9 @@ fun FocusScreen(
                                 icon = CyberIcons.Check,
                                 onClick = {
                                     val name = newScheduleLabel.trim().ifEmpty { "Schedule ${focus.schedules.size + 1}" }
-                                    repo.addSchedule(name, newStartMin, newEndMin)
+                                    repo.addSchedule(name, newStartMin, newEndMin, newScheduleAllowedApps)
                                     newScheduleLabel = ""
+                                    newScheduleAllowedApps = emptySet()
                                     showAddSchedule = false
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -546,6 +575,7 @@ fun FocusScreen(
                                         if (isActiveNow) NordicColors.AccentPrimary.copy(alpha = 0.5f) else NordicColors.HairlineBorder,
                                         RoundedCornerShape(12.dp)
                                     )
+                                    .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 Row(
@@ -577,6 +607,18 @@ fun FocusScreen(
                                             color = NordicColors.TextSecondary,
                                             fontSize = 12.sp
                                         )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.clickable { editingScheduleForApps = s }
+                                        ) {
+                                            StatusPillBadge(
+                                                label = "${s.allowedApps.size} Apps Allowed",
+                                                tone = BadgeTone.IDLE,
+                                                small = true,
+                                                icon = CyberIcons.Apps
+                                            )
+                                        }
                                     }
 
                                     val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
@@ -759,7 +801,81 @@ fun FocusScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+            val isFocusCurrentlyLocked = focus.active || study.active || focus.schedules.any { repo.isScheduleActiveNow(it) }
+
+            NordicMicroGridCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+            ) {
+                if (isFocusCurrentlyLocked) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = CyberIcons.Lock,
+                                contentDescription = null,
+                                tint = NordicColors.AlertMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "App selection is locked while a Focus session is active",
+                                color = NordicColors.AlertMuted,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else if (protection.isActive) {
+                    val pendingAppsUnlock = focus.pendingAppsUnlockUntil
+                    if (pendingAppsUnlock > 0L) {
+                        val remSec = ((pendingAppsUnlock - nowMillis) / 1000L).coerceAtLeast(0L)
+                        val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(NordicColors.CardSurfaceHero)
+                                .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = CyberIcons.Lock,
+                                    contentDescription = null,
+                                    tint = NordicColors.AlertMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Modifying allowed apps unlocking in $timeStr",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Text(
+                                text = "Abort",
+                                color = NordicColors.AlertMuted,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { repo.cancelFocusAppsUnlock() }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
+
                 // 3-Tab Filter Chips: User Apps | System Apps | All Apps
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -882,6 +998,7 @@ fun FocusScreen(
                                 }
                                 NordicSwitch(
                                     checked = isAllowed,
+                                    enabled = !isFocusCurrentlyLocked || isAllowed,
                                     onCheckedChange = { repo.toggleAllowedFocusApp(app.packageName) }
                                 )
                             }
@@ -1238,7 +1355,13 @@ fun FocusScreen(
                         }
                         NordicSwitch(
                             checked = study.autoDnd,
-                            onCheckedChange = { repo.setStudyAutoDnd(it) }
+                            onCheckedChange = {
+                                if (it && !study.hasDndAccess) {
+                                    repo.requestDndAccess(context)
+                                } else {
+                                    repo.setStudyAutoDnd(it)
+                                }
+                            }
                         )
                     }
                 }
@@ -1380,6 +1503,48 @@ fun FocusScreen(
         }
 
         Spacer(modifier = Modifier.height(28.dp))
+        }
+    }
+
+    if (showNewScheduleAppPicker) {
+        ScheduleAppPickerDialog(
+            title = "Allowed Apps for New Schedule",
+            initialAllowed = newScheduleAllowedApps,
+            allApps = apps,
+            isLocked = false,
+            unlockTargetMs = 0L,
+            nowMillis = nowMillis,
+            onToggleApp = { pkg ->
+                newScheduleAllowedApps = if (newScheduleAllowedApps.contains(pkg)) {
+                    newScheduleAllowedApps - pkg
+                } else {
+                    newScheduleAllowedApps + pkg
+                }
+            },
+            onAbortUnlock = {},
+            onDismiss = { showNewScheduleAppPicker = false }
+        )
+    }
+
+    editingScheduleForApps?.let { sched ->
+        val schedLockKey = "sched_apps_${sched.id}"
+        val unlockTarget = BlockerStore.settingUnlockTarget(context, schedLockKey)
+        val isLocked = repo.isScheduleActiveNow(sched) || protection.isActive
+        ScheduleAppPickerDialog(
+            title = "Allowed Apps — ${sched.label}",
+            initialAllowed = sched.allowedApps,
+            allApps = apps,
+            isLocked = isLocked,
+            unlockTargetMs = unlockTarget,
+            nowMillis = nowMillis,
+            onToggleApp = { pkg ->
+                repo.toggleScheduleAllowedApp(sched.id, pkg)
+            },
+            onAbortUnlock = {
+                repo.cancelScheduleAppsUnlock(sched.id)
+            },
+            onDismiss = { editingScheduleForApps = null }
+        )
     }
 }
 
@@ -1471,6 +1636,249 @@ private fun DistractionItemCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ScheduleAppPickerDialog(
+    title: String,
+    initialAllowed: Set<String>,
+    allApps: List<com.blocker.data.AppItem>,
+    isLocked: Boolean,
+    unlockTargetMs: Long,
+    nowMillis: Long,
+    onToggleApp: (String) -> Unit,
+    onAbortUnlock: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var tabIndex by remember { mutableStateOf(0) } // 0: User, 1: System, 2: All
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.88f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(NordicColors.CardSurface)
+                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            color = NordicColors.TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${initialAllowed.size} apps permitted during schedule",
+                            color = NordicColors.TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(CyberIcons.Close, contentDescription = "Close", tint = NordicColors.TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Locked or Ticking Countdown Banner
+                if (unlockTargetMs > 0L) {
+                    val remSec = ((unlockTargetMs - nowMillis) / 1000L).coerceAtLeast(0L)
+                    val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(CyberIcons.Lock, contentDescription = null, tint = NordicColors.AlertMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Modifying apps unlocking in $timeStr",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Text(
+                            text = "Abort",
+                            color = NordicColors.AlertMuted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { onAbortUnlock() }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else if (isLocked) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(CyberIcons.Lock, contentDescription = null, tint = NordicColors.AlertMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Adding new apps requires countdown while active/protected",
+                                color = NordicColors.AlertMuted,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // 3 Tabs: User Apps | System Apps | All Apps
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("User Apps", "System Apps", "All Apps").forEachIndexed { idx, tabTitle ->
+                        val selected = tabIndex == idx
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                .border(1.dp, if (selected) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(8.dp))
+                                .clickable { tabIndex = idx }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tabTitle,
+                                color = if (selected) Color.White else NordicColors.TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Search box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(NordicColors.CanvasBg)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    if (searchQuery.isEmpty()) {
+                        Text(text = "Search apps to allow...", color = NordicColors.TextSecondary, fontSize = 12.5.sp)
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        textStyle = TextStyle(color = NordicColors.TextPrimary, fontSize = 12.5.sp),
+                        cursorBrush = SolidColor(NordicColors.AccentPrimary),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val filtered = remember(allApps, searchQuery, tabIndex, initialAllowed) {
+                    val q = searchQuery.trim().lowercase()
+                    val base = when (tabIndex) {
+                        0 -> allApps.filter { !it.isSystem }
+                        1 -> allApps.filter { it.isSystem }
+                        else -> allApps
+                    }
+                    base.filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
+                        .sortedWith(
+                            compareByDescending<com.blocker.data.AppItem> { initialAllowed.contains(it.packageName) }
+                                .thenBy { it.label.lowercase() }
+                        )
+                }
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filtered.size) { i ->
+                        val app = filtered[i]
+                        val isAllowed = initialAllowed.contains(app.packageName)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            ) {
+                                AppIconView(drawable = app.icon, modifier = Modifier.size(32.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = app.label,
+                                            color = NordicColors.TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (app.isSystem) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            StatusPillBadge(label = "System", tone = BadgeTone.ACCENT, small = true)
+                                        }
+                                    }
+                                    Text(
+                                        text = app.packageName,
+                                        color = NordicColors.TextSecondary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            NordicSwitch(
+                                checked = isAllowed,
+                                onCheckedChange = { onToggleApp(app.packageName) }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Btn(
+                    label = "Done",
+                    icon = CyberIcons.Check,
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

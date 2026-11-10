@@ -1,7 +1,6 @@
 package com.blocker.ui.components
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -142,6 +141,26 @@ fun NordicArcGauge(
 ) {
     val p = progress.coerceIn(0f, 1f)
 
+    val infiniteTransition = rememberInfiniteTransition(label = "arc_pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 2.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_scale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_alpha"
+    )
+
     Box(
         modifier = modifier.size(size),
         contentAlignment = Alignment.Center
@@ -186,12 +205,19 @@ fun NordicArcGauge(
                     style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                 )
 
-                // Hollow 5.dp circle node at the tip of progress
+                // Hollow circle node at the tip of progress with pulsing halo dot
                 val radius = arcSize.width / 2f
                 val center = Offset(this.size.width / 2f, this.size.height / 2f)
                 val tipAngleRad = Math.toRadians((startAngle + activeSweep).toDouble())
                 val tipX = (center.x + radius * cos(tipAngleRad)).toFloat()
                 val tipY = (center.y + radius * sin(tipAngleRad)).toFloat()
+
+                // Pulsing accent halo ring at the tip node
+                drawCircle(
+                    color = NordicColors.AccentPrimary.copy(alpha = pulseAlpha),
+                    radius = 4.dp.toPx() * pulseScale,
+                    center = Offset(tipX, tipY)
+                )
 
                 // Inner fill matching hero card surface
                 drawCircle(

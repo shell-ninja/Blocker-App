@@ -66,7 +66,8 @@ data class FocusSchedule(
     val startMin: Int,
     val endMin: Int,
     val enabled: Boolean,
-    val allowedApps: Set<String> = emptySet()
+    val allowedApps: Set<String> = emptySet(),
+    val allowedPackages: Set<String> = allowedApps
 ) {
     fun toJson(): JSONObject {
         val arr = JSONArray()
@@ -74,12 +75,13 @@ data class FocusSchedule(
         return JSONObject()
             .put("id", id).put("label", label).put("startMin", startMin).put("endMin", endMin).put("enabled", enabled)
             .put("allowedApps", arr)
+            .put("allowedPackages", arr)
     }
 
     companion object {
         fun fromJson(o: JSONObject): FocusSchedule {
             val appSet = mutableSetOf<String>()
-            val arr = o.optJSONArray("allowedApps")
+            val arr = o.optJSONArray("allowedPackages") ?: o.optJSONArray("allowedApps")
             if (arr != null) {
                 for (i in 0 until arr.length()) {
                     val a = arr.optString(i, "")
@@ -185,12 +187,19 @@ object BlockerStore {
     const val BUILD_NUMBER = 100
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
+    const val DEBUG_UNLOCK_DURATION_MS = 3000L
     const val GUARD_WINDOW_MS = 10 * 60_000L
 
     fun isTimerDebug(): Boolean = try {
         BuildConfig.DEBUG || BuildConfig.IS_DEBUG_TIMER
     } catch (_: Throwable) {
         false
+    }
+
+    fun resolveUnlockDelayDurationMs(c: Context? = null): Long = try {
+        if (isTimerDebug()) BuildConfig.DEBUG_UNLOCK_DURATION_MS else DAY_MS
+    } catch (_: Throwable) {
+        if (isTimerDebug()) DEBUG_UNLOCK_DURATION_MS else DAY_MS
     }
 
     fun prefs(c: Context): SharedPreferences =
@@ -264,14 +273,13 @@ object BlockerStore {
         var changed = false
         val editor = p.edit()
         val all = p.all
+        val maxAllowed = resolveUnlockDelayDurationMs(c)
         for ((key, value) in all) {
             if (key.startsWith("pending_") || key.contains("unlock") || key.contains("cooldown")) {
                 val target = (value as? Number)?.toLong() ?: continue
                 val remaining = target - now
-                // ONLY clamp old stuck 24h/cooldown timers (remaining > 65 seconds)!
-                // NEVER clamp or overwrite an active countdown timer that is <= 60 seconds!
-                if (remaining > 65_000L) {
-                    editor.putLong(key, now + 60_000L)
+                if (remaining > maxAllowed) {
+                    editor.putLong(key, now + maxAllowed)
                     changed = true
                 }
             }
@@ -408,8 +416,8 @@ object BlockerStore {
     }
 
     fun delayDays(c: Context): Int = 1
-    // 1-minute in debug builds (BuildConfig.DEBUG || BuildConfig.IS_DEBUG_TIMER), strict 24-hour waiting period in production
-    fun delayMs(c: Context): Long = if (isTimerDebug()) 60_000L else DAY_MS
+    // Live 3-second in debug builds, strict 24-hour waiting period in production
+    fun delayMs(c: Context): Long = resolveUnlockDelayDurationMs(c)
 
     fun isOnboardingCompleted(c: Context): Boolean =
         prefs(c).getBoolean("onboarding_completed", false)

@@ -1,5 +1,7 @@
 package com.blocker.ui.screens
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,7 +59,9 @@ fun HomeScreen(
 
         // Primary Hero Bento Card with Botanical Watermark Texture
         NordicFoliageHeroCard(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -68,24 +72,26 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f).padding(end = 12.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(NordicColors.CardSurface)
-                            .border(
-                                1.5.dp,
-                                if (protection.isActive) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (protection.isActive) CyberIcons.Check else CyberIcons.Shield,
-                            contentDescription = null,
-                            tint = if (protection.isActive) NordicColors.AccentPrimary else NordicColors.TextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    PulsingHaloShield(isActive = protection.isActive) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(NordicColors.CardSurface)
+                                .border(
+                                    1.5.dp,
+                                    if (protection.isActive) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (protection.isActive) CyberIcons.Check else CyberIcons.Shield,
+                                contentDescription = null,
+                                tint = if (protection.isActive) NordicColors.AccentPrimary else NordicColors.TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(14.dp))
@@ -122,7 +128,11 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(14.dp))
 
         // 7-Day Protection Activity Graph Card
-        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+        NordicMicroGridCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -415,6 +425,14 @@ fun DailyBlockedActivityGraph(
                 } else {
                     0.06f
                 }
+                val animBarFraction by animateFloatAsState(
+                    targetValue = barFraction,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                    label = "bar_anim_$index"
+                )
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -444,7 +462,7 @@ fun DailyBlockedActivityGraph(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.55f)
-                            .fillMaxHeight(barFraction * 0.72f)
+                            .fillMaxHeight(animBarFraction * 0.72f)
                             .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
                             .background(
                                 when {

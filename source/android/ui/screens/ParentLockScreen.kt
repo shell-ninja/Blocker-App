@@ -64,7 +64,7 @@ fun ParentLockScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(NordicColors.CanvasBg)
+            .background(Color.Transparent)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {

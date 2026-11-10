@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
@@ -70,7 +71,8 @@ data class FocusState(
     val pendingUnlockUntil: Long = 0L,
     val pendingUnlockRemainingMs: Long = 0L,
     val pendingScheduleUnlocks: Map<String, Long> = emptyMap(),
-    val pendingScheduleActions: Map<String, String> = emptyMap()
+    val pendingScheduleActions: Map<String, String> = emptyMap(),
+    val pendingAppsUnlockUntil: Long = 0L
 )
 
 data class StudyState(
@@ -346,6 +348,8 @@ class BlockerRepository(private val context: Context) {
             }
         }
 
+        val fAppsUnlockUntil = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
+
         _focusState.value = FocusState(
             active = fActive,
             focusUntil = fUntil,
@@ -355,7 +359,8 @@ class BlockerRepository(private val context: Context) {
             pendingUnlockUntil = fUnlockUntil,
             pendingUnlockRemainingMs = fUnlockRem,
             pendingScheduleUnlocks = schedUnlocks,
-            pendingScheduleActions = schedActions
+            pendingScheduleActions = schedActions,
+            pendingAppsUnlockUntil = fAppsUnlockUntil
         )
 
         val sActive = BlockerStore.studyActive(appContext)
@@ -525,6 +530,18 @@ class BlockerRepository(private val context: Context) {
                 BlockerStore.cancelSettingUnlockTarget(appContext, key)
                 BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
                 refreshDistractionShield()
+            }
+        }
+
+        // 7. Focus Mode Apps Unlock & Schedule Apps Unlocks
+        val fAppsTarget = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
+        if (fAppsTarget > 0L && now >= fAppsTarget) {
+            refreshFocusAndStudy()
+        }
+        for (sched in _focusState.value.schedules) {
+            val sAppsTarget = BlockerStore.settingUnlockTarget(appContext, "sched_apps_${sched.id}")
+            if (sAppsTarget > 0L && now >= sAppsTarget) {
+                refreshFocusAndStudy()
             }
         }
 
@@ -801,6 +818,7 @@ class BlockerRepository(private val context: Context) {
 
     fun requestDndAccess(context: Context) {
         com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
+        com.blocker.PermissionFlowTracker.lastDndPermissionRequestMs = SystemClock.elapsedRealtime()
         MainActivity.isLaunchingExternal = true
         val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1038,6 +1056,13 @@ class BlockerRepository(private val context: Context) {
 
     fun isScheduleActiveNow(s: FocusSchedule): Boolean = BlockerStore.scheduleIsActiveNow(s, appContext)
 
+    fun isFocusCurrentlyLocked(): Boolean {
+        val fActive = _focusState.value.active
+        val sActive = _studyState.value.active
+        val schedActive = _focusState.value.schedules.any { isScheduleActiveNow(it) }
+        return fActive || sActive || schedActive
+    }
+
     fun saveSchedules(list: List<FocusSchedule>) {
         BlockerStore.putSchedules(appContext, list)
         refreshFocusAndStudy()
@@ -1045,12 +1070,82 @@ class BlockerRepository(private val context: Context) {
 
     fun toggleAllowedFocusApp(pkg: String) {
         val current = BlockerStore.focusApps(appContext).toMutableSet()
-        if (current.contains(pkg)) {
-            current.remove(pkg)
-        } else {
+        val isCurrentlyAllowed = current.contains(pkg)
+        val locked = isFocusCurrentlyLocked()
+        val protActive = _protectionState.value.isActive
+        val now = System.currentTimeMillis()
+
+        if (!isCurrentlyAllowed) {
+            // Attempting to ADD a new app
+            if (locked) {
+                // Strictly block adding any new apps while Focus Mode is active
+                return
+            }
+            if (protActive) {
+                val target = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
+                if (target > 0L && now >= target) {
+                    // Timer expired: clear target and allow adding
+                    BlockerStore.cancelSettingUnlockTarget(appContext, "focus_apps")
+                } else if (target == 0L) {
+                    val delayMs = BlockerStore.resolveUnlockDelayDurationMs(appContext)
+                    BlockerStore.setSettingUnlockTarget(appContext, "focus_apps", now + delayMs)
+                    refreshFocusAndStudy()
+                    return
+                } else {
+                    return
+                }
+            }
             current.add(pkg)
+        } else {
+            // Removing an app
+            current.remove(pkg)
         }
         BlockerStore.prefs(appContext).edit().putStringSet("focus_apps", current).apply()
+        refreshFocusAndStudy()
+    }
+
+    fun cancelFocusAppsUnlock() {
+        BlockerStore.cancelSettingUnlockTarget(appContext, "focus_apps")
+        refreshFocusAndStudy()
+    }
+
+    fun toggleScheduleAllowedApp(scheduleId: String, pkg: String) {
+        val sched = _focusState.value.schedules.find { it.id == scheduleId } ?: return
+        val currentApps = sched.allowedApps.toMutableSet()
+        val isCurrentlyAllowed = currentApps.contains(pkg)
+        val isActive = isScheduleActiveNow(sched)
+        val protActive = _protectionState.value.isActive
+        val now = System.currentTimeMillis()
+
+        if (!isCurrentlyAllowed) {
+            // Adding a new allowed app to this schedule
+            val lockKey = "sched_apps_$scheduleId"
+            if (isActive || protActive) {
+                val target = BlockerStore.settingUnlockTarget(appContext, lockKey)
+                if (target > 0L && now >= target) {
+                    BlockerStore.cancelSettingUnlockTarget(appContext, lockKey)
+                } else if (target == 0L) {
+                    val delayMs = BlockerStore.resolveUnlockDelayDurationMs(appContext)
+                    BlockerStore.setSettingUnlockTarget(appContext, lockKey, now + delayMs)
+                    refreshFocusAndStudy()
+                    return
+                } else {
+                    return
+                }
+            }
+            currentApps.add(pkg)
+        } else {
+            currentApps.remove(pkg)
+        }
+
+        val updated = _focusState.value.schedules.map {
+            if (it.id == scheduleId) it.copy(allowedApps = currentApps) else it
+        }
+        saveSchedules(updated)
+    }
+
+    fun cancelScheduleAppsUnlock(scheduleId: String) {
+        BlockerStore.cancelSettingUnlockTarget(appContext, "sched_apps_$scheduleId")
         refreshFocusAndStudy()
     }
 

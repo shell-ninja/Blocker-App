@@ -53,7 +53,7 @@ fun BlocklistScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(NordicColors.CanvasBg)
+            .background(Color.Transparent)
             .imePadding()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 14.dp)
