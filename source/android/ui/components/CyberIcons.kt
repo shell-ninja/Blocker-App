@@ -51,4 +51,7 @@ object CyberIcons {
     val Download: ImageVector = Icons.Rounded.Download
     val Refresh: ImageVector = Icons.Rounded.Refresh
     val OpenInNew: ImageVector = Icons.Rounded.OpenInNew
+    val Phone: ImageVector = Icons.Rounded.Phone
+    val Edit: ImageVector = Icons.Rounded.Edit
+    val Plus: ImageVector = Icons.Rounded.Add
 }

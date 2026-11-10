@@ -1,13 +1,17 @@
 package com.blocker.ui.screens
 
 import android.app.TimePickerDialog
+import android.content.Context
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,11 +32,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.blocker.FocusSchedule
 import com.blocker.BlockerStore
+import com.blocker.FocusSchedule
+import com.blocker.data.AppItem
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private data class StudyQuote(val quote: String, val source: String)
 
@@ -60,8 +68,9 @@ private val STUDY_QUOTES = listOf(
 )
 
 private fun clock12(totalMinutes: Int): String {
-    val h24 = (totalMinutes / 60) % 24
-    val min = totalMinutes % 60
+    val clean = totalMinutes.coerceIn(0, 1439)
+    val h24 = (clean / 60) % 24
+    val min = clean % 60
     val ampm = if (h24 < 12) "AM" else "PM"
     val h12 = if (h24 % 12 == 0) 12 else h24 % 12
     return String.format("%d:%02d %s", h12, min, ampm)
@@ -79,6 +88,45 @@ private fun formatDuration(startMin: Int, endMin: Int): String {
     }
 }
 
+private fun formatHms(seconds: Long): String {
+    val sec = seconds.coerceAtLeast(0L)
+    val h = sec / 3600L
+    val m = (sec % 3600L) / 60L
+    val s = sec % 60L
+    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+}
+
+private fun formatStartsIn(millis: Long): String {
+    val sec = millis / 1000L
+    val h = sec / 3600L
+    val m = (sec % 3600L) / 60L
+    return when {
+        h > 0 -> "Starts in ${h}h ${m}m"
+        m > 0 -> "Starts in ${m}m"
+        else -> "Starting soon"
+    }
+}
+
+private fun formatClockTime(epochMs: Long): String {
+    return SimpleDateFormat("hh:mm a", Locale.US).format(Date(epochMs))
+}
+
+private fun openEmergencyDialer(context: Context) {
+    try {
+        val intent = Intent(Intent.ACTION_DIAL).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
+    } catch (_: Throwable) {
+        try {
+            val emergencyIntent = Intent("android.intent.action.EMERGENCY_ASSISTANCE").apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(emergencyIntent)
+        } catch (_: Throwable) {}
+    }
+}
+
 @Composable
 fun FocusScreen(
     repo: BlockerRepository,
@@ -90,8 +138,9 @@ fun FocusScreen(
     val distraction by repo.distractionShield.collectAsState()
     val apps by repo.installedApps.collectAsState()
     val nowMillis by repo.currentTimeMillisFlow.collectAsState()
-    val scrollState = rememberScrollState()
     val context = LocalContext.current
+
+    val isWifiOn = remember(nowMillis) { repo.isWifiEnabled() }
 
     // Segmented page: 0 -> Focus Mode, 1 -> Study Mode
     var selectedTab by remember { mutableStateOf(if (study.active) 1 else 0) }
@@ -106,30 +155,44 @@ fun FocusScreen(
     var studyRounds by remember { mutableStateOf(4) }
     val randomQuote = remember { STUDY_QUOTES.random() }
 
-    // Daily Schedule Creation State
-    var showAddSchedule by remember { mutableStateOf(false) }
-    var newScheduleLabel by remember { mutableStateOf("") }
-    var newStartMin by remember { mutableStateOf(540) } // 9:00 AM default
-    var newEndMin by remember { mutableStateOf(1020) }  // 5:00 PM default
-    var newScheduleAllowedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showNewScheduleAppPicker by remember { mutableStateOf(false) }
+    // Daily Schedule Add/Edit State
+    var showAddOrEditSchedule by remember { mutableStateOf(false) }
+    var editingSchedule by remember { mutableStateOf<FocusSchedule?>(null) }
+    var scheduleFormLabel by remember { mutableStateOf("") }
+    var scheduleFormStartMin by remember { mutableStateOf(0) } // Default 12:00 AM (0)
+    var scheduleFormEndMin by remember { mutableStateOf(360) } // Default 06:00 AM (360)
+    var scheduleFormDays by remember { mutableStateOf<Set<Int>>(setOf(1, 2, 3, 4, 5, 6, 7)) }
+    var scheduleFormAllowedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showScheduleFormAppPicker by remember { mutableStateOf(false) }
+
+    // Schedule Card Quick App Picker
     var editingScheduleForApps by remember { mutableStateOf<FocusSchedule?>(null) }
+
+    // Manual Focus Duration Selector
+    val durationOptions = listOf(15 to "15m", 30 to "30m", 45 to "45m", 60 to "1h", 120 to "2h", 240 to "4h", -1 to "Custom")
+    var selectedManualDurationMin by remember { mutableStateOf(45) }
+    var customManualDurationMin by remember { mutableStateOf(90) }
 
     // Essential Apps Search & Filter
     var appSearchQuery by remember { mutableStateOf("") }
     var appFilterTab by remember { mutableStateOf(0) } // 0: User Apps, 1: System Apps, 2: All Apps
 
+    // Active Status Calculations
+    val isManualActive = focus.focusUntil > nowMillis
+    val activeSchedule = focus.schedules.firstOrNull { it.isRunningAt() }
+    val isFocusRunningNow = isManualActive || activeSchedule != null
+    val isFocusCurrentlyLocked = isFocusRunningNow || study.active
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Transparent)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         // Top Segmented Tab Switcher (Focus Mode vs Study Mode)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(NordicColors.CardSurface)
                 .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp))
@@ -196,7 +259,7 @@ fun FocusScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
-                                .size(6.dp)
+                                .size(7.dp)
                                 .clip(CircleShape)
                                 .background(if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.AccentPrimary)
                         )
@@ -205,469 +268,465 @@ fun FocusScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        AnimatedContent(
-            targetState = selectedTab,
-            transitionSpec = {
-                (fadeIn(animationSpec = tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 18 })
-                    .togetherWith(fadeOut(animationSpec = tween(150)))
-            },
-            label = "focus_study_tab_anim"
-        ) { currentTab ->
-            if (currentTab == 0) {
+        if (selectedTab == 0) {
             // ==========================================
-            // FOCUS MODE VIEW
+            // FOCUS MODE TAB (Single Scrollable LazyColumn)
             // ==========================================
-
-            // 1. Quick Focus Mode Card
-            if (focus.active && focus.remainingMs > 0) {
-                val remSec = focus.remainingMs / 1000L
-                val hours = remSec / 3600L
-                val mins = (remSec % 3600L) / 60L
-                val secs = remSec % 60L
-                val timeStr = if (hours > 0) {
-                    String.format("%02d:%02d:%02d", hours, mins, secs)
-                } else {
-                    String.format("%02d:%02d", mins, secs)
+            val filteredApps = remember(apps, appSearchQuery, focus.allowedApps, appFilterTab) {
+                val q = appSearchQuery.trim().lowercase()
+                val baseList = when (appFilterTab) {
+                    0 -> apps.filter { !it.isSystem }
+                    1 -> apps.filter { it.isSystem }
+                    else -> apps
                 }
-
-                NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        StatusPillBadge(
-                            label = "Focus Mode Active",
-                            tone = BadgeTone.ACCENT,
-                            breathing = true,
-                            icon = CyberIcons.Focus
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        HeroNumeral(
-                            value = timeStr,
-                            caption = "Remaining Focus Time",
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Only essential allowed apps are accessible",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                        val hasPendingUnlock = focus.pendingUnlockUntil > 0L
-                        val unlockRemMs = (focus.pendingUnlockUntil - nowMillis).coerceAtLeast(0L)
-                        if (hasPendingUnlock) {
-                            val totalSec = (unlockRemMs / 1000).coerceAtLeast(0)
-                            val h = totalSec / 3600
-                            val m = (totalSec % 3600) / 60
-                            val s = totalSec % 60
-                            val unlockTimeStr = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
-                            Spacer(modifier = Modifier.height(14.dp))
-                            StatusPillBadge(
-                                label = "Unlocking in $unlockTimeStr",
-                                tone = BadgeTone.WARN,
-                                breathing = true,
-                                icon = CyberIcons.Clock
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Btn(
-                                label = "Cancel Unlock",
-                                icon = CyberIcons.Close,
-                                onClick = { repo.cancelFocusUnlock() },
-                                kind = BtnKind.GHOST
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.height(18.dp))
-                            Btn(
-                                label = "End Focus Early",
-                                icon = CyberIcons.Stop,
-                                onClick = { repo.requestEndQuickFocus() },
-                                kind = BtnKind.SECONDARY
-                            )
-                        }
-                    }
-                }
-            } else {
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(
-                                text = "Quick Focus Countdown",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Instantly block distractions for a targeted interval",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            15 to "15m",
-                            30 to "30m",
-                            60 to "1h",
-                            120 to "2h",
-                            240 to "4h"
-                        ).forEach { (m, lbl) ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(NordicColors.CardSurfaceHero)
-                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                    .clickable { repo.startQuickFocus(m) }
-                                    .padding(horizontal = 13.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = lbl,
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
+                baseList
+                    .filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
+                    .sortedWith(
+                        compareByDescending<AppItem> { focus.allowedApps.contains(it.packageName) }
+                            .thenBy { it.label.lowercase() }
+                    )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 110.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // ----------------------------------------------------
+                // Section 1: Focus Session Status & Live Timer Card
+                // ----------------------------------------------------
+                item(key = "focus_status_hero") {
+                    if (isFocusRunningNow) {
+                        val remainingSec = if (isManualActive) {
+                            ((focus.focusUntil - nowMillis) / 1000L).coerceAtLeast(0L)
+                        } else {
+                            (activeSchedule!!.getRemainingMillisNow() / 1000L).coerceAtLeast(0L)
+                        }
+                        val timeStr = formatHms(remainingSec)
+                        val finishClock = if (isManualActive) {
+                            formatClockTime(focus.focusUntil)
+                        } else {
+                            clock12(activeSchedule!!.endMin)
+                        }
+                        val sessionSubtitle = if (isManualActive) "Manual Session" else "Schedule: ${activeSchedule?.label}"
 
-            // 2. Daily Schedules Section
-            SectionHeader(
-                title = "Daily Schedules",
-                icon = CyberIcons.Clock,
-                subtitle = "Focus mode turns on automatically during recurring daily windows"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Recurring Windows",
-                            color = NordicColors.TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${focus.schedules.size} schedule${if (focus.schedules.size == 1) "" else "s"} configured",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Btn(
-                        label = if (showAddSchedule) "Cancel" else "Add",
-                        icon = if (showAddSchedule) CyberIcons.Close else CyberIcons.Add,
-                        onClick = { showAddSchedule = !showAddSchedule },
-                        kind = if (showAddSchedule) BtnKind.GHOST else BtnKind.PRIMARY
-                    )
-                }
-
-                // Add Schedule Form
-                if (showAddSchedule) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(NordicColors.CardSurfaceHero)
-                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(14.dp))
-                            .padding(14.dp)
-                    ) {
-                        Column {
-                            Text(
-                                text = "New Schedule Details",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Name input
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(NordicColors.CanvasBg)
-                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                        NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                if (newScheduleLabel.isEmpty()) {
-                                    Text(
-                                        text = "Schedule name (e.g. Work, Bedtime)",
-                                        color = NordicColors.TextSecondary,
-                                        fontSize = 13.sp
+                                StatusPillBadge(
+                                    label = "FOCUS SESSION ACTIVE",
+                                    tone = BadgeTone.ACCENT,
+                                    breathing = true,
+                                    icon = CyberIcons.Focus
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = sessionSubtitle,
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                NordicArcGauge(
+                                    progress = (remainingSec % 3600L).toFloat() / 3600f,
+                                    size = 175.dp
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = timeStr,
+                                            color = NordicColors.TextPrimary,
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 1.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Remaining Time",
+                                            color = NordicColors.TextSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Runs until $finishClock",
+                                            color = NordicColors.AccentPrimary,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Only essential allowed apps are accessible",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 12.sp
+                                )
+
+                                val hasPendingUnlock = focus.pendingUnlockUntil > 0L
+                                val unlockRemMs = (focus.pendingUnlockUntil - nowMillis).coerceAtLeast(0L)
+                                if (hasPendingUnlock) {
+                                    val totalSec = unlockRemMs / 1000L
+                                    val unlockTimeStr = formatHms(totalSec)
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    StatusPillBadge(
+                                        label = "Unlocking in $unlockTimeStr",
+                                        tone = BadgeTone.WARN,
+                                        breathing = true,
+                                        icon = CyberIcons.Clock
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Btn(
+                                        label = "Cancel Unlock",
+                                        icon = CyberIcons.Close,
+                                        onClick = { repo.cancelFocusUnlock() },
+                                        kind = BtnKind.GHOST
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Btn(
+                                        label = "Stop Focus Mode",
+                                        icon = CyberIcons.Stop,
+                                        onClick = { repo.requestEndQuickFocus() },
+                                        kind = BtnKind.SECONDARY
                                     )
                                 }
-                                BasicTextField(
-                                    value = newScheduleLabel,
-                                    onValueChange = { newScheduleLabel = it },
-                                    textStyle = TextStyle(
-                                        color = NordicColors.TextPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    cursorBrush = SolidColor(NordicColors.AccentPrimary),
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                             }
+                        }
+                    } else {
+                        // Focus Mode Inactive
+                        val nextUpcomingSched = focus.schedules
+                            .filter { it.enabled }
+                            .minByOrNull { it.getNextStartMillis() ?: Long.MAX_VALUE }
 
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Time pickers
+                        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                // Starts
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Starts", color = NordicColors.TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(NordicColors.CanvasBg)
-                                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                TimePickerDialog(
-                                                    context,
-                                                    { _, h, m -> newStartMin = h * 60 + m },
-                                                    newStartMin / 60,
-                                                    newStartMin % 60,
-                                                    false
-                                                ).show()
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = clock12(newStartMin),
-                                            color = NordicColors.TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                // Duration pill
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
-                                        text = formatDuration(newStartMin, newEndMin),
-                                        color = NordicColors.AccentPrimary,
-                                        fontSize = 12.sp,
+                                        text = "Focus Mode Inactive",
+                                        color = NordicColors.TextPrimary,
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold
                                     )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    val subtitle = if (nextUpcomingSched != null) {
+                                        "Next schedule starts at ${clock12(nextUpcomingSched.startMin)}"
+                                    } else {
+                                        "Instantly block distractions for a targeted interval"
+                                    }
                                     Text(
-                                        text = "duration",
+                                        text = subtitle,
                                         color = NordicColors.TextSecondary,
-                                        fontSize = 10.sp
+                                        fontSize = 12.sp
                                     )
                                 }
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                // Ends
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Ends", color = NordicColors.TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(NordicColors.CanvasBg)
-                                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                TimePickerDialog(
-                                                    context,
-                                                    { _, h, m -> newEndMin = h * 60 + m },
-                                                    newEndMin / 60,
-                                                    newEndMin % 60,
-                                                    false
-                                                ).show()
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = clock12(newEndMin),
-                                            color = NordicColors.TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
                             }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Btn(
-                                label = "Select Allowed Apps (${newScheduleAllowedApps.size} selected)",
-                                icon = CyberIcons.Apps,
-                                onClick = { showNewScheduleAppPicker = true },
-                                kind = BtnKind.SECONDARY,
-                                modifier = Modifier.fillMaxWidth()
-                            )
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            Btn(
-                                label = "Save Schedule",
-                                icon = CyberIcons.Check,
-                                onClick = {
-                                    val name = newScheduleLabel.trim().ifEmpty { "Schedule ${focus.schedules.size + 1}" }
-                                    repo.addSchedule(name, newStartMin, newEndMin, newScheduleAllowedApps)
-                                    newScheduleLabel = ""
-                                    newScheduleAllowedApps = emptySet()
-                                    showAddSchedule = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-
-                // Schedule items list
-                if (focus.schedules.isEmpty() && !showAddSchedule) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "No daily schedules yet — tap Add to create a recurring focus window.",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.5.sp
-                    )
-                } else if (focus.schedules.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        focus.schedules.forEach { s ->
-                            val isActiveNow = repo.isScheduleActiveNow(s)
-                            Box(
+                            // Duration Chips Row
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActiveNow) NordicColors.CardSurfaceHero else NordicColors.CanvasBg)
-                                    .border(
-                                        1.dp,
-                                        if (isActiveNow) NordicColors.AccentPrimary.copy(alpha = 0.5f) else NordicColors.HairlineBorder,
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                    .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                durationOptions.forEach { (mins, lbl) ->
+                                    val isSel = (selectedManualDurationMin == mins)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                            .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                            .clickable { selectedManualDurationMin = mins }
+                                            .padding(horizontal = 13.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = lbl,
+                                            color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextPrimary,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (selectedManualDurationMin == -1) {
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = s.label,
-                                                color = NordicColors.TextPrimary,
-                                                fontSize = 13.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            if (isActiveNow) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                StatusPillBadge(
-                                                    label = "Active",
-                                                    tone = BadgeTone.OK,
-                                                    small = true,
-                                                    breathing = true
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "${clock12(s.startMin)} – ${clock12(s.endMin)} (${formatDuration(s.startMin, s.endMin)})",
-                                            color = NordicColors.TextSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.clickable { editingScheduleForApps = s }
+                                    listOf(10, 20, 90, 180, 360).forEach { cm ->
+                                        val isCustomSel = (customManualDurationMin == cm)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isCustomSel) NordicColors.AccentSecondary else NordicColors.CanvasBg)
+                                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(8.dp))
+                                                .clickable { customManualDurationMin = cm }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
                                         ) {
-                                            StatusPillBadge(
-                                                label = "${s.allowedApps.size} Apps Allowed",
-                                                tone = BadgeTone.IDLE,
-                                                small = true,
-                                                icon = CyberIcons.Apps
+                                            Text(
+                                                text = "${cm}m",
+                                                color = NordicColors.TextPrimary,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold
                                             )
                                         }
                                     }
+                                }
+                            }
 
-                                    val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
-                                    val hasSchedPending = schedPendingUntil > 0L
-                                    val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
-                                    val action = focus.pendingScheduleActions[s.id] ?: "delete"
+                            Spacer(modifier = Modifier.height(16.dp))
 
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (hasSchedPending) {
-                                            val totalSec = (schedRemMs / 1000).coerceAtLeast(0)
-                                            val h = totalSec / 3600
-                                            val m = (totalSec % 3600) / 60
-                                            val sec = totalSec % 60
-                                            val timeStr = if (h > 0) String.format("%02d:%02d:%02d", h, m, sec) else String.format("%02d:%02d", m, sec)
-                                            val actionLabel = if (action == "delete") "Deleting" else "Disabling"
-                                            StatusPillBadge(
-                                                label = "$actionLabel in $timeStr",
-                                                tone = BadgeTone.WARN,
-                                                small = true
+                            val finalDurationMin = if (selectedManualDurationMin == -1) customManualDurationMin else selectedManualDurationMin
+                            val finalDurationLabel = if (finalDurationMin >= 60) "${finalDurationMin / 60}h ${if (finalDurationMin % 60 > 0) "${finalDurationMin % 60}m" else ""}".trim() else "${finalDurationMin}m"
+                            Btn(
+                                label = "Start Focus Session ($finalDurationLabel)",
+                                icon = CyberIcons.Play,
+                                onClick = { repo.startQuickFocus(finalDurationMin) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                // ----------------------------------------------------
+                // Section 2: Daily Schedules Card
+                // ----------------------------------------------------
+                item(key = "daily_schedules_card") {
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "DAILY SCHEDULES",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Automate recurring focus windows with custom allowed apps",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Btn(
+                                label = "+ New Schedule",
+                                icon = CyberIcons.Plus,
+                                onClick = {
+                                    editingSchedule = null
+                                    scheduleFormLabel = ""
+                                    scheduleFormStartMin = 0 // 12:00 AM (0)
+                                    scheduleFormEndMin = 360 // 06:00 AM (360)
+                                    scheduleFormDays = setOf(1, 2, 3, 4, 5, 6, 7)
+                                    scheduleFormAllowedApps = emptySet()
+                                    showAddOrEditSchedule = true
+                                },
+                                kind = BtnKind.PRIMARY
+                            )
+                        }
+
+                        if (focus.schedules.isEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No daily schedules yet — tap '+ New Schedule' to create a recurring focus window.",
+                                color = NordicColors.TextSecondary,
+                                fontSize = 12.5.sp
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                focus.schedules.forEach { s ->
+                                    val isActiveNow = s.isRunningAt()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isActiveNow) NordicColors.CardSurfaceHero else NordicColors.CanvasBg)
+                                            .border(
+                                                1.dp,
+                                                if (isActiveNow) NordicColors.AccentPrimary.copy(alpha = 0.6f) else NordicColors.HairlineBorder,
+                                                RoundedCornerShape(12.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            IconButton(
-                                                onClick = { repo.cancelScheduleUnlock(s.id) },
-                                                modifier = Modifier.size(32.dp)
+                                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                                    ) {
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Icon(
-                                                    imageVector = CyberIcons.Close,
-                                                    contentDescription = "Abort",
-                                                    tint = NordicColors.AlertMuted,
-                                                    modifier = Modifier.size(16.dp)
+                                                Text(
+                                                    text = s.label,
+                                                    color = NordicColors.TextPrimary,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
                                                 )
+                                                if (isActiveNow) {
+                                                    val leftSec = s.getRemainingMillisNow() / 1000L
+                                                    val leftStr = formatHms(leftSec)
+                                                    StatusPillBadge(
+                                                        label = "Running Now ($leftStr left)",
+                                                        tone = BadgeTone.OK,
+                                                        small = true,
+                                                        breathing = true
+                                                    )
+                                                } else if (s.enabled) {
+                                                    val nextMs = s.getNextStartMillis()
+                                                    val statusStr = if (nextMs != null) formatStartsIn(nextMs) else "Upcoming at ${clock12(s.startMin)}"
+                                                    StatusPillBadge(
+                                                        label = statusStr,
+                                                        tone = BadgeTone.ACCENT,
+                                                        small = true
+                                                    )
+                                                } else {
+                                                    StatusPillBadge(
+                                                        label = "Disabled",
+                                                        tone = BadgeTone.IDLE,
+                                                        small = true
+                                                    )
+                                                }
                                             }
-                                        } else {
-                                            IconButton(
-                                                onClick = { repo.requestDeleteSchedule(s.id) },
-                                                modifier = Modifier.size(32.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = CyberIcons.Delete,
-                                                    contentDescription = "Delete",
-                                                    tint = NordicColors.AlertMuted,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            NordicSwitch(
-                                                checked = s.enabled,
-                                                onCheckedChange = { repo.requestToggleScheduleEnabled(s.id, it) }
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "${clock12(s.startMin)} – ${clock12(s.endMin)} (${formatDuration(s.startMin, s.endMin)})",
+                                                color = NordicColors.TextSecondary,
+                                                fontSize = 12.sp
                                             )
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            // Days of Week Pills
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                listOf(1 to "M", 2 to "T", 3 to "W", 4 to "T", 5 to "F", 6 to "S", 7 to "S").forEach { (dow, ch) ->
+                                                    val isDayActive = s.daysOfWeek.contains(dow)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(22.dp)
+                                                            .clip(CircleShape)
+                                                            .background(if (isDayActive) NordicColors.AccentPrimary.copy(alpha = 0.85f) else NordicColors.CardSurfaceHero)
+                                                            .border(1.dp, NordicColors.HairlineBorder, CircleShape),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = ch,
+                                                            color = if (isDayActive) Color.White else NordicColors.TextSecondary.copy(alpha = 0.6f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.width(6.dp))
+
+                                                // Allowed Apps Chip
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.clickable { editingScheduleForApps = s }
+                                                ) {
+                                                    StatusPillBadge(
+                                                        label = "${s.allowedPackages.size} Apps Allowed",
+                                                        tone = BadgeTone.IDLE,
+                                                        small = true,
+                                                        icon = CyberIcons.Apps
+                                                    )
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(10.dp))
+
+                                            val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
+                                            val hasSchedPending = schedPendingUntil > 0L
+                                            val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
+                                            val action = focus.pendingScheduleActions[s.id] ?: "delete"
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.End
+                                            ) {
+                                                if (hasSchedPending) {
+                                                    val timeStr = formatHms(schedRemMs / 1000L)
+                                                    val actionLabel = if (action == "delete") "Deleting" else "Disabling"
+                                                    StatusPillBadge(
+                                                        label = "$actionLabel in $timeStr",
+                                                        tone = BadgeTone.WARN,
+                                                        small = true
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    IconButton(
+                                                        onClick = { repo.cancelScheduleUnlock(s.id) },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = CyberIcons.Close,
+                                                            contentDescription = "Abort",
+                                                            tint = NordicColors.AlertMuted,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                } else {
+                                                    IconButton(
+                                                        onClick = {
+                                                            editingSchedule = s
+                                                            scheduleFormLabel = s.label
+                                                            scheduleFormStartMin = s.startMin
+                                                            scheduleFormEndMin = s.endMin
+                                                            scheduleFormDays = s.daysOfWeek
+                                                            scheduleFormAllowedApps = s.allowedPackages
+                                                            showAddOrEditSchedule = true
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = CyberIcons.Edit,
+                                                            contentDescription = "Edit",
+                                                            tint = NordicColors.TextSecondary,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(2.dp))
+                                                    IconButton(
+                                                        onClick = { repo.requestDeleteSchedule(s.id) },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = CyberIcons.Delete,
+                                                            contentDescription = "Delete",
+                                                            tint = NordicColors.AlertMuted,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    NordicSwitch(
+                                                        checked = s.enabled,
+                                                        onCheckedChange = { repo.requestToggleScheduleEnabled(s.id, it) }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -675,291 +734,225 @@ fun FocusScreen(
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 3. Distraction & Short-Form Shield (Separated items)
-            SectionHeader(
-                title = "Distraction & Short-Form Shield",
-                icon = CyberIcons.ShieldCheck,
-                subtitle = "Exit short-form video feeds and algorithms while keeping communication intact"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Dedicated Individual Item 1: YouTube Shorts
-            DistractionItemCard(
-                title = "Block YouTube Shorts",
-                subtitle = "Immediately ejects Shorts back to Home feed or subscription tab",
-                icon = CyberIcons.Movie,
-                checked = distraction.blockYtShorts,
-                pendingUnlockUntil = distraction.pendingUnlocks["block_yt_shorts"] ?: 0L,
-                nowMillis = nowMillis,
-                onCancelUnlock = { repo.cancelDistractionUnlock("block_yt_shorts") },
-                onCheckedChange = { repo.toggleDistraction("block_yt_shorts", it) }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Dedicated Individual Item 2: Instagram Reels
-            DistractionItemCard(
-                title = "Block Instagram Reels",
-                subtitle = "Immediately exits Reels back to your main timeline and messages",
-                icon = CyberIcons.Movie,
-                checked = distraction.blockInstaReels,
-                pendingUnlockUntil = distraction.pendingUnlocks["block_insta_reels"] ?: 0L,
-                nowMillis = nowMillis,
-                onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_reels") },
-                onCheckedChange = { repo.toggleDistraction("block_insta_reels", it) }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Dedicated Individual Item 3: Instagram Explore & Search
-            DistractionItemCard(
-                title = "Block Instagram Explore",
-                subtitle = "Blocks discovery algorithm and search tab to prevent doom-scrolling",
-                icon = CyberIcons.Search,
-                checked = distraction.blockInstaSearch,
-                pendingUnlockUntil = distraction.pendingUnlocks["block_insta_search"] ?: 0L,
-                nowMillis = nowMillis,
-                onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_search") },
-                onCheckedChange = { repo.toggleDistraction("block_insta_search", it) }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Dedicated Individual Item 4: Facebook Reels & Videos
-            DistractionItemCard(
-                title = "Block Facebook Reels & Videos",
-                subtitle = "Exits Reels, Watch and video feeds (Stories and text posts stay open)",
-                icon = CyberIcons.Movie,
-                checked = distraction.blockFbReels,
-                pendingUnlockUntil = distraction.pendingUnlocks["block_fb_reels"] ?: 0L,
-                nowMillis = nowMillis,
-                onCancelUnlock = { repo.cancelDistractionUnlock("block_fb_reels") },
-                onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Dedicated Item 5: Reddit Mature Content Lockdown
-            NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f).padding(end = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(NordicColors.CardSurfaceHero)
-                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = CyberIcons.Lock,
-                                contentDescription = null,
-                                tint = NordicColors.AccentPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Reddit Mature Content Lockdown",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Enforces 'Show mature content' OFF at the system level",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                    StatusPillBadge(label = "Enforced", tone = BadgeTone.OK, small = true)
+                // ----------------------------------------------------
+                // Section 2.5: Distraction & Short-Form Shield
+                // ----------------------------------------------------
+                item(key = "distraction_shield_section") {
+                    SectionHeader(
+                        title = "Distraction & Short-Form Shield",
+                        icon = CyberIcons.ShieldCheck,
+                        subtitle = "Exit short-form video feeds and algorithms while keeping communication intact"
+                    )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(18.dp))
+                item(key = "distraction_yt") {
+                    DistractionItemCard(
+                        title = "Block YouTube Shorts",
+                        subtitle = "Immediately ejects Shorts back to Home feed or subscription tab",
+                        icon = CyberIcons.Movie,
+                        checked = distraction.blockYtShorts,
+                        pendingUnlockUntil = distraction.pendingUnlocks["block_yt_shorts"] ?: 0L,
+                        nowMillis = nowMillis,
+                        onCancelUnlock = { repo.cancelDistractionUnlock("block_yt_shorts") },
+                        onCheckedChange = { repo.toggleDistraction("block_yt_shorts", it) }
+                    )
+                }
 
-            // 4. Allowed Essential Apps Whitelist
-            SectionHeader(
-                title = "Allowed Essential Apps",
-                icon = CyberIcons.Apps,
-                subtitle = "Only these apps (plus Phone and keyboard) remain usable during focus"
-            )
+                item(key = "distraction_insta_reels") {
+                    DistractionItemCard(
+                        title = "Block Instagram Reels",
+                        subtitle = "Immediately exits Reels back to your main timeline and messages",
+                        icon = CyberIcons.Movie,
+                        checked = distraction.blockInstaReels,
+                        pendingUnlockUntil = distraction.pendingUnlocks["block_insta_reels"] ?: 0L,
+                        nowMillis = nowMillis,
+                        onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_reels") },
+                        onCheckedChange = { repo.toggleDistraction("block_insta_reels", it) }
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(10.dp))
+                item(key = "distraction_insta_explore") {
+                    DistractionItemCard(
+                        title = "Block Instagram Explore",
+                        subtitle = "Blocks discovery algorithm and search tab to prevent doom-scrolling",
+                        icon = CyberIcons.Search,
+                        checked = distraction.blockInstaSearch,
+                        pendingUnlockUntil = distraction.pendingUnlocks["block_insta_search"] ?: 0L,
+                        nowMillis = nowMillis,
+                        onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_search") },
+                        onCheckedChange = { repo.toggleDistraction("block_insta_search", it) }
+                    )
+                }
 
-            val isFocusCurrentlyLocked = focus.active || study.active || focus.schedules.any { repo.isScheduleActiveNow(it) }
+                item(key = "distraction_fb_reels") {
+                    DistractionItemCard(
+                        title = "Block Facebook Reels & Videos",
+                        subtitle = "Exits Reels, Watch and video feeds (Stories and text posts stay open)",
+                        icon = CyberIcons.Movie,
+                        checked = distraction.blockFbReels,
+                        pendingUnlockUntil = distraction.pendingUnlocks["block_fb_reels"] ?: 0L,
+                        nowMillis = nowMillis,
+                        onCancelUnlock = { repo.cancelDistractionUnlock("block_fb_reels") },
+                        onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
+                    )
+                }
 
-            NordicMicroGridCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
-            ) {
-                if (isFocusCurrentlyLocked) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(NordicColors.CardSurfaceHero)
-                            .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 12.dp, vertical = 9.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = CyberIcons.Lock,
-                                contentDescription = null,
-                                tint = NordicColors.AlertMuted,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "App selection is locked while a Focus session is active",
-                                color = NordicColors.AlertMuted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                // ----------------------------------------------------
+                // Section 3: Focus Mode Allowed Apps Whitelist Header & Filter
+                // ----------------------------------------------------
+                item(key = "allowed_apps_header") {
+                    Column {
+                        SectionHeader(
+                            title = "Allowed Essential Apps",
+                            icon = CyberIcons.Apps,
+                            subtitle = "Apps permitted to open during manual or scheduled focus sessions"
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Lock Banner (strictly ONLY when a focus session is actively running right now!)
+                        if (isFocusCurrentlyLocked) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NordicColors.CardSurfaceHero)
+                                    .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 12.dp, vertical = 9.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = CyberIcons.Lock,
+                                        contentDescription = null,
+                                        tint = NordicColors.AlertMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "App selection is locked while a Focus session is active",
+                                        color = NordicColors.AlertMuted,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                        } else if (protection.isActive) {
+                            val pendingAppsUnlock = focus.pendingAppsUnlockUntil
+                            if (pendingAppsUnlock > 0L) {
+                                val remSec = ((pendingAppsUnlock - nowMillis) / 1000L).coerceAtLeast(0L)
+                                val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(NordicColors.CardSurfaceHero)
+                                        .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = CyberIcons.Lock,
+                                            contentDescription = null,
+                                            tint = NordicColors.AlertMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Modifying allowed apps unlocking in $timeStr",
+                                            color = NordicColors.TextPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Text(
+                                        text = "Abort",
+                                        color = NordicColors.AlertMuted,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { repo.cancelFocusAppsUnlock() }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
                         }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                } else if (protection.isActive) {
-                    val pendingAppsUnlock = focus.pendingAppsUnlockUntil
-                    if (pendingAppsUnlock > 0L) {
-                        val remSec = ((pendingAppsUnlock - nowMillis) / 1000L).coerceAtLeast(0L)
-                        val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+
+                        // 3-Tab Filter Chips: User Apps | System Apps | All Apps
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("User Apps", "System Apps", "All Apps").forEachIndexed { idx, title ->
+                                val selected = appFilterTab == idx
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (selected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                        .border(
+                                            1.dp,
+                                            if (selected) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { appFilterTab = idx }
+                                        .padding(vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = title,
+                                        color = if (selected) Color.White else NordicColors.TextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Search box
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(NordicColors.CardSurfaceHero)
-                                .border(1.dp, NordicColors.AlertMuted, RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .background(NordicColors.CanvasBg)
+                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = CyberIcons.Lock,
-                                    contentDescription = null,
-                                    tint = NordicColors.AlertMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Modifying allowed apps unlocking in $timeStr",
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            if (appSearchQuery.isEmpty()) {
+                                Text(text = "Search apps to whitelist...", color = NordicColors.TextSecondary, fontSize = 13.sp)
                             }
-                            Text(
-                                text = "Abort",
-                                color = NordicColors.AlertMuted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clickable { repo.cancelFocusAppsUnlock() }
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-                }
-
-                // 3-Tab Filter Chips: User Apps | System Apps | All Apps
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("User Apps", "System Apps", "All Apps").forEachIndexed { idx, title ->
-                        val selected = appFilterTab == idx
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
-                                .border(
-                                    1.dp,
-                                    if (selected) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable { appFilterTab = idx }
-                                .padding(vertical = 7.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = title,
-                                color = if (selected) Color.White else NordicColors.TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            BasicTextField(
+                                value = appSearchQuery,
+                                onValueChange = { appSearchQuery = it },
+                                textStyle = TextStyle(color = NordicColors.TextPrimary, fontSize = 13.sp),
+                                cursorBrush = SolidColor(NordicColors.AccentPrimary),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Search box
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(NordicColors.CanvasBg)
-                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 9.dp)
-                ) {
-                    if (appSearchQuery.isEmpty()) {
-                        Text(text = "Search apps to whitelist...", color = NordicColors.TextSecondary, fontSize = 13.sp)
-                    }
-                    BasicTextField(
-                        value = appSearchQuery,
-                        onValueChange = { appSearchQuery = it },
-                        textStyle = TextStyle(color = NordicColors.TextPrimary, fontSize = 13.sp),
-                        cursorBrush = SolidColor(NordicColors.AccentPrimary),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                val filteredApps = remember(apps, appSearchQuery, focus.allowedApps, appFilterTab) {
-                    val q = appSearchQuery.trim().lowercase()
-                    val baseList = when (appFilterTab) {
-                        0 -> apps.filter { !it.isSystem }
-                        1 -> apps.filter { it.isSystem }
-                        else -> apps
-                    }
-                    baseList
-                        .filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
-                        .sortedWith(
-                            compareByDescending<com.blocker.data.AppItem> { focus.allowedApps.contains(it.packageName) }
-                                .thenBy { it.label.lowercase() }
-                        )
-                        .take(30)
-                }
-
+                // ----------------------------------------------------
+                // Section 3: App Rows
+                // ----------------------------------------------------
                 if (filteredApps.isEmpty()) {
-                    Text(
-                        text = "No apps found matching query",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
+                    item(key = "empty_apps") {
+                        Text(
+                            text = "No apps found matching query",
+                            color = NordicColors.TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        filteredApps.forEach { app ->
-                            val isAllowed = focus.allowedApps.contains(app.packageName)
+                    items(filteredApps.take(40), key = { it.packageName }) { app ->
+                        val isAllowed = focus.allowedApps.contains(app.packageName)
+                        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1009,530 +1002,664 @@ fun FocusScreen(
 
         } else {
             // ==========================================
-            // STUDY MODE VIEW (Pomodoro Lockout)
+            // STUDY MODE TAB (Clean Scrollable Column)
             // ==========================================
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(bottom = 110.dp), // Clearance for bottom navigation
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (study.active) {
+                    // Active Study Lockout State
+                    val remSec = study.remainingMs / 1000L
+                    val timeStr = formatHms(remSec)
+                    val finishClock = formatClockTime(study.until)
+                    val totalCycleSec = ((if (study.isBreak) study.breakMinutes else study.focusMinutes) * 60).coerceAtLeast(1)
+                    val progressFraction = (remSec.toFloat() / totalCycleSec.toFloat()).coerceIn(0f, 1f)
 
-            if (study.active) {
-                val remSec = study.remainingMs / 1000L
-                val mins = remSec / 60L
-                val secs = remSec % 60L
-                val timeStr = String.format("%02d:%02d", mins, secs)
-
-                NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        StatusPillBadge(
-                            label = if (study.isBreak) "Break Time — Rest Your Mind" else "Deep Study Lockout",
-                            tone = if (study.isBreak) BadgeTone.OK else BadgeTone.ACCENT,
-                            breathing = true,
-                            icon = if (study.isBreak) CyberIcons.Check else CyberIcons.Lock
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        HeroNumeral(
-                            value = timeStr,
-                            caption = if (study.isBreak) "Break Remaining" else "Study Session Countdown",
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "Round ${study.currentRound} of ${study.totalRounds}",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        NordicLinearBar(
-                            progress = study.currentRound.toFloat() / study.totalRounds.coerceAtLeast(1).toFloat(),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
-                        )
-
-                        if (study.autoDnd || study.autoWifi) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (study.autoDnd) {
-                                    StatusPillBadge(
-                                        label = "DND Active",
-                                        tone = BadgeTone.ACCENT,
-                                        small = true,
-                                        icon = CyberIcons.Dnd
-                                    )
-                                }
-                                if (study.autoWifi) {
-                                    StatusPillBadge(
-                                        label = if (study.isBreak) "Wi-Fi Restored" else "Wi-Fi Muted",
-                                        tone = if (study.isBreak) BadgeTone.OK else BadgeTone.WARN,
-                                        small = true,
-                                        icon = if (study.isBreak) CyberIcons.Wifi else CyberIcons.WifiOff
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (study.isBreak) {
-                                Btn(
-                                    label = "Skip Break",
-                                    icon = CyberIcons.Play,
-                                    onClick = { repo.skipStudyBreak() },
-                                    kind = BtnKind.PRIMARY
-                                )
-                            }
-                            Btn(
-                                label = "End Session",
-                                icon = CyberIcons.Stop,
-                                onClick = { repo.endStudySession() },
-                                kind = BtnKind.SECONDARY
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Active Quote Card
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "\"${randomQuote.quote}\"",
-                        color = NordicColors.TextPrimary,
-                        fontSize = 13.5.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "— ${randomQuote.source}",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-            } else {
-                // Study Mode Setup & Configurator
-                SectionHeader(
-                    title = "Pomodoro Study Lockout",
-                    icon = CyberIcons.Book,
-                    subtitle = "Eliminates all digital friction with strict timed focus cycles"
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Customize Study Cycles",
-                        color = NordicColors.TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = "Full device lockout during focus; relax during scheduled breaks.",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // 1. Focus Duration Chips
-                    Text(
-                        text = "FOCUS DURATION",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(15, 25, 30, 45, 60).forEach { m ->
-                            val isSel = (studyFocusMins == m)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
-                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                    .clickable { studyFocusMins = m }
-                                    .padding(horizontal = 13.dp, vertical = 7.dp)
-                            ) {
-                                Text(
-                                    text = "${m}m",
-                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // 2. Break Duration Chips
-                    Text(
-                        text = "BREAK DURATION",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(3, 5, 10, 15).forEach { m ->
-                            val isSel = (studyBreakMins == m)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
-                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                    .clickable { studyBreakMins = m }
-                                    .padding(horizontal = 14.dp, vertical = 7.dp)
-                            ) {
-                                Text(
-                                    text = "${m}m",
-                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // 3. Total Rounds Chips
-                    Text(
-                        text = "TOTAL ROUNDS",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(1, 2, 3, 4, 6).forEach { r ->
-                            val isSel = (studyRounds == r)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
-                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                                    .clickable { studyRounds = r }
-                                    .padding(horizontal = 14.dp, vertical = 7.dp)
-                            ) {
-                                Text(
-                                    text = "$r",
-                                    color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Btn(
-                        label = "Launch Study Lockout ($studyFocusMins min focus, $studyRounds rounds)",
-                        icon = CyberIcons.Play,
-                        onClick = {
-                            repo.startStudySession(studyFocusMins, studyBreakMins, studyRounds)
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Connectivity & Notification Lockdown
-                SectionHeader(
-                    title = "Lockdown Safeguards & Connectivity",
-                    icon = CyberIcons.Dnd,
-                    subtitle = "Automate Do Not Disturb, silence notifications, and eliminate internet distractions"
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // DND Access Warning Card if not granted
-                if (!study.hasDndAccess) {
-                    NordicMicroGridCard(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = CyberIcons.Warning,
-                                    contentDescription = null,
-                                    tint = NordicColors.AlertMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "DND Permission Needed",
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "To automatically silence incoming rings, alerts, and notifications during study sessions, grant Do Not Disturb access.",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Btn(
-                                label = "Grant DND Permission",
-                                icon = CyberIcons.Dnd,
-                                onClick = { repo.requestDndAccess(context) },
-                                kind = BtnKind.PRIMARY
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                // Auto DND Toggle
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f).padding(end = 12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .background(NordicColors.CardSurfaceHero)
-                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = CyberIcons.Dnd,
-                                    contentDescription = null,
-                                    tint = NordicColors.AccentPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Silence Notifications (DND)",
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Auto-enables Do Not Disturb during focus cycles",
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 11.5.sp
-                                )
-                            }
-                        }
-                        NordicSwitch(
-                            checked = study.autoDnd,
-                            onCheckedChange = {
-                                if (it && !study.hasDndAccess) {
-                                    repo.requestDndAccess(context)
-                                } else {
-                                    repo.setStudyAutoDnd(it)
-                                }
-                            }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Auto Wi-Fi Disconnect Toggle
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f).padding(end = 12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .background(NordicColors.CardSurfaceHero)
-                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = CyberIcons.WifiOff,
-                                    contentDescription = null,
-                                    tint = NordicColors.AccentPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Turn off Wi-Fi during Study",
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Disconnects Wi-Fi during focus; restores on breaks",
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 11.5.sp
-                                )
-                            }
-                        }
-                        NordicSwitch(
-                            checked = study.autoWifi,
-                            onCheckedChange = { repo.setStudyAutoWifi(it) }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Cellular & Connectivity Quick Actions
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Column {
-                        Row(
+                    NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(11.dp))
-                                        .background(NordicColors.CardSurfaceHero)
-                                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                                    contentAlignment = Alignment.Center
+                            StatusPillBadge(
+                                label = if (study.isBreak) "REST BREAK" else "FOCUS SESSION",
+                                tone = if (study.isBreak) BadgeTone.OK else BadgeTone.ACCENT,
+                                breathing = true,
+                                icon = if (study.isBreak) CyberIcons.Check else CyberIcons.Lock
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            NordicArcGauge(
+                                progress = progressFraction,
+                                size = 185.dp
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
                                 ) {
-                                    Icon(
-                                        imageVector = CyberIcons.Cellular,
-                                        contentDescription = null,
-                                        tint = NordicColors.AccentPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
                                     Text(
-                                        text = "Mobile Data & Network Controls",
+                                        text = timeStr,
                                         color = NordicColors.TextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 28.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 1.sp
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "Quick shortcuts to toggle off cellular or internet data",
+                                        text = if (study.isBreak) "Break Remaining" else "Study Countdown",
                                         color = NordicColors.TextSecondary,
-                                        fontSize = 11.5.sp
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "Ends at $finishClock",
+                                        color = NordicColors.AccentPrimary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "Round ${study.currentRound} of ${study.totalRounds}",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            NordicLinearBar(
+                                progress = study.currentRound.toFloat() / study.totalRounds.coerceAtLeast(1).toFloat(),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            // Quick Controls Row (Wi-Fi + Emergency Dialer)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Btn(
+                                    label = if (isWifiOn) "Turn Off Wi-Fi" else "Restore Wi-Fi",
+                                    icon = if (isWifiOn) CyberIcons.WifiOff else CyberIcons.Wifi,
+                                    onClick = { repo.toggleWifi(context) },
+                                    kind = BtnKind.SECONDARY,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Btn(
+                                    label = "Emergency Dialer",
+                                    icon = CyberIcons.Phone,
+                                    onClick = { openEmergencyDialer(context) },
+                                    kind = BtnKind.SECONDARY,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Session Actions Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (study.isBreak) {
+                                    Btn(
+                                        label = "Skip Break",
+                                        icon = CyberIcons.Play,
+                                        onClick = { repo.skipStudyBreak() },
+                                        kind = BtnKind.PRIMARY,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Btn(
+                                    label = "End Session",
+                                    icon = CyberIcons.Stop,
+                                    onClick = { repo.endStudySession() },
+                                    kind = BtnKind.SECONDARY,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Active Motivation Quote Card
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(2.dp)) {
+                            Text(
+                                text = "\"${randomQuote.quote}\"",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 13.5.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "— ${randomQuote.source}",
+                                color = NordicColors.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                } else {
+                    // Study Mode Setup & Configurator (Sequential Vertical Order)
+
+                    // Card 1: Motivation Quote Card
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(2.dp)) {
+                            Text(
+                                text = "\"${randomQuote.quote}\"",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 13.5.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "— ${randomQuote.source}",
+                                color = NordicColors.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Card 2: System Readiness & Quick Controls Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Left Card: Do Not Disturb
+                        NordicMicroGridCard(modifier = Modifier.weight(1f)) {
+                            Column {
+                                Text(
+                                    text = "Do Not Disturb",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (study.hasDndAccess) "Granted" else "Required",
+                                    color = if (study.hasDndAccess) NordicColors.SuccessMuted else NordicColors.AlertMuted,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                if (!study.hasDndAccess) {
+                                    Btn(
+                                        label = "Enable DND",
+                                        icon = CyberIcons.Dnd,
+                                        onClick = { repo.requestDndAccess(context) },
+                                        kind = BtnKind.PRIMARY,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    Btn(
+                                        label = "DND Ready",
+                                        icon = CyberIcons.Check,
+                                        onClick = {},
+                                        kind = BtnKind.GHOST,
+                                        enabled = false,
+                                        modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                        // Right Card: Wi-Fi Network
+                        NordicMicroGridCard(modifier = Modifier.weight(1f)) {
+                            Column {
+                                Text(
+                                    text = "Wi-Fi Network",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (isWifiOn) "Connected" else "Off",
+                                    color = if (isWifiOn) NordicColors.SuccessMuted else NordicColors.TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Btn(
+                                    label = "Toggle Wi-Fi",
+                                    icon = if (isWifiOn) CyberIcons.WifiOff else CyberIcons.Wifi,
+                                    onClick = { repo.toggleWifi(context) },
+                                    kind = BtnKind.SECONDARY,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    // Card 3: Study Session Configuration Card
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column {
+                                Text(
+                                    text = "Customize Study Cycles",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Full device lockout during focus; relax during scheduled breaks.",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            // Section A: FOCUS DURATION
+                            Column {
+                                Text(
+                                    text = "FOCUS DURATION",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(15, 25, 45, 60, 90, 120, 180).forEach { m ->
+                                        val isSel = (studyFocusMins == m)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                                .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                                .clickable { studyFocusMins = m }
+                                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                                        ) {
+                                            Text(
+                                                text = "${m}m",
+                                                color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Section B: BREAK DURATION
+                            Column {
+                                Text(
+                                    text = "BREAK DURATION",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(3, 5, 10, 15).forEach { m ->
+                                        val isSel = (studyBreakMins == m)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                                .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                                .clickable { studyBreakMins = m }
+                                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                                        ) {
+                                            Text(
+                                                text = "${m}m",
+                                                color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Section C: TOTAL ROUNDS
+                            Column {
+                                Text(
+                                    text = "TOTAL ROUNDS",
+                                    color = NordicColors.TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(1, 2, 3, 4, 5, 6).forEach { r ->
+                                        val isSel = (studyRounds == r)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                                .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                                .clickable { studyRounds = r }
+                                                .padding(horizontal = 15.dp, vertical = 7.dp)
+                                        ) {
+                                            Text(
+                                                text = "$r",
+                                                color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Section D: Launch Button
                             Btn(
-                                label = "Cellular Settings",
-                                icon = CyberIcons.Cellular,
-                                onClick = { repo.openDataSettings(context) },
-                                kind = BtnKind.SECONDARY,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Btn(
-                                label = "Wi-Fi Settings",
-                                icon = CyberIcons.Wifi,
-                                onClick = { repo.openWifiSettings(context) },
-                                kind = BtnKind.SECONDARY,
-                                modifier = Modifier.weight(1f)
+                                label = "Launch Study Lockout ($studyFocusMins min focus, $studyRounds rounds)",
+                                icon = CyberIcons.Play,
+                                onClick = { repo.startStudySession(studyFocusMins, studyBreakMins, studyRounds) },
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Quote Card
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "\"${randomQuote.quote}\"",
-                        color = NordicColors.TextPrimary,
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "— ${randomQuote.source}",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
         }
     }
 
-    if (showNewScheduleAppPicker) {
+    // ==========================================
+    // Add / Edit Schedule Dialog
+    // ==========================================
+    if (showAddOrEditSchedule) {
+        Dialog(
+            onDismissRequest = { showAddOrEditSchedule = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(NordicColors.CardSurface)
+                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(20.dp))
+                        .padding(20.dp)
+                ) {
+                    // Title Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (editingSchedule != null) "Edit Schedule" else "New Schedule",
+                            color = NordicColors.TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { showAddOrEditSchedule = false }) {
+                            Icon(CyberIcons.Close, contentDescription = "Close", tint = NordicColors.TextSecondary)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Name Field
+                    Text(text = "Schedule Name", color = NordicColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CanvasBg)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        if (scheduleFormLabel.isEmpty()) {
+                            Text(text = "e.g. Bedtime, Deep Work", color = NordicColors.TextSecondary.copy(alpha = 0.6f), fontSize = 13.sp)
+                        }
+                        BasicTextField(
+                            value = scheduleFormLabel,
+                            onValueChange = { scheduleFormLabel = it },
+                            textStyle = TextStyle(color = NordicColors.TextPrimary, fontSize = 13.sp),
+                            cursorBrush = SolidColor(NordicColors.AccentPrimary),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Start & End Time Pickers (12:00 AM converts to 0)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Starts", color = NordicColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NordicColors.CanvasBg)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hourOfDay, minute ->
+                                                scheduleFormStartMin = hourOfDay * 60 + minute
+                                            },
+                                            scheduleFormStartMin / 60,
+                                            scheduleFormStartMin % 60,
+                                            false
+                                        ).show()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = clock12(scheduleFormStartMin),
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Ends", color = NordicColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NordicColors.CanvasBg)
+                                    .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hourOfDay, minute ->
+                                                scheduleFormEndMin = hourOfDay * 60 + minute
+                                            },
+                                            scheduleFormEndMin / 60,
+                                            scheduleFormEndMin % 60,
+                                            false
+                                        ).show()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = clock12(scheduleFormEndMin),
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Window: ${formatDuration(scheduleFormStartMin, scheduleFormEndMin)}",
+                        color = NordicColors.AccentPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Days of Week
+                    Text(text = "Days of Week", color = NordicColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf(1 to "M", 2 to "T", 3 to "W", 4 to "T", 5 to "F", 6 to "S", 7 to "S").forEach { (dow, ch) ->
+                            val isSel = scheduleFormDays.contains(dow)
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSel) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                                    .border(1.dp, if (isSel) NordicColors.AccentPrimary else NordicColors.HairlineBorder, CircleShape)
+                                    .clickable {
+                                        scheduleFormDays = if (isSel) {
+                                            if (scheduleFormDays.size > 1) scheduleFormDays - dow else scheduleFormDays
+                                        } else {
+                                            scheduleFormDays + dow
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = ch,
+                                    color = if (isSel) Color.White else NordicColors.TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Select Allowed Apps Button
+                    Btn(
+                        label = "Select Allowed Apps (${scheduleFormAllowedApps.size} selected)",
+                        icon = CyberIcons.Apps,
+                        onClick = { showScheduleFormAppPicker = true },
+                        kind = BtnKind.SECONDARY,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Btn(
+                            label = "Cancel",
+                            onClick = { showAddOrEditSchedule = false },
+                            kind = BtnKind.GHOST,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Btn(
+                            label = "Save Schedule",
+                            icon = CyberIcons.Check,
+                            onClick = {
+                                val label = scheduleFormLabel.ifBlank { "Focus Window" }
+                                if (editingSchedule != null) {
+                                    repo.updateSchedule(
+                                        id = editingSchedule!!.id,
+                                        label = label,
+                                        startMin = scheduleFormStartMin,
+                                        endMin = scheduleFormEndMin,
+                                        enabled = editingSchedule!!.enabled,
+                                        allowedApps = scheduleFormAllowedApps,
+                                        daysOfWeek = scheduleFormDays
+                                    )
+                                } else {
+                                    repo.addSchedule(
+                                        label = label,
+                                        startMin = scheduleFormStartMin,
+                                        endMin = scheduleFormEndMin,
+                                        allowedApps = scheduleFormAllowedApps,
+                                        daysOfWeek = scheduleFormDays
+                                    )
+                                }
+                                showAddOrEditSchedule = false
+                            },
+                            kind = BtnKind.PRIMARY,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal App Picker for Schedule Form
+    if (showScheduleFormAppPicker) {
         ScheduleAppPickerDialog(
-            title = "Allowed Apps for New Schedule",
-            initialAllowed = newScheduleAllowedApps,
+            title = "Allowed Apps for Schedule",
+            initialAllowed = scheduleFormAllowedApps,
             allApps = apps,
             isLocked = false,
             unlockTargetMs = 0L,
             nowMillis = nowMillis,
             onToggleApp = { pkg ->
-                newScheduleAllowedApps = if (newScheduleAllowedApps.contains(pkg)) {
-                    newScheduleAllowedApps - pkg
+                scheduleFormAllowedApps = if (scheduleFormAllowedApps.contains(pkg)) {
+                    scheduleFormAllowedApps - pkg
                 } else {
-                    newScheduleAllowedApps + pkg
+                    scheduleFormAllowedApps + pkg
                 }
             },
             onAbortUnlock = {},
-            onDismiss = { showNewScheduleAppPicker = false }
+            onDismiss = { showScheduleFormAppPicker = false }
         )
     }
 
+    // Modal App Picker for Existing Schedule Card Quick Tap
     editingScheduleForApps?.let { sched ->
         val schedLockKey = "sched_apps_${sched.id}"
         val unlockTarget = BlockerStore.settingUnlockTarget(context, schedLockKey)
-        val isLocked = repo.isScheduleActiveNow(sched) || protection.isActive
+        val isLocked = sched.isRunningAt() || protection.isActive
         ScheduleAppPickerDialog(
             title = "Allowed Apps — ${sched.label}",
-            initialAllowed = sched.allowedApps,
+            initialAllowed = sched.allowedPackages,
             allApps = apps,
             isLocked = isLocked,
             unlockTargetMs = unlockTarget,
@@ -1645,7 +1772,7 @@ private fun DistractionItemCard(
 fun ScheduleAppPickerDialog(
     title: String,
     initialAllowed: Set<String>,
-    allApps: List<com.blocker.data.AppItem>,
+    allApps: List<AppItem>,
     isLocked: Boolean,
     unlockTargetMs: Long,
     nowMillis: Long,
@@ -1820,7 +1947,7 @@ fun ScheduleAppPickerDialog(
                     }
                     base.filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
                         .sortedWith(
-                            compareByDescending<com.blocker.data.AppItem> { initialAllowed.contains(it.packageName) }
+                            compareByDescending<AppItem> { initialAllowed.contains(it.packageName) }
                                 .thenBy { it.label.lowercase() }
                         )
                 }

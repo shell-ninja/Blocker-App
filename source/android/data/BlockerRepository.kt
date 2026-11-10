@@ -12,6 +12,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
@@ -832,6 +833,24 @@ class BlockerRepository(private val context: Context) {
         refreshFocusAndStudy()
     }
 
+    fun isWifiEnabled(): Boolean = BlockerStore.isWifiEnabled(appContext)
+
+    fun toggleWifi(context: Context) {
+        if (isWifiEnabled()) {
+            BlockerStore.disableWifi(appContext)
+        } else {
+            BlockerStore.restoreWifi(appContext)
+            runCatching {
+                val wm = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                wm?.isWifiEnabled = true
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            openWifiSettings(context)
+        }
+    }
+
     fun setStudyAutoWifi(enabled: Boolean) {
         BlockerStore.prefs(appContext).edit().putBoolean("study_auto_wifi", enabled).apply()
         refreshFocusAndStudy()
@@ -978,16 +997,16 @@ class BlockerRepository(private val context: Context) {
         refreshDistractionShield()
     }
 
-    fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet()) {
+    fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet(), daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7)) {
         val current = _focusState.value.schedules.toMutableList()
         val id = "sched_" + System.currentTimeMillis()
-        current.add(FocusSchedule(id = id, label = label, startMin = startMin, endMin = endMin, enabled = true, allowedApps = allowedApps))
+        current.add(FocusSchedule(id = id, label = label.ifBlank { "Focus Window" }, startMin = startMin.coerceIn(0, 1439), endMin = endMin.coerceIn(0, 1439), enabled = true, allowedApps = allowedApps, allowedPackages = allowedApps, daysOfWeek = daysOfWeek))
         saveSchedules(current)
     }
 
-    fun updateSchedule(id: String, label: String, startMin: Int, endMin: Int, enabled: Boolean, allowedApps: Set<String>) {
+    fun updateSchedule(id: String, label: String, startMin: Int, endMin: Int, enabled: Boolean, allowedApps: Set<String>, daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7)) {
         val current = _focusState.value.schedules.map {
-            if (it.id == id) it.copy(label = label, startMin = startMin, endMin = endMin, enabled = enabled, allowedApps = allowedApps) else it
+            if (it.id == id) it.copy(label = label.ifBlank { it.label }, startMin = startMin.coerceIn(0, 1439), endMin = endMin.coerceIn(0, 1439), enabled = enabled, allowedApps = allowedApps, allowedPackages = allowedApps, daysOfWeek = daysOfWeek) else it
         }
         saveSchedules(current)
     }
@@ -1054,13 +1073,14 @@ class BlockerRepository(private val context: Context) {
         refreshFocusAndStudy()
     }
 
-    fun isScheduleActiveNow(s: FocusSchedule): Boolean = BlockerStore.scheduleIsActiveNow(s, appContext)
+    fun isScheduleActiveNow(s: FocusSchedule): Boolean = s.isRunningAt()
 
     fun isFocusCurrentlyLocked(): Boolean {
-        val fActive = _focusState.value.active
-        val sActive = _studyState.value.active
-        val schedActive = _focusState.value.schedules.any { isScheduleActiveNow(it) }
-        return fActive || sActive || schedActive
+        val now = System.currentTimeMillis()
+        val isManualFocusRunningNow = _focusState.value.focusUntil > now
+        val isStudyLockdownRunningNow = _studyState.value.active
+        val isScheduleRunningNow = _focusState.value.schedules.any { it.enabled && it.isRunningAt() }
+        return isManualFocusRunningNow || isStudyLockdownRunningNow || isScheduleRunningNow
     }
 
     fun saveSchedules(list: List<FocusSchedule>) {

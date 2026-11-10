@@ -67,15 +67,88 @@ data class FocusSchedule(
     val endMin: Int,
     val enabled: Boolean,
     val allowedApps: Set<String> = emptySet(),
-    val allowedPackages: Set<String> = allowedApps
+    val allowedPackages: Set<String> = allowedApps,
+    val daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7) // 1=Mon .. 7=Sun (DayOfWeek.value)
 ) {
+    fun isRunningAt(dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now()): Boolean {
+        if (!enabled) return false
+        val nowMinutes = dateTime.hour * 60 + dateTime.minute
+        val todayDow = dateTime.dayOfWeek.value // 1 (Mon) .. 7 (Sun)
+        val yesterdayDow = if (todayDow == 1) 7 else todayDow - 1
+
+        val start = startMin.coerceIn(0, 1439)
+        val end = endMin.coerceIn(0, 1439)
+
+        return if (start == end) {
+            false
+        } else if (start < end) {
+            // Case 1: Same-Day Schedule (e.g. 12:00 AM [0] to 06:00 AM [360], or 09:00 AM [540] to 05:00 PM [1020])
+            (todayDow in daysOfWeek) && (nowMinutes in start until end)
+        } else {
+            // Case 2: Overnight Schedule crossing midnight (e.g. 11:00 PM [1380] to 06:00 AM [360])
+            if (nowMinutes >= start) {
+                todayDow in daysOfWeek
+            } else if (nowMinutes < end) {
+                yesterdayDow in daysOfWeek
+            } else {
+                false
+            }
+        }
+    }
+
+    fun getRemainingMillisNow(dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now()): Long {
+        if (!isRunningAt(dateTime)) return 0L
+        val nowMinutes = dateTime.hour * 60 + dateTime.minute
+        val start = startMin.coerceIn(0, 1439)
+        val end = endMin.coerceIn(0, 1439)
+
+        val targetDateTime = if (start < end) {
+            dateTime.toLocalDate().atTime(end / 60, end % 60, 0)
+        } else {
+            if (nowMinutes >= start) {
+                dateTime.toLocalDate().plusDays(1).atTime(end / 60, end % 60, 0)
+            } else {
+                dateTime.toLocalDate().atTime(end / 60, end % 60, 0)
+            }
+        }
+        val zone = java.time.ZoneId.systemDefault()
+        val targetMs = targetDateTime.atZone(zone).toInstant().toEpochMilli()
+        val nowMs = dateTime.atZone(zone).toInstant().toEpochMilli()
+        return (targetMs - nowMs).coerceAtLeast(0L)
+    }
+
+    fun getNextStartMillis(dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now()): Long? {
+        if (!enabled) return null
+        val nowMinutes = dateTime.hour * 60 + dateTime.minute
+        val start = startMin.coerceIn(0, 1439)
+
+        for (dayOffset in 0..7) {
+            val checkDate = dateTime.toLocalDate().plusDays(dayOffset.toLong())
+            val checkDow = checkDate.dayOfWeek.value
+            if (checkDow in daysOfWeek) {
+                if (dayOffset == 0 && nowMinutes >= start) {
+                    continue
+                }
+                val startDateTime = checkDate.atTime(start / 60, start % 60, 0)
+                val zone = java.time.ZoneId.systemDefault()
+                val targetMs = startDateTime.atZone(zone).toInstant().toEpochMilli()
+                val nowMs = dateTime.atZone(zone).toInstant().toEpochMilli()
+                return (targetMs - nowMs).coerceAtLeast(0L)
+            }
+        }
+        return null
+    }
+
     fun toJson(): JSONObject {
-        val arr = JSONArray()
-        allowedApps.forEach { arr.put(it) }
+        val appArr = JSONArray()
+        allowedPackages.forEach { appArr.put(it) }
+        val daysArr = JSONArray()
+        daysOfWeek.forEach { daysArr.put(it) }
         return JSONObject()
             .put("id", id).put("label", label).put("startMin", startMin).put("endMin", endMin).put("enabled", enabled)
-            .put("allowedApps", arr)
-            .put("allowedPackages", arr)
+            .put("allowedApps", appArr)
+            .put("allowedPackages", appArr)
+            .put("daysOfWeek", daysArr)
     }
 
     companion object {
@@ -88,9 +161,30 @@ data class FocusSchedule(
                     if (a.isNotEmpty()) appSet.add(a)
                 }
             }
+            val daysSet = mutableSetOf<Int>()
+            val dArr = o.optJSONArray("daysOfWeek")
+            if (dArr != null && dArr.length() > 0) {
+                for (i in 0 until dArr.length()) {
+                    daysSet.add(dArr.getInt(i))
+                }
+            } else {
+                daysSet.addAll(listOf(1, 2, 3, 4, 5, 6, 7))
+            }
+            var sMin = o.getInt("startMin")
+            val eMin = o.getInt("endMin")
+            val lbl = o.optString("label", "Schedule")
+            if (sMin == 720 && (lbl.contains("12", ignoreCase = true) || lbl.contains("midnight", ignoreCase = true) || lbl.contains("night", ignoreCase = true))) {
+                sMin = 0
+            }
             return FocusSchedule(
-                o.getString("id"), o.optString("label", "Schedule"), o.getInt("startMin"), o.getInt("endMin"),
-                o.optBoolean("enabled", true), appSet
+                id = o.getString("id"),
+                label = lbl,
+                startMin = sMin,
+                endMin = eMin,
+                enabled = o.optBoolean("enabled", true),
+                allowedApps = appSet,
+                allowedPackages = appSet,
+                daysOfWeek = daysSet
             )
         }
     }
@@ -541,34 +635,30 @@ object BlockerStore {
     private fun inWindow(start: Int, end: Int, now: Int): Boolean =
         if (start == end) false else if (start < end) now in start until end else now >= start || now < end
 
-    fun scheduleIsActiveNow(s: FocusSchedule, c: Context? = null): Boolean = s.enabled && inWindow(s.startMin, s.endMin, minuteOfDay(c))
-    fun anyScheduleActiveNow(c: Context) = schedules(c).any { scheduleIsActiveNow(it, c) }
-    fun focusActive(c: Context) = focusUntil(c) > SecureTime.now(c) || anyScheduleActiveNow(c)
-
-    /** Minutes remaining until a window closes, from a given minute-of-day. */
-    private fun minutesUntil(target: Int, from: Int): Int = if (target > from) target - from else 1440 - from + target
+    fun scheduleIsActiveNow(s: FocusSchedule, c: Context? = null): Boolean = s.isRunningAt()
+    fun anyScheduleActiveNow(c: Context) = schedules(c).any { it.isRunningAt() }
+    fun focusActive(c: Context): Boolean {
+        val manualActive = focusUntil(c) > SecureTime.now(c)
+        val schedActive = anyScheduleActiveNow(c)
+        return manualActive || schedActive
+    }
 
     fun focusRemainingMs(c: Context): Long = runCatching {
         val now = SecureTime.now(c)
         val untilMs = (focusUntil(c) - now).coerceAtLeast(0L)
-        val cal = Calendar.getInstance().apply { timeInMillis = now }
-        val secOfDay = cal.get(Calendar.HOUR_OF_DAY) * 3600 + cal.get(Calendar.MINUTE) * 60 + cal.get(Calendar.SECOND)
-        val activeEnds = schedules(c).filter { scheduleIsActiveNow(it, c) }
-            .map {
-                val endSec = it.endMin * 60
-                val secUntil = if (endSec > secOfDay) endSec - secOfDay else (86400 - secOfDay + endSec)
-                secUntil * 1000L
-            }
-        val schedMs = activeEnds.maxOrNull() ?: 0L
+        val schedMs = schedules(c)
+            .filter { it.isRunningAt() }
+            .map { it.getRemainingMillisNow() }
+            .maxOrNull() ?: 0L
         maxOf(untilMs, schedMs)
     }.getOrDefault(0L)
 
     /** Returns the union of allowed apps configured for all schedules currently active. */
     fun scheduleAllowedApps(c: Context): Set<String> {
-        val active = schedules(c).filter { scheduleIsActiveNow(it, c) }
+        val active = schedules(c).filter { it.isRunningAt() }
         val set = mutableSetOf<String>()
         for (s in active) {
-            set.addAll(s.allowedApps)
+            set.addAll(s.allowedPackages)
         }
         return set
     }
@@ -805,6 +895,12 @@ object BlockerStore {
             }
         }
     }
+
+    fun isWifiEnabled(c: Context): Boolean = runCatching {
+        val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        @Suppress("DEPRECATION")
+        wm?.isWifiEnabled ?: (Settings.Global.getInt(c.contentResolver, "wifi_on", 0) != 0)
+    }.getOrDefault(false)
 
     fun restoreWifi(c: Context) {
         val p = prefs(c)
