@@ -312,7 +312,7 @@ class BlockerForegroundService : Service {
 
     private fun runBackgroundUpdateCheck() {
         try {
-            val url = URL("https://api.github.com/repos/shell-ninja/Blocker-App/releases/latest")
+            val url = URL(com.blocker.data.UpdateManager.GITHUB_API_URL)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 12000
@@ -320,12 +320,23 @@ class BlockerForegroundService : Service {
                 setRequestProperty("Accept", "application/vnd.github.v3+json")
                 setRequestProperty("User-Agent", "Blocker-App")
             }
-            if (conn.responseCode == 200) {
+            val code = conn.responseCode
+            val tagName = if (code == 200) {
                 val reader = BufferedReader(InputStreamReader(conn.inputStream))
                 val resp = reader.readText()
                 reader.close()
-                val json = JSONObject(resp)
-                val tagName = json.optString("tag_name", "")
+                conn.disconnect()
+                JSONObject(resp).optString("tag_name", "")
+            } else {
+                conn.disconnect()
+                if (code == 403 || code == 429) {
+                    com.blocker.data.UpdateManager.resolveLatestTagViaWeb().orEmpty()
+                } else {
+                    ""
+                }
+            }
+
+            if (tagName.isNotBlank()) {
                 val version = tagName.removePrefix("v").removePrefix("V")
                 val currentVersion = runCatching {
                     packageManager.getPackageInfo(packageName, 0).versionName.orEmpty().trim()
@@ -348,7 +359,6 @@ class BlockerForegroundService : Service {
                     }
                 }
             }
-            conn.disconnect()
         } catch (_: Throwable) {
             // Network failure / offline: safe ignore, will retry
         }
