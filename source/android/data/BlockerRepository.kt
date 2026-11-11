@@ -302,6 +302,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun refreshFocusAndStudy() {
+        BlockerStore.autoClampStuckTimers(appContext)
         val now = SecureTime.now(appContext)
         val fActive = BlockerStore.focusActive(appContext)
         val fUntil = BlockerStore.focusUntil(appContext)
@@ -535,15 +536,22 @@ class BlockerRepository(private val context: Context) {
         }
 
         // 7. Focus Mode Apps Unlock & Schedule Apps Unlocks
+        var appsChanged = false
         val fAppsTarget = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
         if (fAppsTarget > 0L && now >= fAppsTarget) {
-            refreshFocusAndStudy()
+            BlockerStore.openSettingGuardWindow(appContext, "focus_apps")
+            appsChanged = true
         }
         for (sched in _focusState.value.schedules) {
-            val sAppsTarget = BlockerStore.settingUnlockTarget(appContext, "sched_apps_${sched.id}")
+            val sAppsKey = "sched_apps_${sched.id}"
+            val sAppsTarget = BlockerStore.settingUnlockTarget(appContext, sAppsKey)
             if (sAppsTarget > 0L && now >= sAppsTarget) {
-                refreshFocusAndStudy()
+                BlockerStore.openSettingGuardWindow(appContext, sAppsKey)
+                appsChanged = true
             }
+        }
+        if (appsChanged) {
+            refreshFocusAndStudy()
         }
 
         val prot = _protectionState.value
@@ -713,7 +721,7 @@ class BlockerRepository(private val context: Context) {
                 BlockerStore.cancelPowerOffCooldown(appContext)
                 refreshProtection()
             } else {
-                val cooldownDuration = if (BlockerStore.isTimerDebug()) 60_000L else 2L * 60L * 60L * 1000L
+                val cooldownDuration = if (BlockerStore.isTimerDebug()) BlockerStore.resolveUnlockDelayDurationMs(appContext) else 2L * 60L * 60L * 1000L
                 BlockerStore.setPowerOffCooldown(appContext, now + cooldownDuration)
                 refreshProtection()
             }
@@ -821,11 +829,31 @@ class BlockerRepository(private val context: Context) {
         com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
         com.blocker.PermissionFlowTracker.lastDndPermissionRequestMs = SystemClock.elapsedRealtime()
         MainActivity.isLaunchingExternal = true
-        val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
         val act = context.findActivity() ?: (context as? Activity)
-        if (act != null) act.startActivity(intent) else context.startActivity(intent)
+        val launchedDirect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                val detailIntent = Intent("android.settings.NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS").apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (detailIntent.resolveActivity(context.packageManager) != null) {
+                    if (act != null) act.startActivity(detailIntent) else context.startActivity(detailIntent)
+                    true
+                } else {
+                    false
+                }
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        if (!launchedDirect) {
+            runCatching {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (act != null) act.startActivity(intent) else context.startActivity(intent)
+            }
+        }
     }
 
     fun setStudyAutoDnd(enabled: Boolean) {
@@ -1101,11 +1129,11 @@ class BlockerRepository(private val context: Context) {
                 // Strictly block adding any new apps while Focus Mode is active
                 return
             }
-            if (protActive) {
+            if (protActive && !BlockerStore.isSettingGuardOpen(appContext, "focus_apps")) {
                 val target = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
                 if (target > 0L && now >= target) {
-                    // Timer expired: clear target and allow adding
-                    BlockerStore.cancelSettingUnlockTarget(appContext, "focus_apps")
+                    // Timer expired: open guard window and allow adding
+                    BlockerStore.openSettingGuardWindow(appContext, "focus_apps")
                 } else if (target == 0L) {
                     val delayMs = BlockerStore.resolveUnlockDelayDurationMs(appContext)
                     BlockerStore.setSettingUnlockTarget(appContext, "focus_apps", now + delayMs)
@@ -1140,10 +1168,10 @@ class BlockerRepository(private val context: Context) {
         if (!isCurrentlyAllowed) {
             // Adding a new allowed app to this schedule
             val lockKey = "sched_apps_$scheduleId"
-            if (isActive || protActive) {
+            if ((isActive || protActive) && !BlockerStore.isSettingGuardOpen(appContext, lockKey)) {
                 val target = BlockerStore.settingUnlockTarget(appContext, lockKey)
                 if (target > 0L && now >= target) {
-                    BlockerStore.cancelSettingUnlockTarget(appContext, lockKey)
+                    BlockerStore.openSettingGuardWindow(appContext, lockKey)
                 } else if (target == 0L) {
                     val delayMs = BlockerStore.resolveUnlockDelayDurationMs(appContext)
                     BlockerStore.setSettingUnlockTarget(appContext, lockKey, now + delayMs)

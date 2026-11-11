@@ -697,6 +697,17 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg) && rootPkg != "android") return
         if (!shieldEngaged() && !shouldBlockDateTime() && !shouldBlockScheduledPower()) return
 
+        // Allow Android's legitimate Do Not Disturb access grant flow (Rule A & Rule B)
+        val (isDndFlow, dndAllowed) = evaluateDndFlowAccess(rootPkg, null, root)
+        if (isDndFlow) {
+            if (dndAllowed) return
+            if (shieldEngaged() || BlockerStore.studyActive(this)) {
+                autoCancelDialog(root)
+                pollKick(if (isBangla()) "সুরক্ষা বা স্টাডি মোড চলাকালীন DND অনুমতি বন্ধ করা যাবে না।" else "Do Not Disturb access for Blocker cannot be modified while Protection or Study Mode is active.")
+                return
+            }
+        }
+
         // If an install or update dialog is in foreground, allow it:
         if (isInstallOrUpdateDialog(root = root)) return
 
@@ -1298,7 +1309,9 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isDndPermissionScreen(packageName: String, className: String, allScreenText: String): Boolean {
-        if (!isSettingsPkg(packageName)) return false
+        if (!isSettingsPkg(packageName) && packageName != "android" && !packageName.contains("permission", ignoreCase = true)) {
+            return false
+        }
         val cls = className.lowercase()
         val t = allScreenText.lowercase()
         val hasDndCls = cls.contains("zenaccess") ||
@@ -1310,7 +1323,8 @@ class BlockerAccessibilityService : AccessibilityService() {
             t.contains("notification policy access") ||
             t.contains("read, reply & control") ||
             t.contains("do not disturb") ||
-            t.contains("zen")
+            t.contains("zen access") ||
+            t.contains("dnd access")
         return hasDndCls || hasDndText
     }
 
@@ -1319,7 +1333,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         val t = allScreenText.lowercase()
         val hasBlocker = t.contains("blocker") || t.contains("prachir") ||
             t.contains("com.blocker") || t.contains("com.prachir.app")
-        val isDetailAction = t.contains("allow do not disturb") || t.contains("read, reply & control")
+        val isDetailAction = t.contains("allow do not disturb") ||
+            t.contains("read, reply & control") ||
+            t.contains("allow notification policy")
         return hasBlocker && isDetailAction
     }
 
@@ -1332,21 +1348,81 @@ class BlockerAccessibilityService : AccessibilityService() {
         false
     }
 
-    private fun shouldAllowDndScreen(packageName: String, className: String, allScreenText: String): Boolean {
-        if (!isDndPermissionScreen(packageName, className, allScreenText)) return false
+    private fun gatherSettingsContextText(
+        root: AccessibilityNodeInfo?,
+        ev: AccessibilityEvent? = null,
+        extra: String = ""
+    ): String {
+        val sb = StringBuilder()
+        if (extra.isNotBlank()) sb.append(extra).append(' ')
+        if (currentSettingsScreenTitle.isNotBlank()) sb.append(currentSettingsScreenTitle).append(' ')
+        if (ev != null) {
+            for (t in ev.text) {
+                if (t != null) sb.append(t).append(' ')
+            }
+            ev.contentDescription?.let { sb.append(it).append(' ') }
+        }
+        val activeRoot = root ?: runCatching { rootInActiveWindow }.getOrNull()
+        if (activeRoot != null) {
+            collectText(activeRoot, sb, 0, intArrayOf(180))
+        }
+        val wins = runCatching { windows }.getOrNull()
+        if (!wins.isNullOrEmpty()) {
+            for (w in wins) {
+                if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+                val wr = runCatching { w.root }.getOrNull() ?: continue
+                if (wr.packageName?.toString() == packageName) continue
+                collectText(wr, sb, 0, intArrayOf(80))
+            }
+        }
+        return sb.toString().lowercase()
+    }
+
+    private fun evaluateDndFlowAccess(
+        packageName: String,
+        ev: AccessibilityEvent?,
+        root: AccessibilityNodeInfo?,
+        preCollectedText: String? = null
+    ): Pair<Boolean, Boolean> {
+        if (!isSettingsPkg(packageName) && packageName != "android" && !packageName.contains("permission", ignoreCase = true)) {
+            return false to true
+        }
+        val evCls = ev?.className?.toString().orEmpty()
+        val rootCls = root?.className?.toString().orEmpty()
+        val text = preCollectedText?.lowercase() ?: gatherSettingsContextText(root, ev)
+        val isDndScreen = isDndPermissionScreen(packageName, evCls, text) ||
+            isDndPermissionScreen(packageName, rootCls, text)
+
+        val elapsed = SystemClock.elapsedRealtime() - PermissionFlowTracker.lastDndPermissionRequestMs
+        val inRecentDndGrantWindow = PermissionFlowTracker.lastDndPermissionRequestMs > 0L && elapsed in 0L..60_000L
         val isDndGranted = isDndAccessGranted()
-        val recentlyRequested = (SystemClock.elapsedRealtime() - PermissionFlowTracker.lastDndPermissionRequestMs) < 45_000L
-        if (!isDndGranted || recentlyRequested || PermissionFlowTracker.isLaunchingPermissionIntent) {
-            // User is granting DND access or recently requested it: ALWAYS ALLOW!
-            return true
+
+        // Rule A: DND not yet granted -> ALWAYS allow DND flow or within 60s of request
+        if (!isDndGranted && (isDndScreen || inRecentDndGrantWindow || PermissionFlowTracker.isLaunchingPermissionIntent)) {
+            return true to true
         }
-        // After granted, ALWAYS ALLOW the general DND apps list screen!
-        if (!isBlockerDndDetailScreen(packageName, className, allScreenText)) {
-            return true
+        // Keep the active 60s grant session uninterrupted if user just toggled DND ON
+        if (isDndScreen && (inRecentDndGrantWindow || PermissionFlowTracker.isLaunchingPermissionIntent)) {
+            return true to true
         }
-        // User opened Blocker's DND detail screen while already granted and not recently requested:
-        // Only block if protection or study mode is active to prevent toggling OFF
-        return !(selfProtectionActive() || BlockerStore.studyActive(this))
+        if (!isDndScreen) return false to true
+
+        // Rule B: DND already granted -> allow general DND list; block ONLY Blocker DND detail toggle when armed
+        val isSelfDetail = isBlockerDndDetailScreen(packageName, evCls, text) ||
+            isBlockerDndDetailScreen(packageName, rootCls, text)
+        if (!isSelfDetail) return true to true
+        val armed = selfProtectionActive() || BlockerStore.studyActive(this)
+        return true to !armed
+    }
+
+    private fun shouldAllowDndScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        val (isDndFlow, allowed) = evaluateDndFlowAccess(
+            packageName = packageName,
+            ev = null,
+            root = null,
+            preCollectedText = if (className.isBlank()) allScreenText else "$className $allScreenText"
+        )
+        return isDndFlow && allowed
     }
 
     private fun isLegitimatePermissionTitle(title: String): Boolean {
@@ -1830,6 +1906,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         val blockSchedPower = shouldBlockScheduledPower()
         if (!BlockerStore.active(this) && !isShieldActive && !blockDateTime && !blockSchedPower) return false
 
+        val (isDndFlowNative, dndAllowedNative) = evaluateDndFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+        if (isDndFlowNative && dndAllowedNative) return false
+
         // 0-microsecond fast-path filter: Skip 99% of apps that have no native rules
         val isTargetApp = isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android" ||
             pkg == "com.facebook.katana" || pkg == "com.facebook.lite" ||
@@ -2102,6 +2181,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                 main.removeCallbacks(settingsPollRunnable)
                 previousEventPkg = packageName
                 currentFgPkg = packageName
+                if (isDndAccessGranted()) {
+                    PermissionFlowTracker.lastDndPermissionRequestMs = 0L
+                    PermissionFlowTracker.isLaunchingPermissionIntent = false
+                }
                 return
             }
 
@@ -2137,6 +2220,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             // --- BANKING APPS EXEMPTION (bKash, Nagad, etc.) ---
             if (pkg in BANKING_PACKAGES) {
                 return
+            }
+
+            // --- TOP-PRIORITY DND ACCESS GATE (Before Scoped Tamper Guard, Native Engine, and AppInfo checks) ---
+            val (isDndFlow, dndAllowed) = evaluateDndFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+            if (isDndFlow) {
+                if (dndAllowed) return
+                if (selfProtectionActive() || BlockerStore.studyActive(this)) {
+                    autoCancelDialog(rootInActiveWindow)
+                    pollKick(if (isBangla()) "সুরক্ষা বা স্টাডি মোড চলাকালীন DND অনুমতি বন্ধ করা যাবে না।" else "Do Not Disturb access for Blocker cannot be modified while Protection or Study Mode is active.")
+                    return
+                }
             }
 
             // --- 0MS TOP-PRIORITY DEFENSE: Scoped Tamper Guard for Blocker / Prachir ---
@@ -3966,6 +4060,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
                 val rootForClick = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
                 val rootClsForClick = runCatching { rootForClick?.className?.toString().orEmpty() }.getOrDefault("")
+                val (clickDndFlow, clickDndAllowed) = evaluateDndFlowAccess(pkg, ev, rootForClick)
+                if (clickDndFlow && clickDndAllowed) return false
 
                 if (isSelfRowClick && !isDeviceAdminScreenOrSetup(rootForClick, rootClsForClick, rowText)) {
                     autoCancelDialog(rootInActiveWindow)
@@ -4235,6 +4331,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // Blocker row was clicked inside Settings!
         // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization, Device Admin), allow it:
+        val (rowDndFlow, rowDndAllowed) = evaluateDndFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+        if (rowDndFlow && rowDndAllowed) return
         if (isLegitimatePermissionTitle(currentSettingsScreenTitle)) return
 
         val root = rootInActiveWindow ?: ev.source

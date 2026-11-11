@@ -26,8 +26,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -435,12 +438,12 @@ fun FocusScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            // Duration Chips Row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            // Duration Chips Row (FlowRow wraps cleanly without right-edge clipping)
+                            @OptIn(ExperimentalLayoutApi::class)
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 durationOptions.forEach { (mins, lbl) ->
                                     val isSel = (selectedManualDurationMin == mins)
@@ -456,7 +459,9 @@ fun FocusScreen(
                                             text = lbl,
                                             color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextPrimary,
                                             fontSize = 12.5.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                 }
@@ -464,10 +469,11 @@ fun FocusScreen(
 
                             if (selectedManualDurationMin == -1) {
                                 Spacer(modifier = Modifier.height(10.dp))
-                                Row(
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     listOf(10, 20, 90, 180, 360).forEach { cm ->
                                         val isCustomSel = (customManualDurationMin == cm)
@@ -483,7 +489,9 @@ fun FocusScreen(
                                                 text = "${cm}m",
                                                 color = NordicColors.TextPrimary,
                                                 fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -514,24 +522,21 @@ fun FocusScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(
-                                    text = "DAILY SCHEDULES",
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.5.sp
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Automate recurring focus windows with custom allowed apps",
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Text(
+                                text = "DAILY SCHEDULES",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(end = 10.dp)
+                            )
                             Btn(
-                                label = "+ New Schedule",
+                                label = "New Schedule",
                                 icon = CyberIcons.Plus,
+                                compact = true,
                                 onClick = {
                                     editingSchedule = null
                                     scheduleFormLabel = ""
@@ -544,6 +549,14 @@ fun FocusScreen(
                                 kind = BtnKind.PRIMARY
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Automate recurring focus windows with custom allowed apps",
+                            color = NordicColors.TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
                         if (focus.schedules.isEmpty()) {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -570,6 +583,7 @@ fun FocusScreen(
                                             .padding(horizontal = 14.dp, vertical = 12.dp)
                                     ) {
                                         Column {
+                                            // Row 1: Schedule Name & Status Pill
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -579,7 +593,10 @@ fun FocusScreen(
                                                     text = s.label,
                                                     color = NordicColors.TextPrimary,
                                                     fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                                                 )
                                                 if (isActiveNow) {
                                                     val leftSec = s.getRemainingMillisNow() / 1000L
@@ -607,6 +624,7 @@ fun FocusScreen(
                                                 }
                                             }
 
+                                            // Row 2: Time Range
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
                                                 text = "${clock12(s.startMin)} – ${clock12(s.endMin)} (${formatDuration(s.startMin, s.endMin)})",
@@ -614,18 +632,18 @@ fun FocusScreen(
                                                 fontSize = 12.sp
                                             )
 
-                                            Spacer(modifier = Modifier.height(8.dp))
-
-                                            // Days of Week Pills
+                                            // Row 3: 7 Day Circles full width
+                                            Spacer(modifier = Modifier.height(10.dp))
                                             Row(
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 listOf(1 to "M", 2 to "T", 3 to "W", 4 to "T", 5 to "F", 6 to "S", 7 to "S").forEach { (dow, ch) ->
                                                     val isDayActive = s.daysOfWeek.contains(dow)
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(22.dp)
+                                                            .size(24.dp)
                                                             .clip(CircleShape)
                                                             .background(if (isDayActive) NordicColors.AccentPrimary.copy(alpha = 0.85f) else NordicColors.CardSurfaceHero)
                                                             .border(1.dp, NordicColors.HairlineBorder, CircleShape),
@@ -639,10 +657,20 @@ fun FocusScreen(
                                                         )
                                                     }
                                                 }
+                                            }
 
-                                                Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.height(12.dp))
 
-                                                // Allowed Apps Chip
+                                            val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
+                                            val hasSchedPending = schedPendingUntil > 0L
+                                            val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
+                                            val action = focus.pendingScheduleActions[s.id] ?: "delete"
+
+                                            // Row 4: Allowed Apps Chip (Left) + Action Controls (Right)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     modifier = Modifier.clickable { editingScheduleForApps = s }
@@ -654,20 +682,9 @@ fun FocusScreen(
                                                         icon = CyberIcons.Apps
                                                     )
                                                 }
-                                            }
 
-                                            Spacer(modifier = Modifier.height(10.dp))
+                                                Spacer(modifier = Modifier.weight(1f))
 
-                                            val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
-                                            val hasSchedPending = schedPendingUntil > 0L
-                                            val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
-                                            val action = focus.pendingScheduleActions[s.id] ?: "delete"
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.End
-                                            ) {
                                                 if (hasSchedPending) {
                                                     val timeStr = formatHms(schedRemMs / 1000L)
                                                     val actionLabel = if (action == "delete") "Deleting" else "Disabling"
@@ -842,7 +859,7 @@ fun FocusScreen(
                             val pendingAppsUnlock = focus.pendingAppsUnlockUntil
                             if (pendingAppsUnlock > 0L) {
                                 val remSec = ((pendingAppsUnlock - nowMillis) / 1000L).coerceAtLeast(0L)
-                                val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                                val timeStr = formatHms(remSec)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -853,7 +870,10 @@ fun FocusScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        modifier = Modifier.weight(1f).padding(end = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Icon(
                                             imageVector = CyberIcons.Lock,
                                             contentDescription = null,
@@ -864,17 +884,29 @@ fun FocusScreen(
                                         Text(
                                             text = "Modifying allowed apps unlocking in $timeStr",
                                             color = NordicColors.TextPrimary,
-                                            fontSize = 12.sp,
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 16.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
-                                    Text(
-                                        text = "Abort",
-                                        color = NordicColors.AlertMuted,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clickable { repo.cancelFocusAppsUnlock() }
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(NordicColors.AlertMuted.copy(alpha = 0.14f))
+                                            .border(1.dp, NordicColors.AlertMuted.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                            .clickable { repo.cancelFocusAppsUnlock() }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Abort",
+                                            color = NordicColors.AlertMuted,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                             }
@@ -1009,7 +1041,7 @@ fun FocusScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .padding(bottom = 110.dp), // Clearance for bottom navigation
+                    .padding(bottom = 120.dp), // Clearance for bottom navigation
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (study.active) {
@@ -1093,6 +1125,7 @@ fun FocusScreen(
                                     icon = if (isWifiOn) CyberIcons.WifiOff else CyberIcons.Wifi,
                                     onClick = { repo.toggleWifi(context) },
                                     kind = BtnKind.SECONDARY,
+                                    compact = true,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Btn(
@@ -1100,6 +1133,7 @@ fun FocusScreen(
                                     icon = CyberIcons.Phone,
                                     onClick = { openEmergencyDialer(context) },
                                     kind = BtnKind.SECONDARY,
+                                    compact = true,
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -1202,6 +1236,7 @@ fun FocusScreen(
                                         icon = CyberIcons.Dnd,
                                         onClick = { repo.requestDndAccess(context) },
                                         kind = BtnKind.PRIMARY,
+                                        compact = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 } else {
@@ -1211,6 +1246,7 @@ fun FocusScreen(
                                         onClick = {},
                                         kind = BtnKind.GHOST,
                                         enabled = false,
+                                        compact = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -1239,6 +1275,7 @@ fun FocusScreen(
                                     icon = if (isWifiOn) CyberIcons.WifiOff else CyberIcons.Wifi,
                                     onClick = { repo.toggleWifi(context) },
                                     kind = BtnKind.SECONDARY,
+                                    compact = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -1246,7 +1283,7 @@ fun FocusScreen(
                     }
 
                     // Card 3: Study Session Configuration Card
-                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
                         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Column {
                                 Text(
@@ -1273,11 +1310,11 @@ fun FocusScreen(
                                     letterSpacing = 0.5.sp
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     listOf(15, 25, 45, 60, 90, 120, 180).forEach { m ->
                                         val isSel = (studyFocusMins == m)
@@ -1293,7 +1330,9 @@ fun FocusScreen(
                                                 text = "${m}m",
                                                 color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                                 fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -1310,11 +1349,11 @@ fun FocusScreen(
                                     letterSpacing = 0.5.sp
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     listOf(3, 5, 10, 15).forEach { m ->
                                         val isSel = (studyBreakMins == m)
@@ -1330,7 +1369,9 @@ fun FocusScreen(
                                                 text = "${m}m",
                                                 color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                                 fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -1347,11 +1388,11 @@ fun FocusScreen(
                                     letterSpacing = 0.5.sp
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     listOf(1, 2, 3, 4, 5, 6).forEach { r ->
                                         val isSel = (studyRounds == r)
@@ -1367,7 +1408,9 @@ fun FocusScreen(
                                                 text = "$r",
                                                 color = if (isSel) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
                                                 fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -1378,7 +1421,7 @@ fun FocusScreen(
 
                             // Section D: Launch Button
                             Btn(
-                                label = "Launch Study Lockout ($studyFocusMins min focus, $studyRounds rounds)",
+                                label = "Launch Study Lockout (${studyFocusMins}m, ${studyRounds} rounds)",
                                 icon = CyberIcons.Play,
                                 onClick = { repo.startStudySession(studyFocusMins, studyBreakMins, studyRounds) },
                                 modifier = Modifier.fillMaxWidth()
@@ -1738,7 +1781,7 @@ private fun DistractionItemCard(
             }
             if (isPending) {
                 val remSec = ((pendingUnlockUntil - nowMillis) / 1000L).coerceAtLeast(0L)
-                val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                val timeStr = formatHms(remSec)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1832,7 +1875,7 @@ fun ScheduleAppPickerDialog(
                 // Locked or Ticking Countdown Banner
                 if (unlockTargetMs > 0L) {
                     val remSec = ((unlockTargetMs - nowMillis) / 1000L).coerceAtLeast(0L)
-                    val timeStr = String.format("%02d:%02d", remSec / 60, remSec % 60)
+                    val timeStr = formatHms(remSec)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1843,23 +1886,38 @@ fun ScheduleAppPickerDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(CyberIcons.Lock, contentDescription = null, tint = NordicColors.AlertMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Modifying apps unlocking in $timeStr",
                                 color = NordicColors.TextPrimary,
-                                fontSize = 12.sp,
+                                fontSize = 12.5.sp,
+                                lineHeight = 16.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Text(
-                            text = "Abort",
-                            color = NordicColors.AlertMuted,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { onAbortUnlock() }
-                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NordicColors.AlertMuted.copy(alpha = 0.14f))
+                                .border(1.dp, NordicColors.AlertMuted.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .clickable { onAbortUnlock() }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Abort",
+                                color = NordicColors.AlertMuted,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                 } else if (isLocked) {

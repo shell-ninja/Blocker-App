@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.NativeBlockerBridge
@@ -56,7 +57,7 @@ fun BlocklistScreen(
             .background(Color.Transparent)
             .imePadding()
             .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp)
     ) {
         SectionHeader(
             title = "Web & keywords",
@@ -136,8 +137,9 @@ fun BlocklistScreen(
                 OutlinedTextField(
                     value = domainInput,
                     onValueChange = { domainInput = it },
-                    placeholder = { Text("domain.com", color = NordicColors.TextSecondary, fontSize = 13.sp) },
+                    placeholder = { Text("domain.com", color = NordicColors.TextSecondary, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
+                    maxLines = 1,
                     modifier = Modifier
                         .weight(1f)
                         .bringIntoViewRequester(domainBringIntoView)
@@ -233,8 +235,9 @@ fun BlocklistScreen(
                 OutlinedTextField(
                     value = keywordInput,
                     onValueChange = { keywordInput = it },
-                    placeholder = { Text("keyword or phrase", color = NordicColors.TextSecondary, fontSize = 13.sp) },
+                    placeholder = { Text("keyword or phrase", color = NordicColors.TextSecondary, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
+                    maxLines = 1,
                     modifier = Modifier
                         .weight(1f)
                         .bringIntoViewRequester(keywordBringIntoView)
@@ -333,8 +336,9 @@ fun BlocklistScreen(
                         testInput = it
                         testResult = null
                     },
-                    placeholder = { Text("https://example.com/page", color = NordicColors.TextSecondary, fontSize = 13.sp) },
+                    placeholder = { Text("https://example.com", color = NordicColors.TextSecondary, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
+                    maxLines = 1,
                     modifier = Modifier
                         .weight(1f)
                         .bringIntoViewRequester(testBringIntoView)

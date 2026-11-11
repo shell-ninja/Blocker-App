@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.R
@@ -285,7 +286,10 @@ fun StatusPillBadge(
             color = textClr,
             fontSize = fontSz,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.3.sp
+            letterSpacing = 0.3.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -366,7 +370,8 @@ fun Btn(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     kind: BtnKind = BtnKind.PRIMARY,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    compact: Boolean = false
 ) {
     val shape = RoundedCornerShape(14.dp)
 
@@ -378,6 +383,11 @@ fun Btn(
     }
 
     val borderModifier = if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier
+    val horizPad = if (compact) 10.dp else 14.dp
+    val vertPad = if (compact) 9.dp else 11.dp
+    val iconSize = if (compact) 15.dp else 16.dp
+    val spacerWidth = if (compact) 6.dp else 7.dp
+    val textSize = if (compact) 12.5.sp else 13.sp
 
     Box(
         modifier = modifier
@@ -385,7 +395,7 @@ fun Btn(
             .background(if (enabled) bgColor else NordicColors.CardSurface)
             .then(borderModifier)
             .pressScaleClickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(horizontal = horizPad, vertical = vertPad),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -397,15 +407,18 @@ fun Btn(
                     imageVector = icon,
                     contentDescription = null,
                     tint = if (enabled) textClr else NordicColors.TextSecondary,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(iconSize)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(spacerWidth))
             }
             Text(
                 text = label,
                 color = if (enabled) textClr else NordicColors.TextSecondary,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = textSize,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

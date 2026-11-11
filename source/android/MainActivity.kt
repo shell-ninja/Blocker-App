@@ -60,6 +60,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         BlockerStore.autoClampStuckTimers(this)
         PermissionFlowTracker.isLaunchingPermissionIntent = false
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+        if (nm?.isNotificationPolicyAccessGranted == true) {
+            PermissionFlowTracker.lastDndPermissionRequestMs = 0L
+        }
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
         if (::repo.isInitialized) {

@@ -1,11 +1,14 @@
 package com.blocker.ui.components
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -13,145 +16,74 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.blocker.ui.theme.NordicColors
 
 /**
- * Multi-layer procedural Royal Obsidian background:
- * a) Base Layer: Deep Obsidian (0xFF070512).
- * b) Ambient Royal Purple Glow Mesh:
- *    - Top-right amethyst radial glow (center at 85% X, 12% Y, color 0x407C3AED fading to transparent)
- *    - Bottom-left indigo-violet radial glow (center at 15% X, 85% Y, color 0x304C1D95 fading to transparent)
- * c) Crisp Geometric & Topographic Pattern:
- *    - Isometric hexagonal shield lattice + flowing topographic contour waves using 1.2.dp strokes in 0xFF36266E (alpha = 0.65f)
- *    - Glowing intersection nodes/dots in 0xFF8B5CF6 (alpha = 0.45f).
- */
-fun Modifier.royalObsidianTexture(): Modifier = this.drawWithCache {
-    val baseColor = Color(0xFF070512)
-    val glowAmethyst = Color(0x407C3AED)
-    val glowIndigo = Color(0x304C1D95)
-
-    val latticeColor = Color(0xFF36266E).copy(alpha = 0.65f)
-    val dotColor = Color(0xFF8B5CF6).copy(alpha = 0.45f)
-    val latticeStroke = Stroke(width = 1.2.dp.toPx())
-    val dotRadius = 2.2.dp.toPx()
-
-    val w = size.width
-    val h = size.height
-
-    // Radial gradients
-    val amethystGlowBrush = Brush.radialGradient(
-        colors = listOf(glowAmethyst, Color.Transparent),
-        center = Offset(w * 0.85f, h * 0.12f),
-        radius = (w * 0.75f).coerceAtLeast(100f)
-    )
-
-    val indigoGlowBrush = Brush.radialGradient(
-        colors = listOf(glowIndigo, Color.Transparent),
-        center = Offset(w * 0.15f, h * 0.85f),
-        radius = (w * 0.75f).coerceAtLeast(100f)
-    )
-
-    // Flowing Topographic Contour Waves
-    val contourWaveRatios = listOf(0.10f, 0.22f, 0.38f, 0.52f, 0.68f, 0.82f, 0.94f)
-    val contourPaths = contourWaveRatios.map { ratio ->
-        val yBase = h * ratio
-        Path().apply {
-            moveTo(-20f, yBase)
-            cubicTo(
-                w * 0.28f, yBase - 24.dp.toPx(),
-                w * 0.68f, yBase + 28.dp.toPx(),
-                w + 20f, yBase - 8.dp.toPx()
-            )
-        }
-    }
-
-    // Isometric Hexagonal Shield Lattice Paths
-    val hexRadius = 32.dp.toPx()
-    val hexPaths = mutableListOf<Path>()
-    val hexCenters = mutableListOf<Offset>()
-
-    val colSpacing = hexRadius * 1.732f
-    val rowSpacing = hexRadius * 1.5f
-
-    var row = 0
-    var y = 20.dp.toPx()
-    while (y <= h + hexRadius) {
-        val xOffset = if (row % 2 == 1) colSpacing / 2f else 0f
-        var x = xOffset
-        while (x <= w + hexRadius) {
-            val center = Offset(x, y)
-            hexCenters.add(center)
-            val p = Path()
-            for (i in 0 until 6) {
-                val angleRad = Math.toRadians((60.0 * i - 30.0))
-                val px = center.x + hexRadius * Math.cos(angleRad).toFloat()
-                val py = center.y + hexRadius * Math.sin(angleRad).toFloat()
-                if (i == 0) p.moveTo(px, py) else p.lineTo(px, py)
-            }
-            p.close()
-            hexPaths.add(p)
-            x += colSpacing
-        }
-        y += rowSpacing
-        row++
-    }
-
-    onDrawBehind {
-        // 1. Base Layer: Deep Obsidian
-        drawRect(baseColor)
-
-        // 2. Ambient Royal Purple Glow Mesh
-        drawRect(brush = amethystGlowBrush)
-        drawRect(brush = indigoGlowBrush)
-
-        // 3. Isometric Hex Lattice
-        for (hp in hexPaths) {
-            drawPath(hp, latticeColor, style = latticeStroke)
-        }
-
-        // 4. Flowing Topographic Contour Waves
-        for (cp in contourPaths) {
-            drawPath(cp, latticeColor, style = latticeStroke)
-        }
-
-        // 5. Glowing Intersection Nodes / Dots
-        for (hc in hexCenters) {
-            drawCircle(dotColor, dotRadius, hc)
-        }
-    }
-}
-
-/**
- * Full-screen container with procedural Royal Obsidian background textures.
+ * Full-screen Deep Obsidian background backed by assets/bg-pattern.jpg at low opacity
+ * plus a subtle dark purple vignette scrim so foreground cards pop with depth.
  */
 @Composable
 fun RoyalObsidianBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val context = LocalContext.current
+    val bgBitmap = remember(context) {
+        runCatching {
+            context.assets.open("bg-pattern.jpg").use { stream ->
+                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
-            .royalObsidianTexture(),
-        content = content
-    )
+            .background(Color(0xFF070512))
+    ) {
+        if (bgBitmap != null) {
+            Image(
+                bitmap = bgBitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.16f
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0x55070512),
+                            Color(0x22070512),
+                            Color(0x66070512)
+                        )
+                    )
+                )
+        )
+        content()
+    }
 }
 
-/** Legacy alias pointing directly to RoyalObsidianBackground. */
+/** Transparent pass-through scaffold container (MainActivity renders RoyalObsidianBackground). */
 @Composable
 fun NordicTexturedScaffold(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    RoyalObsidianBackground(
-        modifier = modifier,
+    Box(
+        modifier = modifier.fillMaxSize(),
         content = content
     )
 }
 
-fun Modifier.nordicBackgroundTexture(): Modifier = this.royalObsidianTexture()
+fun Modifier.nordicBackgroundTexture(): Modifier = this.background(Color(0xFF070512))
 
 /**
  * Flagship Hero Card with high-contrast geometric & botanical crest watermark artwork

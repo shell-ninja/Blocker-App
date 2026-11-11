@@ -371,6 +371,7 @@ object BlockerStore {
         for ((key, value) in all) {
             if (key.startsWith("pending_") || key.contains("unlock") || key.contains("cooldown")) {
                 val target = (value as? Number)?.toLong() ?: continue
+                if (target <= 0L) continue
                 val remaining = target - now
                 if (remaining > maxAllowed) {
                     editor.putLong(key, now + maxAllowed)
@@ -392,7 +393,7 @@ object BlockerStore {
 
         val all = p.all
         for ((k, v) in all) {
-            if (k.startsWith("pending_")) {
+            if (k == "pending_protection" || k == "pending_setting_focus_apps" || k.startsWith("pending_setting_sched_apps_")) {
                 val target = (v as? Number)?.toLong() ?: continue
                 if (target != 0L && now >= target) {
                     val baseKey = k.removePrefix("pending_")
@@ -500,6 +501,21 @@ object BlockerStore {
 
     fun cancelSettingUnlockTarget(c: Context, key: String) {
         prefs(c).edit().remove("pending_setting_$key").apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun isSettingGuardOpen(c: Context, key: String): Boolean {
+        val now = System.currentTimeMillis()
+        val openUntil = prefs(c).getLong("open_setting_$key", 0L)
+        return openUntil > now
+    }
+
+    fun openSettingGuardWindow(c: Context, key: String) {
+        val now = System.currentTimeMillis()
+        prefs(c).edit()
+            .remove("pending_setting_$key")
+            .putLong("open_setting_$key", now + GUARD_WINDOW_MS)
+            .apply()
         updateIntegrityHmac(c)
     }
 

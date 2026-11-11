@@ -491,7 +491,10 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -635,7 +638,8 @@ fun SettingsScreen(
                         icon = CyberIcons.Download,
                         onClick = { showUpdateModal = true },
                         kind = BtnKind.PRIMARY,
-                        modifier = Modifier.weight(1.3f)
+                        compact = true,
+                        modifier = Modifier.weight(1.25f)
                     )
                     Btn(
                         label = if (updateState.checking) "Checking..." else "Check Again",
@@ -643,6 +647,7 @@ fun SettingsScreen(
                         enabled = !updateState.checking,
                         onClick = { repo.checkForUpdates(true) },
                         kind = BtnKind.GHOST,
+                        compact = true,
                         modifier = Modifier.weight(1f)
                     )
                 } else {
@@ -652,6 +657,7 @@ fun SettingsScreen(
                         enabled = !updateState.checking,
                         onClick = { repo.checkForUpdates(true) },
                         kind = BtnKind.PRIMARY,
+                        compact = true,
                         modifier = Modifier.weight(1f)
                     )
                     if (updateState.release != null) {
@@ -660,6 +666,7 @@ fun SettingsScreen(
                             icon = CyberIcons.Book,
                             onClick = { showUpdateModal = true },
                             kind = BtnKind.GHOST,
+                            compact = true,
                             modifier = Modifier.weight(1f)
                         )
                     }

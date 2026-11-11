@@ -44,6 +44,10 @@ if cpp_src.exists():
 
 # 2c. Pre-compiled binary assets
 assets_src = src / "android" / "assets"
+bg_pattern_root = here / "assets" / "bg-pattern.jpg"
+if bg_pattern_root.exists():
+    assets_src.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(bg_pattern_root, assets_src / "bg-pattern.jpg")
 if assets_src.exists():
     assets_dest = main / "assets"
     shutil.copytree(assets_src, assets_dest, dirs_exist_ok=True)
@@ -52,6 +56,9 @@ if assets_src.exists():
 res_src = src / "android" / "res"
 if res_src.exists():
     shutil.copytree(res_src, main / "res", dirs_exist_ok=True)
+obsolete_bg_xml = main / "res" / "drawable" / "bg_royal_obsidian_pattern.xml"
+if obsolete_bg_xml.exists():
+    obsolete_bg_xml.unlink()
 
 
 
@@ -410,6 +417,20 @@ if "buildConfig true" not in g:
 if 'buildConfigField "boolean", "IS_DEBUG_TIMER"' not in g:
     g = re.sub(r"(debug\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "true"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "3000L"', g, count=1)
     g = re.sub(r"(release\s*\{[^}]*)", r'\1\n            buildConfigField "boolean", "IS_DEBUG_TIMER", "false"\n            buildConfigField "long", "DEBUG_UNLOCK_DURATION_MS", "60000L"', g, count=1)
+if "copyBgPattern" not in g:
+    copy_bg_task = """
+tasks.register("copyBgPattern", Copy) {
+    def srcImg = file("${rootProject.projectDir}/../../assets/bg-pattern.jpg")
+    if (srcImg.exists()) {
+        from(srcImg)
+        into(file("src/main/assets"))
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("copyBgPattern")
+}
+"""
+    g = re.sub(r"(dependencies\s*\{)", copy_bg_task + r"\1", g, count=1)
 
 write(gr, g)
 

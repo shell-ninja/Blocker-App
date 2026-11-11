@@ -712,6 +712,28 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
             }
 
+            // Do Not Disturb Access / Notification Policy Access: let Kotlin's Rule A/B DND flow gate handle it
+            bool is_dnd_screen =
+                contains_ci(cls, "zenaccess") || contains_ci(cls, "notificationaccess") ||
+                contains_ci(cls, "policyaccess") || contains_ci(cls, "managezenaccess");
+            if (!is_dnd_screen) {
+                for (size_t i = 0; i < node_count; ++i) {
+                    std::string_view t = nodes[i].text;
+                    std::string_view c = nodes[i].cd;
+                    if (contains_ci(t, "do not disturb access") || contains_ci(c, "do not disturb access") ||
+                        contains_ci(t, "allow do not disturb") || contains_ci(c, "allow do not disturb") ||
+                        contains_ci(t, "notification policy access") || contains_ci(c, "notification policy access") ||
+                        contains_ci(t, "read, reply & control") || contains_ci(c, "read, reply & control") ||
+                        contains_ci(t, "do not disturb") || contains_ci(c, "do not disturb")) {
+                        is_dnd_screen = true;
+                        break;
+                    }
+                }
+            }
+            if (is_dnd_screen) {
+                return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+            }
+
             // Scoped Check: Does this Settings / App Info screen target Blocker?
             bool targets_self_in_settings = false;
             for (size_t i = 0; i < node_count; ++i) {
