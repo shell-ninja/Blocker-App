@@ -6,81 +6,51 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ## v1.0.6.7 (Current Release)
 
-**Release Date:** November 10, 2026  
+**Release Date:** November 11, 2026  
 **Version:** 1.0.6.7  
-**Build:** 101  
+**Build:** 109  
 
 ### Major Fixes & Enhancements:
+- **GitHub Update Checker Rate-Limit Fix (`HTTP 403` Web Fallback & ETag Cache):**
+  - Added conditional `If-None-Match` (`ETag`) caching (`HTTP 304 Not Modified`) and a 10-minute automatic update-check cooldown (`AUTO_CHECK_COOLDOWN_MS`) using dedicated UI preference keys in `UpdateManager`, preventing repeated auto-checks from exhausting GitHub's unauthenticated REST API quota.
+  - Added automatic fallback to GitHub web endpoints (`/releases/latest` `302` tag redirect, `/releases/expanded_assets/<tag>` `.apk` asset resolution with HTTP `HEAD` `Content-Length` size verification, and `/releases.atom` changelog metadata) whenever `api.github.com` returns `HTTP 403` / `429` or fails.
+  - Updated `BlockerForegroundService.runBackgroundUpdateCheck` to use `UpdateManager.resolveLatestTagViaWeb()` on `HTTP 403` / `429` while keeping its 2-hour background check schedule (with 24-hour pending-update backoff) independent.
+- **Royal Obsidian `bg-pattern.jpg` Background & Unstacked Study Mode UI:**
+  - Replaced procedural hexagon and dot-matrix canvases with `RoyalObsidianBackground`, rendering `assets/bg-pattern.jpg` at low opacity (`0.16f`) over Deep Obsidian (`#070512`) with a purple vignette scrim, synced via Gradle's `copyBgPattern` task and `patch_android.py`.
+  - Unstacked the Study Mode layout into a single-column scrollable sequence of non-overlapping cards (Motivation Quote Card, Do Not Disturb & Wi-Fi quick readiness controls, and Study Session Configuration for Focus Duration, Rest Break, and Rounds `1–12`).
+  - Added smooth Compose state animations, compact update buttons on `SettingsScreen`, and single-line truncated placeholders with IME padding across `BlocklistScreen`.
+- **Focus Mode App Locking, Per-Schedule Whitelists & 12 AM Schedule Math Fix:**
+  - Enforced delay locks when modifying allowed apps during active Focus Mode or Protection Mode, and added per-schedule allowed-app configuration (`FocusSchedule.allowedApps` / `ScheduleAppPickerDialog`).
+  - Fixed 12:00 AM midnight schedule range calculation and premature activation in `FocusSchedule.isActiveNow` and `BlockerStore`.
+- **Do Not Disturb (Notification Policy) Permission Allow-Gate:**
+  - Exempted Android's Do Not Disturb / Notification Policy Access grant workflow (`PermissionFlowTracker.lastDndPermissionRequestMs`, Kotlin `Rule A` / `Rule B`, and native C++ `is_dnd_screen` check in `blocker_engine.cpp`) so users can grant DND permission cleanly from Study Mode without being kicked out of Settings.
+  - Strictly blocks revoking Blocker's own DND access when Protection Mode or Study Mode is active.
+- **Clean APK Naming & Monotonic In-Place Upgrade Architecture:**
+  - Standardized generated APK names without a `v` prefix: `Blocker-debug-1.0.6.7.apk` and `Blocker-release-1.0.6.7.apk`.
+  - Updated monotonic `versionCode` progression (`1006811` for debug, `1106811` for release) to guarantee seamless in-place APK upgrades over installed builds without encountering `INSTALL_FAILED_VERSION_DOWNGRADE`.
+- **3-Second Live Debug Timers & Startup Auto-Clamping:**
+  - Debug builds enforce a 3-second (`DEBUG_UNLOCK_DURATION_MS = 3000L`) live countdown delay for rapid testing, while Release builds strictly enforce real **1 to 30 day** delayed-unlock timers with no backdoors.
+  - Startup clamping (`autoClampStuckTimers`) automatically clamps lingering persisted countdown timestamps down to 3 seconds on Debug builds.
 - **Real-Time 1-Second Countdown Ticker & Protected Settings Locks:**
-  - Resolved the frozen countdown timer issue by eliminating redundant timer clamping during polling and protecting all future epoch timestamps from being overwritten while active.
-  - Added a reactive 1-second ticker (`currentTimeMillisFlow`) in `BlockerRepository` that powers live, synchronized countdown displays across HomeScreen, FocusScreen, and SettingsScreen (`00:59` → `00:58` … → `00:00`).
+  - Eliminated frozen countdown timers by protecting future epoch timestamps from being overwritten while active and driving UI badges from a shared 1-second ticker (`currentTimeMillisFlow`) across HomeScreen, FocusScreen, and SettingsScreen.
   - Strict countdown delay enforcement across Distraction Shields, Daily Schedule deletion/toggle-off, Focus Mode cancellation, and Custom Web/Keyword removal while Protection or Focus Mode is active.
 - **Device Admin Apps List Screen Smart Allow-Gate:**
-  - Disentangled the general Android "Device admin apps" list overview screen from detail and deactivation pages.
-  - Users can freely browse, scroll, and activate other system administrators (such as Google Find My Device and Play Protect) without being kicked to Home.
-  - Clicking on Blocker's Device Admin row while active remains strictly deflected in 0ms.
+  - Disentangled the general Android "Device admin apps" list overview screen from detail and deactivation pages so users can freely browse and manage other system administrators (such as Google Find My Device and Play Protect) while deflecting Blocker's own deactivation page in 0ms.
 - **Exact Blocked URL & Matched Keyword Reporting:**
-  - Native C++ engine (`matchUrlRule`) and regex gatekeepers now extract and return the exact blocked domain host (e.g. `Blocked URL: m.example.com` / `ব্লককৃত লিংক: m.example.com`) or restricted keyword substring (`Blocked Keyword: "phrase"` / `নিষিদ্ধ কীওয়ার্ড: "phrase"`).
-  - Wired exact triggers cleanly into both instant floating HUD banners and bilingual Islamic reminder dialogs.
+  - Native C++ engine (`matchUrlRule`) and regex gatekeepers extract and return the exact blocked domain host (e.g. `Blocked URL: m.example.com` / `ব্লককৃত লিংক: m.example.com`) or restricted keyword substring (`Blocked Keyword: "phrase"` / `নিষিদ্ধ কীওয়ার্ড: "phrase"`) across floating HUD banners and bilingual Islamic reminder dialogs.
 - **Soft Keyboard Auto-Scroll & Input Clearance:**
-  - Enabled `android:windowSoftInputMode="adjustResize"` for `MainActivity` in manifest patching.
-  - Applied `Modifier.imePadding()` to root Compose scaffolds and attached `BringIntoViewRequester` with a 200ms delay to domain, keyword, and simulator text fields, ensuring fields scroll smoothly above the keyboard.
-  - Added extra bottom clearance (`140.dp`) on the Web & Keywords page.
+  - Enabled `android:windowSoftInputMode="adjustResize"` for `MainActivity`, applied `Modifier.imePadding()`, and attached `BringIntoViewRequester` with bottom clearance on the Web & Keywords page so input fields scroll above the keyboard.
 - **Default Blocklist Hardening & GitHub Privacy Encryption:**
-  - Added `redgifs.com` (domain) and `redgifs`, `futanari`, `pawg`, `erotic` (keywords) to the default binary block engine (`blocklist.bin`).
-  - Obfuscated all repository list assets via `encrypted-blocklist` and base64 encoding (`userLists.ts`), ensuring zero plain-text adult strings or URLs are indexed or visible on GitHub.
+  - Added `redgifs.com` (domain) and `redgifs`, `futanari`, `pawg`, `erotic` (keywords) to the default binary block engine (`blocklist.bin`) with obfuscated repository assets (`encrypted-blocklist` and base64 encoding).
 - **Precision Scoped Tamper Guard (Free Uninstallation & Long-Press for Other Apps):**
-  - **Scoped Launcher Interception:** Resolved the issue where long-pressing or opening shortcut menus on other apps (e.g. WhatsApp, Telegram, Camera) was erroneously blocked.
-  - **Node-Targeted Identity Matching:** Scoped `isSelfMentioned(ev)` strictly to the touched node, its label, and its immediate parent—eliminating desktop-wide `rootInActiveWindow` sweeps that previously matched Blocker's desktop icon.
-  - **Package Installer Scoped Gate:** System `PackageInstaller` dialog interception now verifies that Blocker (`com.blocker`) is the specific uninstall target (`targetIsSelf`), allowing all other apps to be uninstalled, updated, or inspected 100% freely.
-- **Device Administrator Direct Redirect & Smart Allow-Gate:**
-  - **Direct System Activation Redirect:** Tapping "Set Device Admin" on Startup / Onboarding or the Home health card immediately launches Android's system Device Administrator activation screen (`DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN`).
-  - **Dynamic Activation vs. Deactivation Gate:** Evaluates `dpm.isAdminActive()` on every event. When Device Admin is not yet active, activation screens are 100% allowed so users can activate Device Admin seamlessly. Once active, any attempt to reach deactivation screens remains locked down.
+  - Scoped launcher long-press and `PackageInstaller` checks strictly to Blocker (`com.blocker`), allowing other apps to be long-pressed, updated, inspected, or uninstalled freely.
 - **Auto-Close & Background Removal on Minimize:**
-  - **Zero Background Footprint:** Whenever Blocker is minimized (via Home button, back gesture, or task switcher), `MainActivity` immediately invokes `finishAndRemoveTask()`.
-  - **Android Recents Protection:** Closes the UI and removes the task from Android Recents completely, preventing access to App Info or Settings via the multitasking overview screen.
-- **Seamless In-Place APK Upgrade Architecture:**
-  - **Monotonic Version Code:** Configured monotonic `versionCode` progression (`1006810` for debug, `1106810` for release) to guarantee seamless in-place APK upgrades over locked devices without requiring uninstallation or encountering `INSTALL_FAILED_VERSION_DOWNGRADE`.
-- **1-Minute Debug Unlock Timer & Auto-Clamping:**
-  - **Debug Timer Enforcement:** Debug builds strictly enforce a 60-second (1-minute) unlock delay and cooldown across all toggles (master toggle, settings, daily schedules, usage limits).
-  - **Startup Auto-Clamping:** Automatically inspects persisted DataStore and SharedPreferences unlock timestamps on startup; any existing 24-hour locks are clamped down to 60 seconds upon upgrading.
-- **Surgical Facebook Newsfeed & Video Ejection (Zero Home Kicking):**
-  - **Fluid Newsfeed Browsing:** Users can browse the Facebook Newsfeed freely without interruption or false-positive kicks.
-  - **In-App Newsfeed Return:** When a user clicks a Reel or video to open a full-screen player, Blocker performs an in-app `GLOBAL_ACTION_BACK` ejection returning the user directly to the Newsfeed—never kicking them out to the Android launcher (`GLOBAL_ACTION_HOME`).
-- **Opt-In Granular Distraction Shields (Default OFF):**
-  - Granular distraction toggles (Facebook Reels, YouTube Shorts, Instagram Reels, Instagram Search) default to `OFF` upon initial installation, allowing users to enable shields selectively.
-- **Silent, Non-Intrusive Distraction Ejection:**
-  - Completely eliminated warning popup overlays when blocking Facebook Reels, Instagram Reels, Instagram Explore/Search, and YouTube Shorts.
-  - Users are smoothly redirected to the app's Home / Feeds page directly via instant in-app navigation (`findHomeTabNode`, `findInstaHomeTabNode`, `findYtHomeTabNode`).
-- **Official Blocker App Icon Restoration:**
-  - Restored the official high-resolution Blocker shield logo icon across the entire application, replacing generic SVGs.
-  - Featured in the app Header squircle well, startup splash screen, error recovery screen, onboarding welcome header, and Settings footer branding.
-- **Maximum Lightness & 60/120fps Buttery Smooth Performance:**
-  - **Fast-Path Facebook Node Inspection:** Inverted check order in `isFacebookVideoOrReels` to verify Home newsfeed status before running node scans, and slashed node scan budget from 3,000 nodes down to 200 characters on newsfeed scroll.
-  - **Zero IPC / Binder Memory Leaks:** Wrapped all accessibility node queries in `try ... finally { runCatching { root.recycle() } }` across `checkGranularInterception` and `checkRedditInterception`.
-  - **Instant Tab Switching (0ms Input Lag):** Instantaneous tab switching with a snappy 110ms hardware-accelerated transition.
-  - **Memoized Background Grid Canvas:** Wrapped `DotMatrixBackground` and `AppBackground` in `React.memo` to eliminate redundant SVG re-renders.
-- **Comprehensive Cyber Design System Overhaul:**
-  - Deep Obsidian-Midnight Canvas (`#070913`) layered with a subtle, low-opacity dot-matrix grid pattern (`CyberBackground`).
-  - Elevated 3D Bento Cards (`#0E1322` to `#13192B`, 18dp corner radius) with crisp 1dp inner border highlights.
-  - Luminous accents & status badges: high-vibrancy emerald green (`#10B981` / `#00E676`) and royal electric purple/violet (`#7C3AED` / `#9333EA`).
-  - Tactile press physics (0.96x spring scale-down on press with crisp rebound) and live rolling counter animations.
-- **Focus Mode Daily Schedule Duration Indicator:**
-  - Added duration badge preview ("Duration: Xh Ym") directly on each daily schedule card in Focus Mode so users instantly see how long protection will remain active.
-- **UI Alignment & Polish:**
-  - Perfectly aligned bottom navigation bar fonts and icons (`CyberBottomBar`).
-  - Fixed Settings footer alignment: "Developed by Shell Ninja", logo, and GitHub "Source Code" link align cleanly in a unified row.
-- **Startup Resilience & Crash Immunity:**
-  - Eliminated infinite re-render loops and startup blank screens.
-  - Hardened ProtectionManager startup sequence with timeout fallbacks and wrapped native getters in `runCatching` to prevent startup freezes.
-- **Maximum Anti-Tamper & Anti-Uninstall Lockdown (Airtight Fortress):**
-  - Permanently removed all accessibility pausing, bypasses, or temporary exemption loopholes. Blocker operates with strict, non-negotiable 24/7 enforcement.
-  - **Zero-ms Launcher Interceptor:** Press-and-hold (long-press) on the Blocker launcher icon, drag-to-uninstall, and app shortcut menus are intercepted and cancelled within 0 milliseconds across all Android OEM launchers.
-  - **Settings & App Info Lockdown:** Any attempt to reach Blocker's App Info, Clear Storage, Force Stop, or Device Admin deactivation screens inside Android Settings is immediately intercepted with sub-millisecond node scanning and kicked to Home.
-  - **Package Installer Ejection Watchdog:** `BlockerForegroundService` runs a continuous background watchdog using `UsageStatsManager` that kicks any unauthorized package manager or sideload dialogs targeting Blocker to Home in 200ms.
-  - **Device Administrator OS Invariant:** Enforces Android Device Administrator policy preventing direct uninstallation at the OS level (`"This app is an active device administrator and must be deactivated before uninstalling"`).
-  - **Device Owner Permanent Lockdown:** Integrates `dpm.setUninstallBlocked(admin, packageName, true)` and `UserManager.DISALLOW_UNINSTALL_APPS` for unbreakable, hardware-enforced uninstallation blocking when provisioned as Device Owner.
-  - **Zero-Overlay Idle Architecture:** Detaches overlay windows from Android WindowManager when idle so legitimate apps encounter no touch-filtering or tapjacking interference.
+  - Minimizing Blocker immediately invokes `finishAndRemoveTask()`, removing the task from Android Recents.
+- **Surgical Facebook Newsfeed & Silent Distraction Ejection:**
+  - Passive Facebook Newsfeed browsing is preserved cleanly; tapping a full-screen video or Reel performs an in-app `GLOBAL_ACTION_BACK` / Home-tab redirection without warning popups or kicking users out to the phone launcher.
+  - Wrapped accessibility node queries in `try ... finally { runCatching { root.recycle() } }` to eliminate Binder/IPC leaks.
+- **Maximum Anti-Tamper & Anti-Uninstall Lockdown:**
+  - Enforces 0ms launcher long-press deflection for Blocker, Settings/App Info protection, 200ms `BlockerForegroundService` package installer watchdog, Android Device Administrator enforcement, and Device Owner uninstall lock support.
 
 ---
 

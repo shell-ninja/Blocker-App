@@ -10,9 +10,9 @@ A privacy-focused, zero-telemetry Android distraction and content blocker built 
 
 > [!IMPORTANT]
 > **Recommendation: Install the Debug Version First!**  
-> We strongly recommend installing and testing the **Debug version** (`Blocker-release-debug-{VERSION}.apk`) before installing the Release build.  
-> - **Test with 1-Minute Timers:** The Debug build uses short **1-minute** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
-> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-{VERSION}.apk`), which enforces real **1 to 30 day** delayed-unlock timers with strict anti-tamper security and no backdoors.
+> We strongly recommend installing and testing the **Debug version** (`Blocker-debug-1.0.6.7.apk`) before installing the Release build.  
+> - **Test with 3-Second Timers:** The Debug build uses short **3-second** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
+> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-1.0.6.7.apk`), which enforces real **1 to 30 day** delayed-unlock timers with strict anti-tamper security and no backdoors.
 
 > [!WARNING]
 > **Play Protect Warning During Installation**  
@@ -32,26 +32,24 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## What's New in v1.0.6.7
 
+- **GitHub Update Checker Rate-Limit Fix (`HTTP 403` Web Fallback & ETag Cache):**
+  - Added conditional `If-None-Match` (`ETag`) caching and a 10-minute auto-check cooldown so checking for updates does not hit unauthenticated GitHub API rate limits.
+  - Added automatic fallback to GitHub web release endpoints (`/releases/latest`, `/releases/expanded_assets/<tag>`, and `/releases.atom`) across both the Settings updater and `BlockerForegroundService`.
+- **Royal Obsidian Texture & Unstacked Study Mode UI:**
+  - Replaced procedural grid backgrounds with `assets/bg-pattern.jpg` over Deep Obsidian (`#070512`) and unstacked Study Mode cards so quotes, DND/Wi-Fi readiness, and focus session controls display cleanly without overlap.
+- **Per-Schedule App Whitelists, DND Allow-Gate & 12 AM Schedule Fix:**
+  - Enforced delay locks when changing allowed apps while Focus or Protection Mode is active, added per-schedule app selection, and fixed 12:00 AM midnight schedule evaluation.
+  - Exempted Android's Do Not Disturb permission grant flow in Kotlin and native C++ so Study Mode setup never kicks users out of Settings, while blocking revocation when armed.
 - **Real-Time 1-Second Countdown Ticker & Anti-Tamper Delay Locks:**
-  - Active delay unlock timers tick down visibly every second (`00:59` → `00:58` … → `00:00`) driven by a shared, synchronized reactive state engine.
-  - Strict countdown delays are enforced across Distraction Shields, Daily Schedule modifications, Focus Mode toggle-off, and Web/Keyword blocklist deletions whenever Protection Mode or Focus Mode is armed.
+  - Active delay unlock timers tick down visibly every second driven by a shared reactive ticker, while Debug builds use fast **3-second** countdowns and clean APK filenames (`Blocker-debug-1.0.6.7.apk` / `Blocker-release-1.0.6.7.apk`).
 - **Device Admin Smart Allow-Gate:**
-  - Android's "Device admin apps" list screen can now be browsed and inspected freely. Users can activate and manage other administrator apps (e.g. Find My Device, Google Play Protect) without being kicked to Home.
-  - Attempting to deactivate Blocker's Device Administrator remains strictly blocked in 0ms.
-- **Exact Trigger Reporting in Popups & Floating HUD:**
-  - Overlay reminders and floating HUD banners now display the exact blocked URL (e.g. `Blocked URL: m.example.com` / `ব্লককৃত লিংক: m.example.com`) or restricted keyword phrase (`Blocked Keyword: "phrase"` / `নিষিদ্ধ কীওয়ার্ড: "phrase"`).
-- **Soft Keyboard Auto-Scroll & Input Clearance:**
-  - Configured `adjustResize` soft input mode and `BringIntoViewRequester` with IME padding on the Web & Keywords page, ensuring input fields smoothly scroll above the Android keyboard upon focus.
+  - Android's "Device admin apps" list screen can be browsed freely for other administrators while blocking Blocker's own deactivation in 0ms.
+- **Exact Trigger Reporting & Keyboard Clearance:**
+  - Floating HUD banners and bilingual English / বাংলা reminder dialogs report the exact blocked URL or matched keyword, and the Web & Keywords screen auto-scrolls above the soft keyboard (`adjustResize` + `BringIntoViewRequester`).
 - **Default Content Hardening & GitHub Privacy Encryption:**
-  - Bundled `redgifs.com` and restricted terms (`redgifs`, `futanari`, `pawg`, `erotic`) directly into the default binary filtering engine.
-  - Full end-to-end repository encryption (`encrypted-blocklist` and base64 obfuscation) guarantees that no plaintext adult URLs or keywords are exposed when viewing repository files on GitHub.
-- **Surgical Distraction Ejection & Newsfeed Protection:**
-  - Passive Facebook Newsfeed scrolling is 100% preserved. Full-screen Reels or video taps trigger an in-app Back action that returns the user straight to the Newsfeed without launcher ejections (`GLOBAL_ACTION_HOME`).
-  - Warning popups are completely silenced during short-form video blocking for a seamless, distraction-free flow.
-- **Auto-Close & Background Removal on Minimize:**
-  - Minimized app tasks invoke `finishAndRemoveTask()`, immediately clearing the app from Android Recents to prevent bypasses via the multitasking overview screen.
-- **Bilingual Islamic Reminder Dialogs:**
-  - Reverent Quranic verses and Hadiths available in authentic English and বাংলা, with dedicated language selection in Settings.
+  - Bundled `redgifs.com` and restricted keywords (`redgifs`, `futanari`, `pawg`, `erotic`) into `blocklist.bin` with repository encryption (`encrypted-blocklist`).
+- **Surgical Distraction Ejection & Auto-Close on Minimize:**
+  - Passive Facebook Newsfeed scrolling stays uninterrupted while clicked full-screen Reels/videos eject in-app cleanly; minimizing Blocker invokes `finishAndRemoveTask()`.
 
 ---
 
@@ -237,9 +235,9 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```bash
 ./build_apk.sh debug
 ```
-* Uses **1-minute** delay timers for protection unlocks so you do not get locked out while testing.
-* Automatically imports blocklists, increments the build number, patches React Native files, and compiles.
-* Outputs the binary to: `apk/Blocker-debug-{build_number}.apk`.
+* Uses **3-second** delay timers for protection unlocks so you do not get locked out while testing.
+* Automatically imports blocklists, increments the build number, patches Android project files, and compiles.
+* Outputs the binary to: `apk/Blocker-debug-1.0.6.7.apk`.
 
 #### Release Build (When Ready for Real Protection):
 ```bash
@@ -247,7 +245,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```
 * Enforces real **1 to 30 day** delayed-unlock timers.
 * Strict anti-tamper security: settings changes cannot be bypassed without waiting the full duration.
-* Outputs the binary to: `apk/Blocker-release-{build_number}.apk`.
+* Outputs the binaries to: `apk/Blocker-release-1.0.6.7.apk` and `apk/Blocker-debug-1.0.6.7.apk`.
 
 ### 3. Install on Device
 
