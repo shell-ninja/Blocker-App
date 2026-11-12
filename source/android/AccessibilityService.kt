@@ -2671,9 +2671,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         val isManualFocusActive = BlockerStore.focusUntil(this) > SecureTime.now(this)
         val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
         val isScheduledFocusActive = activeSchedules.isNotEmpty()
+        val activePrayer = BlockerStore.activePrayerSlot(this)
+        val isPrayerFocusActive = activePrayer != null
 
-        // If manual focus is active, check manual focus allowed packages
-        if (isManualFocusActive) {
+        // If manual focus or prayer focus is active, check global focus allowed packages
+        if (isManualFocusActive || isPrayerFocusActive) {
             val manualAllowed = BlockerStore.focusApps(this)
             if (pkg in manualAllowed) return false
         }
@@ -2685,22 +2687,38 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
 
-        // If neither is active, not blocked
-        if (!isManualFocusActive && !isScheduledFocusActive) {
+        // If none is active, not blocked
+        if (!isManualFocusActive && !isScheduledFocusActive && !isPrayerFocusActive) {
             return false
         }
 
         val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             rootInActiveWindow?.packageName?.toString() == pkg
         if (!trusted) return false
+        val isPrayerOnly = isPrayerFocusActive && !isManualFocusActive && !isScheduledFocusActive
+        val dialogTitle = when {
+            isPrayerOnly && isBangla() -> "নামাজের সময় সক্রিয় (${activePrayer!!.nameBn})"
+            isPrayerOnly -> "Prayer Focus (${activePrayer!!.nameEn})"
+            isBangla() -> "ফোকাস মোড সক্রিয়"
+            else -> "Focus Mode Active"
+        }
+        val dialogVerse = when {
+            isPrayerOnly && isBangla() -> "${activePrayer!!.nameBn} নামাজের ওয়াক্তে মনোযোগ ধরে রাখুন"
+            isPrayerOnly -> "Focus on your ${activePrayer!!.nameEn} prayer (${leftText()} left)"
+            else -> formatFocusModeBody(leftText())
+        }
+        val dialogTag = when {
+            isPrayerOnly -> "${activePrayer!!.nameEn} (${leftText()})"
+            else -> labelOf(pkg)
+        }
         hit(
             "focus",
-            if (isBangla()) "ফোকাস মোড সক্রিয়" else "Focus Mode Active",
-            formatFocusModeBody(leftText()),
+            dialogTitle,
+            dialogVerse,
             if (isBangla()) "কল্যাণকর কাজে সময় ব্যয় করুন" else "Guard your time for what benefits you",
             pkg,
             getUnderstoodButton(),
-            BlockReason(BlockCategory.STUDY_LOCKDOWN, labelOf(pkg))
+            BlockReason(BlockCategory.STUDY_LOCKDOWN, dialogTag)
         )
         return true
     }

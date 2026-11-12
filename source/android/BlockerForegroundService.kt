@@ -146,9 +146,16 @@ class BlockerForegroundService : Service {
         }
     }
 
+    @Volatile private var lastPrayerDndSyncElapsed = 0L
+
     private fun startWatchdog() {
         stopWatchdog()
         watchdogFuture = watchdogExecutor.scheduleWithFixedDelay({
+            val elapsed = android.os.SystemClock.elapsedRealtime()
+            if (elapsed - lastPrayerDndSyncElapsed >= 2000L) {
+                lastPrayerDndSyncElapsed = elapsed
+                runCatching { BlockerStore.syncPrayerAutoDnd(this) }
+            }
             if (!isScreenInteractive) return@scheduleWithFixedDelay
             runCatching { inspectForegroundState() }
         }, 1000L, 250L, TimeUnit.MILLISECONDS)

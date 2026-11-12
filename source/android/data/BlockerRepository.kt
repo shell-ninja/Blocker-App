@@ -23,6 +23,7 @@ import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
 import com.blocker.FocusSchedule
 import com.blocker.MainActivity
+import com.blocker.PrayerSlot
 import com.blocker.SecureTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,10 @@ data class FocusState(
     val pendingUnlockRemainingMs: Long = 0L,
     val pendingScheduleUnlocks: Map<String, Long> = emptyMap(),
     val pendingScheduleActions: Map<String, String> = emptyMap(),
-    val pendingAppsUnlockUntil: Long = 0L
+    val pendingAppsUnlockUntil: Long = 0L,
+    val prayerSlots: List<PrayerSlot> = emptyList(),
+    val pendingPrayerUnlocks: Map<String, Long> = emptyMap(),
+    val hasDndAccess: Boolean = false
 )
 
 data class StudyState(
@@ -352,6 +356,25 @@ class BlockerRepository(private val context: Context) {
 
         val fAppsUnlockUntil = BlockerStore.settingUnlockTarget(appContext, "focus_apps")
 
+        var prayers = BlockerStore.prayerSlots(appContext)
+        val prayerUnlocks = mutableMapOf<String, Long>()
+        var prayersMutated = false
+        for (slot in prayers) {
+            val target = BlockerStore.pendingPrayerUnlockUntil(appContext, slot.id)
+            if (target > 0L && now >= target) {
+                prayers = prayers.map { if (it.id == slot.id) it.copy(isEnabled = false) else it }
+                BlockerStore.cancelPendingPrayerUnlock(appContext, slot.id)
+                prayersMutated = true
+            } else if (target > 0L) {
+                prayerUnlocks[slot.id] = target
+            }
+        }
+        if (prayersMutated) {
+            BlockerStore.putPrayerSlots(appContext, prayers)
+        }
+        BlockerStore.syncPrayerAutoDnd(appContext)
+        val dndAccess = hasDndAccess()
+
         _focusState.value = FocusState(
             active = fActive,
             focusUntil = fUntil,
@@ -362,7 +385,10 @@ class BlockerRepository(private val context: Context) {
             pendingUnlockRemainingMs = fUnlockRem,
             pendingScheduleUnlocks = schedUnlocks,
             pendingScheduleActions = schedActions,
-            pendingAppsUnlockUntil = fAppsUnlockUntil
+            pendingAppsUnlockUntil = fAppsUnlockUntil,
+            prayerSlots = prayers,
+            pendingPrayerUnlocks = prayerUnlocks,
+            hasDndAccess = dndAccess
         )
 
         val sActive = BlockerStore.studyActive(appContext)
@@ -375,7 +401,6 @@ class BlockerRepository(private val context: Context) {
         val sBm = BlockerStore.studyBreakMinutes(appContext)
         val sAutoDnd = BlockerStore.prefs(appContext).getBoolean("study_auto_dnd", true)
         val sAutoWifi = BlockerStore.prefs(appContext).getBoolean("study_auto_wifi", true)
-        val dndAccess = hasDndAccess()
 
         _studyState.value = StudyState(
             active = sActive,
@@ -504,7 +529,20 @@ class BlockerRepository(private val context: Context) {
             }
         }
 
-        if (_focusState.value.active || _focusState.value.pendingUnlockUntil > 0L || _focusState.value.pendingScheduleUnlocks.isNotEmpty()) {
+        // 3b. Prayer Time Pending Unlocks & Auto-DND Sync
+        val prayerUnlocks = _focusState.value.pendingPrayerUnlocks
+        var prayerExpired = false
+        for ((slotId, target) in prayerUnlocks) {
+            if (target > 0L && now >= target) {
+                disablePrayerSlotImmediate(slotId)
+                prayerExpired = true
+            }
+        }
+        if (_focusState.value.prayerSlots.any { it.isEnabled } || BlockerStore.prefs(appContext).getBoolean("prayer_dnd_applied", false)) {
+            BlockerStore.syncPrayerAutoDnd(appContext)
+        }
+
+        if (_focusState.value.active || _focusState.value.pendingUnlockUntil > 0L || _focusState.value.pendingScheduleUnlocks.isNotEmpty() || _focusState.value.pendingPrayerUnlocks.isNotEmpty() || prayerExpired) {
             val rem = BlockerStore.focusRemainingMs(appContext)
             _focusState.value = _focusState.value.copy(remainingMs = rem)
             refreshFocusAndStudy()
@@ -1108,7 +1146,72 @@ class BlockerRepository(private val context: Context) {
         val isManualFocusRunningNow = _focusState.value.focusUntil > now
         val isStudyLockdownRunningNow = _studyState.value.active
         val isScheduleRunningNow = _focusState.value.schedules.any { it.enabled && it.isRunningAt() }
-        return isManualFocusRunningNow || isStudyLockdownRunningNow || isScheduleRunningNow
+        val isPrayerRunningNow = BlockerStore.anyPrayerActiveNow(appContext)
+        return isManualFocusRunningNow || isStudyLockdownRunningNow || isScheduleRunningNow || isPrayerRunningNow
+    }
+
+    private fun disablePrayerSlotImmediate(slotId: String) {
+        val updated = BlockerStore.prayerSlots(appContext).map {
+            if (it.id == slotId) it.copy(isEnabled = false) else it
+        }
+        BlockerStore.putPrayerSlots(appContext, updated)
+        BlockerStore.cancelPendingPrayerUnlock(appContext, slotId)
+        BlockerStore.syncPrayerAutoDnd(appContext)
+        refreshFocusAndStudy()
+    }
+
+    fun requestTogglePrayerSlot(slotId: String, enabled: Boolean) {
+        if (enabled) {
+            val updated = BlockerStore.prayerSlots(appContext).map {
+                if (it.id == slotId) it.copy(isEnabled = true) else it
+            }
+            BlockerStore.putPrayerSlots(appContext, updated)
+            BlockerStore.cancelPendingPrayerUnlock(appContext, slotId)
+            BlockerStore.syncPrayerAutoDnd(appContext)
+            refreshFocusAndStudy()
+        } else {
+            val now = SecureTime.now(appContext)
+            val protActive = BlockerStore.active(appContext)
+            if (protActive) {
+                val pending = BlockerStore.pendingPrayerUnlockUntil(appContext, slotId)
+                if (pending > 0L && now >= pending) {
+                    disablePrayerSlotImmediate(slotId)
+                } else if (pending == 0L) {
+                    val delayMs = BlockerStore.resolveUnlockDelayDurationMs(appContext)
+                    BlockerStore.setPendingPrayerUnlock(appContext, slotId, now + delayMs)
+                    refreshFocusAndStudy()
+                }
+            } else {
+                disablePrayerSlotImmediate(slotId)
+            }
+        }
+    }
+
+    fun cancelPrayerSlotUnlock(slotId: String) {
+        BlockerStore.cancelPendingPrayerUnlock(appContext, slotId)
+        refreshFocusAndStudy()
+    }
+
+    fun updatePrayerSlotConfig(
+        slotId: String,
+        startHour24: Int,
+        startMinute: Int,
+        durationMinutes: Int,
+        autoDnd: Boolean
+    ) {
+        val updated = BlockerStore.prayerSlots(appContext).map {
+            if (it.id == slotId) {
+                it.copy(
+                    startHour24 = startHour24.coerceIn(0, 23),
+                    startMinute = startMinute.coerceIn(0, 59),
+                    durationMinutes = durationMinutes.coerceIn(10, 90),
+                    autoDnd = autoDnd
+                )
+            } else it
+        }
+        BlockerStore.putPrayerSlots(appContext, updated)
+        BlockerStore.syncPrayerAutoDnd(appContext)
+        refreshFocusAndStudy()
     }
 
     fun saveSchedules(list: List<FocusSchedule>) {

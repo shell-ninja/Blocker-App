@@ -190,6 +190,123 @@ data class FocusSchedule(
     }
 }
 
+/** One manually adjustable daily prayer / Jumu'ah focus window for seasonal adjustments. */
+data class PrayerSlot(
+    val id: String,              // "FAJR", "DHUHR", "JUMUAH", "ASR", "MAGHRIB", "ISHA"
+    val nameEn: String,
+    val nameBn: String,
+    val startHour24: Int,        // 0..23
+    val startMinute: Int,        // 0..59
+    val durationMinutes: Int,    // 10..90
+    val isEnabled: Boolean = false,
+    val autoDnd: Boolean = true
+) {
+    fun startTotalMinutes(): Int = startHour24.coerceIn(0, 23) * 60 + startMinute.coerceIn(0, 59)
+
+    fun endTotalMinutes(): Int = (startTotalMinutes() + durationMinutes.coerceIn(10, 90)) % 1440
+
+    fun isApplicableOnDate(date: java.time.LocalDate, hasEnabledJumuah: Boolean): Boolean {
+        val isFri = date.dayOfWeek == java.time.DayOfWeek.FRIDAY
+        return when (id) {
+            "JUMUAH" -> isFri
+            "DHUHR" -> !(isFri && hasEnabledJumuah)
+            else -> true
+        }
+    }
+
+    fun getActiveEndEpochMs(
+        dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now(),
+        hasEnabledJumuah: Boolean = false
+    ): Long? {
+        if (!isEnabled) return null
+        val zone = java.time.ZoneId.systemDefault()
+        val nowMs = dateTime.atZone(zone).toInstant().toEpochMilli()
+        val durMs = durationMinutes.coerceIn(10, 90) * 60_000L
+        val h = startHour24.coerceIn(0, 23)
+        val m = startMinute.coerceIn(0, 59)
+        for (offset in -1L..0L) {
+            val checkDate = dateTime.toLocalDate().plusDays(offset)
+            if (!isApplicableOnDate(checkDate, hasEnabledJumuah)) continue
+            val startEpoch = checkDate.atTime(h, m, 0).atZone(zone).toInstant().toEpochMilli()
+            val endEpoch = startEpoch + durMs
+            if (nowMs in startEpoch until endEpoch) {
+                return endEpoch
+            }
+        }
+        return null
+    }
+
+    fun isRunningAt(
+        dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now(),
+        hasEnabledJumuah: Boolean = false
+    ): Boolean = getActiveEndEpochMs(dateTime, hasEnabledJumuah) != null
+
+    fun getRemainingMillisNow(
+        dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now(),
+        hasEnabledJumuah: Boolean = false
+    ): Long {
+        val endEpoch = getActiveEndEpochMs(dateTime, hasEnabledJumuah) ?: return 0L
+        val nowMs = dateTime.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return (endEpoch - nowMs).coerceAtLeast(0L)
+    }
+
+    fun getNextStartMillis(
+        dateTime: java.time.LocalDateTime = java.time.LocalDateTime.now(),
+        hasEnabledJumuah: Boolean = false
+    ): Long? {
+        if (!isEnabled) return null
+        val zone = java.time.ZoneId.systemDefault()
+        val nowMs = dateTime.atZone(zone).toInstant().toEpochMilli()
+        val h = startHour24.coerceIn(0, 23)
+        val m = startMinute.coerceIn(0, 59)
+        for (offset in 0L..7L) {
+            val checkDate = dateTime.toLocalDate().plusDays(offset)
+            if (!isApplicableOnDate(checkDate, hasEnabledJumuah)) continue
+            val startEpoch = checkDate.atTime(h, m, 0).atZone(zone).toInstant().toEpochMilli()
+            if (startEpoch > nowMs) {
+                return startEpoch - nowMs
+            }
+        }
+        return null
+    }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("nameEn", nameEn)
+        .put("nameBn", nameBn)
+        .put("startHour24", startHour24.coerceIn(0, 23))
+        .put("startMinute", startMinute.coerceIn(0, 59))
+        .put("durationMinutes", durationMinutes.coerceIn(10, 90))
+        .put("isEnabled", isEnabled)
+        .put("autoDnd", autoDnd)
+
+    companion object {
+        fun defaultSlots(): List<PrayerSlot> = listOf(
+            PrayerSlot("FAJR", "Fajr", "ফজর", 5, 0, 25, isEnabled = false, autoDnd = true),
+            PrayerSlot("DHUHR", "Dhuhr", "যোহর", 12, 15, 25, isEnabled = false, autoDnd = true),
+            PrayerSlot("JUMUAH", "Jumu'ah (Friday)", "জুমু'আহ (শুক্রবার)", 12, 45, 45, isEnabled = false, autoDnd = true),
+            PrayerSlot("ASR", "Asr", "আসর", 15, 45, 20, isEnabled = false, autoDnd = true),
+            PrayerSlot("MAGHRIB", "Maghrib", "মাগরিব", 17, 30, 20, isEnabled = false, autoDnd = true),
+            PrayerSlot("ISHA", "Isha", "এশা", 19, 15, 25, isEnabled = false, autoDnd = true)
+        )
+
+        fun fromJson(o: JSONObject): PrayerSlot {
+            val id = o.optString("id", "FAJR")
+            val def = defaultSlots().find { it.id == id } ?: defaultSlots().first()
+            return PrayerSlot(
+                id = id,
+                nameEn = o.optString("nameEn", def.nameEn),
+                nameBn = o.optString("nameBn", def.nameBn),
+                startHour24 = o.optInt("startHour24", def.startHour24).coerceIn(0, 23),
+                startMinute = o.optInt("startMinute", def.startMinute).coerceIn(0, 59),
+                durationMinutes = o.optInt("durationMinutes", def.durationMinutes).coerceIn(10, 90),
+                isEnabled = o.optBoolean("isEnabled", false),
+                autoDnd = o.optBoolean("autoDnd", true)
+            )
+        }
+    }
+}
+
 /**
  * Tamper-resistant monotonic time provider.
  * Protects all delay timers, Pomodoro sessions, and daily schedules against
@@ -276,8 +393,8 @@ object SecureTime {
 
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
-    const val APP_VERSION = "1.0.6.7"
-    const val DISPLAY_VERSION = "1.0.6.7"
+    const val APP_VERSION = "1.0.6.8"
+    const val DISPLAY_VERSION = "1.0.6.8"
     const val BUILD_NUMBER = 100
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
@@ -653,10 +770,106 @@ object BlockerStore {
 
     fun scheduleIsActiveNow(s: FocusSchedule, c: Context? = null): Boolean = s.isRunningAt()
     fun anyScheduleActiveNow(c: Context) = schedules(c).any { it.isRunningAt() }
+
+    // ---- Prayer Time (Salah) Focus Mode: 5 daily prayers + Friday Jumu'ah override ----
+    fun prayerSlots(c: Context): List<PrayerSlot> = runCatching {
+        val raw = prefs(c).getString("prayer_slots_json", null)
+        val defaults = PrayerSlot.defaultSlots()
+        if (raw.isNullOrBlank()) return defaults
+        val arr = JSONArray(raw)
+        val parsed = (0 until arr.length()).map { PrayerSlot.fromJson(arr.getJSONObject(it)) }
+            .associateBy { it.id }
+        defaults.map { def -> parsed[def.id] ?: def }
+    }.getOrDefault(PrayerSlot.defaultSlots())
+
+    fun putPrayerSlots(c: Context, list: List<PrayerSlot>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it.toJson()) }
+        prefs(c).edit().putString("prayer_slots_json", arr.toString()).apply()
+    }
+
+    fun hasEnabledJumuah(slots: List<PrayerSlot>): Boolean =
+        slots.any { it.id == "JUMUAH" && it.isEnabled }
+
+    fun activePrayerSlot(c: Context): PrayerSlot? {
+        val slots = prayerSlots(c)
+        val jumuahEnabled = hasEnabledJumuah(slots)
+        val nowDt = java.time.LocalDateTime.now()
+        return slots.firstOrNull { it.isRunningAt(nowDt, jumuahEnabled) }
+    }
+
+    fun anyPrayerActiveNow(c: Context): Boolean = activePrayerSlot(c) != null
+
+    fun prayerRemainingMs(c: Context): Long = runCatching {
+        val slots = prayerSlots(c)
+        val jumuahEnabled = hasEnabledJumuah(slots)
+        val nowDt = java.time.LocalDateTime.now()
+        slots.filter { it.isRunningAt(nowDt, jumuahEnabled) }
+            .maxOfOrNull { it.getRemainingMillisNow(nowDt, jumuahEnabled) } ?: 0L
+    }.getOrDefault(0L)
+
+    fun pendingPrayerUnlockUntil(c: Context, slotId: String): Long =
+        prefs(c).getLong("pending_prayer_unlock_$slotId", 0L)
+
+    fun setPendingPrayerUnlock(c: Context, slotId: String, target: Long) {
+        val current = prefs(c).getLong("pending_prayer_unlock_$slotId", 0L)
+        if (current > 0L && current > System.currentTimeMillis()) return
+        prefs(c).edit().putLong("pending_prayer_unlock_$slotId", target).apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun cancelPendingPrayerUnlock(c: Context, slotId: String) {
+        prefs(c).edit().remove("pending_prayer_unlock_$slotId").apply()
+        updateIntegrityHmac(c)
+    }
+
+    private val prayerDndLock = Any()
+
+    fun syncPrayerAutoDnd(c: Context) = synchronized(prayerDndLock) {
+        val p = prefs(c)
+        val studyOn = p.getBoolean("study_active", false)
+        if (studyOn) {
+            if (p.getBoolean("prayer_dnd_applied", false)) {
+                p.edit()
+                    .remove("prayer_dnd_applied")
+                    .remove("prayer_prev_interruption_filter")
+                    .apply()
+            }
+            return
+        }
+        val activeSlot = activePrayerSlot(c)
+        val shouldApplyDnd = activeSlot != null && activeSlot.autoDnd
+        val alreadyApplied = p.getBoolean("prayer_dnd_applied", false)
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (nm == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+
+        if (shouldApplyDnd && !alreadyApplied) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                p.edit()
+                    .putInt("prayer_prev_interruption_filter", nm.currentInterruptionFilter)
+                    .putBoolean("prayer_dnd_applied", true)
+                    .apply()
+                runCatching {
+                    nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                }
+            }
+        } else if (!shouldApplyDnd && alreadyApplied) {
+            if (nm.isNotificationPolicyAccessGranted) {
+                val prev = p.getInt("prayer_prev_interruption_filter", NotificationManager.INTERRUPTION_FILTER_ALL)
+                runCatching { nm.setInterruptionFilter(prev) }
+            }
+            p.edit()
+                .remove("prayer_dnd_applied")
+                .remove("prayer_prev_interruption_filter")
+                .apply()
+        }
+    }
+
     fun focusActive(c: Context): Boolean {
         val manualActive = focusUntil(c) > SecureTime.now(c)
         val schedActive = anyScheduleActiveNow(c)
-        return manualActive || schedActive
+        val prayerActive = anyPrayerActiveNow(c)
+        return manualActive || schedActive || prayerActive
     }
 
     fun focusRemainingMs(c: Context): Long = runCatching {
@@ -666,7 +879,8 @@ object BlockerStore {
             .filter { it.isRunningAt() }
             .map { it.getRemainingMillisNow() }
             .maxOrNull() ?: 0L
-        maxOf(untilMs, schedMs)
+        val prayerMs = prayerRemainingMs(c)
+        maxOf(untilMs, schedMs, prayerMs)
     }.getOrDefault(0L)
 
     /** Returns the union of allowed apps configured for all schedules currently active. */

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,16 +13,20 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -30,6 +35,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,7 +49,10 @@ import com.blocker.data.AppItem
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDateTime
 import java.util.Date
 import java.util.Locale
 
@@ -96,7 +107,7 @@ private fun formatHms(seconds: Long): String {
     val h = sec / 3600L
     val m = (sec % 3600L) / 60L
     val s = sec % 60L
-    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+    return String.format("%02d:%02d:%02d", h, m, s)
 }
 
 private fun formatStartsIn(millis: Long): String {
@@ -172,9 +183,16 @@ fun FocusScreen(
     var editingScheduleForApps by remember { mutableStateOf<FocusSchedule?>(null) }
 
     // Manual Focus Duration Selector
+    val coroutineScope = rememberCoroutineScope()
+    @OptIn(ExperimentalFoundationApi::class)
+    val customDurationBringIntoView = remember { BringIntoViewRequester() }
     val durationOptions = listOf(15 to "15m", 30 to "30m", 45 to "45m", 60 to "1h", 120 to "2h", 240 to "4h", -1 to "Custom")
     var selectedManualDurationMin by remember { mutableStateOf(45) }
-    var customManualDurationMin by remember { mutableStateOf(90) }
+    var customHoursText by remember { mutableStateOf("1") }
+    var customMinutesText by remember { mutableStateOf("30") }
+    val customHoursVal = (customHoursText.toIntOrNull() ?: 0).coerceIn(0, 23)
+    val customMinutesVal = (customMinutesText.toIntOrNull() ?: 0).coerceIn(0, 59)
+    val totalCustomMinutes = ((customHoursVal * 60) + customMinutesVal).coerceIn(1, 1440)
 
     // Essential Apps Search & Filter
     var appSearchQuery by remember { mutableStateOf("") }
@@ -183,7 +201,10 @@ fun FocusScreen(
     // Active Status Calculations
     val isManualActive = focus.focusUntil > nowMillis
     val activeSchedule = focus.schedules.firstOrNull { it.isRunningAt() }
-    val isFocusRunningNow = isManualActive || activeSchedule != null
+    val jumuahEnabled = remember(focus.prayerSlots) { focus.prayerSlots.any { it.id == "JUMUAH" && it.isEnabled } }
+    val nowDt = remember(nowMillis / 1000L) { LocalDateTime.now() }
+    val activePrayer = focus.prayerSlots.firstOrNull { it.isRunningAt(nowDt, jumuahEnabled) }
+    val isFocusRunningNow = isManualActive || activeSchedule != null || activePrayer != null
     val isFocusCurrentlyLocked = isFocusRunningNow || study.active
 
     Column(
@@ -191,7 +212,7 @@ fun FocusScreen(
             .fillMaxSize()
             .background(Color.Transparent)
     ) {
-        // Top Segmented Tab Switcher (Focus Mode vs Study Mode)
+        // Top Segmented Tab Switcher (Focus Mode vs Study Mode vs Prayer)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -201,7 +222,7 @@ fun FocusScreen(
                 .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp))
                 .padding(4.dp)
         ) {
-            // Focus Mode Tab
+            // Focus Tab
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -219,19 +240,21 @@ fun FocusScreen(
                         imageVector = CyberIcons.Focus,
                         contentDescription = null,
                         tint = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = "Focus Mode",
+                        text = "Focus",
                         color = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
 
-            // Study Mode Tab
+            // Study Tab
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -249,22 +272,65 @@ fun FocusScreen(
                         imageVector = CyberIcons.Book,
                         contentDescription = null,
                         tint = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = "Study Mode",
+                        text = "Study",
                         color = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     if (study.active) {
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
+                                .size(6.dp)
                                 .clip(CircleShape)
                                 .background(if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.AccentPrimary)
+                        )
+                    }
+                }
+            }
+
+            // Prayer Tab
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (selectedTab == 2) NordicColors.AccentPrimary else Color.Transparent)
+                    .clickable(enabled = !study.active) { selectedTab = 2 }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = CyberIcons.Clock,
+                        contentDescription = null,
+                        tint = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "Prayer",
+                        color = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    if (activePrayer != null) {
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.SuccessMuted)
                         )
                     }
                 }
@@ -291,7 +357,9 @@ fun FocusScreen(
             }
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding(),
                 contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 110.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -300,18 +368,22 @@ fun FocusScreen(
                 // ----------------------------------------------------
                 item(key = "focus_status_hero") {
                     if (isFocusRunningNow) {
-                        val remainingSec = if (isManualActive) {
-                            ((focus.focusUntil - nowMillis) / 1000L).coerceAtLeast(0L)
-                        } else {
-                            (activeSchedule!!.getRemainingMillisNow() / 1000L).coerceAtLeast(0L)
+                        val remainingSec = when {
+                            isManualActive -> ((focus.focusUntil - nowMillis) / 1000L).coerceAtLeast(0L)
+                            activeSchedule != null -> (activeSchedule.getRemainingMillisNow() / 1000L).coerceAtLeast(0L)
+                            else -> (activePrayer!!.getRemainingMillisNow(nowDt, jumuahEnabled) / 1000L).coerceAtLeast(0L)
                         }
                         val timeStr = formatHms(remainingSec)
-                        val finishClock = if (isManualActive) {
-                            formatClockTime(focus.focusUntil)
-                        } else {
-                            clock12(activeSchedule!!.endMin)
+                        val finishClock = when {
+                            isManualActive -> formatClockTime(focus.focusUntil)
+                            activeSchedule != null -> clock12(activeSchedule.endMin)
+                            else -> clock12(activePrayer!!.endTotalMinutes())
                         }
-                        val sessionSubtitle = if (isManualActive) "Manual Session" else "Schedule: ${activeSchedule?.label}"
+                        val sessionSubtitle = when {
+                            isManualActive -> "Manual Session"
+                            activeSchedule != null -> "Schedule: ${activeSchedule.label}"
+                            else -> "Prayer: ${activePrayer!!.nameEn}"
+                        }
 
                         NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
                             Column(
@@ -392,6 +464,14 @@ fun FocusScreen(
                                         onClick = { repo.cancelFocusUnlock() },
                                         kind = BtnKind.GHOST
                                     )
+                                } else if (!isManualActive && activeSchedule == null && activePrayer != null) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Btn(
+                                        label = "Manage in Prayer Tab",
+                                        icon = CyberIcons.Clock,
+                                        onClick = { selectedTab = 2 },
+                                        kind = BtnKind.SECONDARY
+                                    )
                                 } else {
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Btn(
@@ -467,32 +547,224 @@ fun FocusScreen(
                                 }
                             }
 
-                            if (selectedManualDurationMin == -1) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                @OptIn(ExperimentalLayoutApi::class)
-                                FlowRow(
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Inline Custom Duration Input Row (Hours 0..23 + Minutes 0..59 with steppers)
+                            @OptIn(ExperimentalFoundationApi::class)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .bringIntoViewRequester(customDurationBringIntoView)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(NordicColors.CardSurfaceHero.copy(alpha = 0.65f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selectedManualDurationMin == -1) Color(0xFF4C3B87) else NordicColors.HairlineBorder,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    listOf(10, 20, 90, 180, 360).forEach { cm ->
-                                        val isCustomSel = (customManualDurationMin == cm)
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isCustomSel) NordicColors.AccentSecondary else NordicColors.CanvasBg)
-                                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(8.dp))
-                                                .clickable { customManualDurationMin = cm }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Text(
-                                                text = "${cm}m",
+                                    Text(
+                                        text = "Custom Duration",
+                                        color = if (selectedManualDurationMin == -1) NordicColors.AccentSecondary else NordicColors.TextSecondary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                    Text(
+                                        text = "1m – 24h",
+                                        color = NordicColors.TextSecondary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Hours (0 to 23) + Steppers
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = customHoursText,
+                                            onValueChange = { raw ->
+                                                val digits = raw.filter { it.isDigit() }.take(2)
+                                                customHoursText = if (digits.isEmpty()) "" else digits.toInt().coerceIn(0, 23).toString()
+                                                selectedManualDurationMin = -1
+                                            },
+                                            label = { Text("Hours", fontSize = 11.5.sp, maxLines = 1, softWrap = false) },
+                                            singleLine = true,
+                                            maxLines = 1,
+                                            textStyle = TextStyle(
                                                 color = NordicColors.TextPrimary,
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = TextAlign.Center
+                                            ),
+                                            keyboardOptions = KeyboardOptions(
+                                                keyboardType = KeyboardType.Number,
+                                                imeAction = ImeAction.Next
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedContainerColor = Color(0xFF1B1536),
+                                                unfocusedContainerColor = Color(0xFF1B1536),
+                                                focusedBorderColor = NordicColors.AccentPrimary,
+                                                unfocusedBorderColor = Color(0xFF4C3B87),
+                                                focusedTextColor = NordicColors.TextPrimary,
+                                                unfocusedTextColor = NordicColors.TextPrimary,
+                                                focusedLabelColor = NordicColors.AccentSecondary,
+                                                unfocusedLabelColor = NordicColors.TextSecondary
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onFocusEvent { st ->
+                                                    if (st.isFocused) {
+                                                        selectedManualDurationMin = -1
+                                                        coroutineScope.launch {
+                                                            delay(200L)
+                                                            customDurationBringIntoView.bringIntoView()
+                                                        }
+                                                    }
+                                                }
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF1B1536))
+                                                    .border(1.dp, Color(0xFF4C3B87), RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        val next = (customHoursVal - 1).coerceIn(0, 23)
+                                                        customHoursText = next.toString()
+                                                        if (next == 0 && customMinutesVal == 0) customMinutesText = "1"
+                                                        selectedManualDurationMin = -1
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("-", color = NordicColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF1B1536))
+                                                    .border(1.dp, Color(0xFF4C3B87), RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        val next = (customHoursVal + 1).coerceIn(0, 23)
+                                                        customHoursText = next.toString()
+                                                        selectedManualDurationMin = -1
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("+", color = NordicColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    // Minutes (0 to 59) + Steppers
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = customMinutesText,
+                                            onValueChange = { raw ->
+                                                val digits = raw.filter { it.isDigit() }.take(2)
+                                                customMinutesText = if (digits.isEmpty()) "" else digits.toInt().coerceIn(0, 59).toString()
+                                                selectedManualDurationMin = -1
+                                            },
+                                            label = { Text("Minutes", fontSize = 11.5.sp, maxLines = 1, softWrap = false) },
+                                            singleLine = true,
+                                            maxLines = 1,
+                                            textStyle = TextStyle(
+                                                color = NordicColors.TextPrimary,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = TextAlign.Center
+                                            ),
+                                            keyboardOptions = KeyboardOptions(
+                                                keyboardType = KeyboardType.Number,
+                                                imeAction = ImeAction.Done
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedContainerColor = Color(0xFF1B1536),
+                                                unfocusedContainerColor = Color(0xFF1B1536),
+                                                focusedBorderColor = NordicColors.AccentPrimary,
+                                                unfocusedBorderColor = Color(0xFF4C3B87),
+                                                focusedTextColor = NordicColors.TextPrimary,
+                                                unfocusedTextColor = NordicColors.TextPrimary,
+                                                focusedLabelColor = NordicColors.AccentSecondary,
+                                                unfocusedLabelColor = NordicColors.TextSecondary
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onFocusEvent { st ->
+                                                    if (st.isFocused) {
+                                                        selectedManualDurationMin = -1
+                                                        coroutineScope.launch {
+                                                            delay(200L)
+                                                            customDurationBringIntoView.bringIntoView()
+                                                        }
+                                                    }
+                                                }
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF1B1536))
+                                                    .border(1.dp, Color(0xFF4C3B87), RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        val rawMin = customMinutesVal - 5
+                                                        val nextMin = if (customHoursVal == 0) rawMin.coerceAtLeast(1) else rawMin.coerceIn(0, 59)
+                                                        customMinutesText = nextMin.toString()
+                                                        selectedManualDurationMin = -1
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("-", color = NordicColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF1B1536))
+                                                    .border(1.dp, Color(0xFF4C3B87), RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        val nextMin = (customMinutesVal + 5).coerceIn(0, 59)
+                                                        customMinutesText = nextMin.toString()
+                                                        selectedManualDurationMin = -1
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("+", color = NordicColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                 }
@@ -500,8 +772,14 @@ fun FocusScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            val finalDurationMin = if (selectedManualDurationMin == -1) customManualDurationMin else selectedManualDurationMin
-                            val finalDurationLabel = if (finalDurationMin >= 60) "${finalDurationMin / 60}h ${if (finalDurationMin % 60 > 0) "${finalDurationMin % 60}m" else ""}".trim() else "${finalDurationMin}m"
+                            val finalDurationMin = (if (selectedManualDurationMin == -1) totalCustomMinutes else selectedManualDurationMin).coerceIn(1, 1440)
+                            val finalH = finalDurationMin / 60
+                            val finalM = finalDurationMin % 60
+                            val finalDurationLabel = when {
+                                finalH > 0 && finalM > 0 -> "${finalH}h ${finalM}m"
+                                finalH > 0 -> "${finalH}h"
+                                else -> "${finalM}m"
+                            }
                             Btn(
                                 label = "Start Focus Session ($finalDurationLabel)",
                                 icon = CyberIcons.Play,
@@ -1032,7 +1310,7 @@ fun FocusScreen(
                 }
             }
 
-        } else {
+        } else if (selectedTab == 1) {
             // ==========================================
             // STUDY MODE TAB (Clean Scrollable Column)
             // ==========================================
@@ -1430,6 +1708,15 @@ fun FocusScreen(
                     }
                 }
             }
+        } else {
+            // ==========================================
+            // PRAYER TIME (SALAH) FOCUS TAB
+            // ==========================================
+            PrayerFocusTab(
+                focus = focus,
+                nowMillis = nowMillis,
+                repo = repo
+            )
         }
     }
 
