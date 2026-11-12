@@ -102,7 +102,7 @@ private fun formatDuration(startMin: Int, endMin: Int): String {
     }
 }
 
-private fun formatHms(seconds: Long): String {
+internal fun formatHms(seconds: Long): String {
     val sec = seconds.coerceAtLeast(0L)
     val h = sec / 3600L
     val m = (sec % 3600L) / 60L
@@ -1094,6 +1094,126 @@ fun FocusScreen(
                 }
 
                 // ----------------------------------------------------
+                // Section 2.6: Focus & Prayer Notification Suppressor
+                // ----------------------------------------------------
+                item(key = "notification_suppressor_card") {
+                    NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(NordicColors.CardSurfaceHero)
+                                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = CyberIcons.NotificationsOff,
+                                        contentDescription = null,
+                                        tint = NordicColors.AccentPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Notification Suppressor",
+                                        color = NordicColors.TextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Calls, alarms, SMS & Blocker stay active",
+                                        color = NordicColors.TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            StatusPillBadge(
+                                label = if (focus.hasNotificationAccess) "Granted" else "Permission Required",
+                                tone = if (focus.hasNotificationAccess) BadgeTone.OK else BadgeTone.DANGER,
+                                small = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Silence blocked app notifications during Focus, Study & Prayer",
+                                color = NordicColors.TextPrimary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.weight(1f).padding(end = 10.dp)
+                            )
+                            NordicSwitch(
+                                checked = focus.suppressNotificationsInFocus,
+                                onCheckedChange = { repo.setSuppressNotificationsInFocus(it) }
+                            )
+                        }
+
+                        if (!focus.hasNotificationAccess) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Btn(
+                                label = "Grant Notification Access",
+                                icon = CyberIcons.ShieldCheck,
+                                onClick = { repo.requestNotificationAccess(context) },
+                                kind = BtnKind.PRIMARY
+                            )
+                        }
+
+                        val notifUnlockUntil = focus.pendingNotificationSuppressorUnlockUntil
+                        if (notifUnlockUntil > nowMillis) {
+                            val remSec = ((notifUnlockUntil - nowMillis).coerceAtLeast(0L)) / 1000L
+                            val timeStr = formatHms(remSec)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NordicColors.AlertMuted.copy(alpha = 0.1f))
+                                    .border(1.dp, NordicColors.AlertMuted.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Unlocking in $timeStr",
+                                    color = NordicColors.AlertMuted,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Text(
+                                    text = "Abort",
+                                    color = NordicColors.TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { repo.cancelSuppressNotificationsUnlock() }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ----------------------------------------------------
                 // Section 3: Focus Mode Allowed Apps Whitelist Header & Filter
                 // ----------------------------------------------------
                 item(key = "allowed_apps_header") {
@@ -2006,7 +2126,7 @@ fun FocusScreen(
 }
 
 @Composable
-private fun DistractionItemCard(
+internal fun DistractionItemCard(
     title: String,
     subtitle: String,
     icon: ImageVector,

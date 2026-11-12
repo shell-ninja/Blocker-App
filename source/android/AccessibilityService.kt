@@ -57,8 +57,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 "org.mozilla.firefox:id/mozac_browser_toolbar_url_view",
                 "org.mozilla.firefox:id/url_bar_title"
             ),
+            "org.mozilla.fenix" to listOf(
+                "org.mozilla.fenix:id/mozac_browser_toolbar_url_view",
+                "org.mozilla.fenix:id/url_bar_title"
+            ),
             "com.opera.browser" to listOf("com.opera.browser:id/url_field"),
+            "com.opera.browser.beta" to listOf("com.opera.browser.beta:id/url_field"),
             "com.opera.mini.native" to listOf("com.opera.mini.native:id/url_field"),
+            "com.opera.gx" to listOf("com.opera.gx:id/url_field"),
             "com.sec.android.app.sbrowser" to listOf(
                 "com.sec.android.app.sbrowser:id/location_bar_edit_text"
             ),
@@ -66,7 +72,8 @@ class BlockerAccessibilityService : AccessibilityService() {
                 "com.duckduckgo.mobile.android:id/omnibarTextInput"
             ),
             "com.vivaldi.browser" to listOf("com.vivaldi.browser:id/url_bar"),
-            "com.kiwibrowser.browser" to listOf("com.kiwibrowser.browser:id/url_bar")
+            "com.kiwibrowser.browser" to listOf("com.kiwibrowser.browser:id/url_bar"),
+            "com.mi.globalbrowser" to listOf("com.mi.globalbrowser:id/url")
         )
 
         private val EMERGENCY_CALL_PKGS = setOf(
@@ -293,7 +300,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             "com.google.android.permissioncontroller", "com.android.intentresolver", "com.android.documentsui",
             "com.google.android.documentsui", "com.google.android.providers.media.module", "com.google.android.gms"
         )
-        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "active", "shield", "admin_disable_requested", "app_limits")
+        private val RELOAD_KEYS = setOf("domains", "keywords", "tlds", "whitelist", "apps", "scan_exempt", "focus_apps", "block_fb_reels", "block_insta_reels", "block_insta_search", "block_yt_shorts", "block_incognito_mode", "enforce_safesearch_guard", "suppress_notifications_in_focus", "active", "shield", "admin_disable_requested", "app_limits")
         // Window titles (as shown on screen) that signal a dangerous settings screen — OEM-agnostic
         private val ADMIN_SCREEN_TITLES = setOf(
             "device admin apps", "device administrators", "device admin",
@@ -399,6 +406,11 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var lastBlockerExitTime = 0L
     @Volatile private var lastBlockerExitElapsed = 0L
     @Volatile private var lastFbPlayerEscapeElapsed = 0L
+    @Volatile private var blockIncognitoMode = true
+    @Volatile private var enforceSafeSearchGuard = true
+    @Volatile private var lastIncognitoKickElapsed = 0L
+    @Volatile private var lastSafeSearchSettingsKickElapsed = 0L
+    private val lastBrowserUrlMap = HashMap<String, String>()
     private var previousEventPkg = ""
     private val appInfoLock = Any()
     private var appInfoCandidatePkg = ""                 // guarded by appInfoLock
@@ -704,6 +716,17 @@ class BlockerAccessibilityService : AccessibilityService() {
             if (shieldEngaged() || BlockerStore.studyActive(this)) {
                 autoCancelDialog(root)
                 pollKick(if (isBangla()) "সুরক্ষা বা স্টাডি মোড চলাকালীন DND অনুমতি বন্ধ করা যাবে না।" else "Do Not Disturb access for Blocker cannot be modified while Protection or Study Mode is active.")
+                return
+            }
+        }
+
+        // Allow Android's legitimate Notification Access grant flow (Rule A & Rule B)
+        val (isNotifFlow, notifAllowed) = evaluateNotificationAccessFlowAccess(rootPkg, null, root)
+        if (isNotifFlow) {
+            if (notifAllowed) return
+            if (shieldEngaged() || BlockerStore.studyActive(this) || BlockerStore.focusActive(this)) {
+                autoCancelDialog(root)
+                pollKick(if (isBangla()) "সুরক্ষা বা ফোকাস মোড চলাকালীন নোটিফিকেশন অ্যাক্সেস পরিবর্তন করা যাবে না।" else "Notification access for Blocker cannot be modified while Protection or Focus Mode is active.")
                 return
             }
         }
@@ -1315,13 +1338,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         val cls = className.lowercase()
         val t = allScreenText.lowercase()
         val hasDndCls = cls.contains("zenaccess") ||
-            cls.contains("notificationaccess") ||
             cls.contains("policyaccess") ||
             cls.contains("managezenaccess")
         val hasDndText = t.contains("do not disturb access") ||
             t.contains("allow do not disturb") ||
             t.contains("notification policy access") ||
-            t.contains("read, reply & control") ||
             t.contains("do not disturb") ||
             t.contains("zen access") ||
             t.contains("dnd access")
@@ -1425,6 +1446,103 @@ class BlockerAccessibilityService : AccessibilityService() {
         return isDndFlow && allowed
     }
 
+    private fun isNotificationListenerGranted(): Boolean =
+        BlockerNotificationListenerService.isGranted(this)
+
+    private fun isNotificationAccessScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        if (!isSettingsPkg(packageName) && packageName != "android" && !packageName.contains("permission", ignoreCase = true)) {
+            return false
+        }
+        val cls = className.lowercase()
+        val t = allScreenText.lowercase()
+        val hasCls = cls.contains("notificationaccess") ||
+            cls.contains("notificationlistener") ||
+            cls.contains("managedservice") ||
+            cls.contains("notificationassistant")
+        val hasText = t.contains("notification access") ||
+            t.contains("device & app notifications") ||
+            t.contains("allow notification access") ||
+            t.contains("read notifications") ||
+            t.contains("read, reply & control") ||
+            t.contains("notification listener") ||
+            t.contains("notificationaccess") ||
+            t.contains("notificationlistener")
+        return hasCls || hasText
+    }
+
+    private fun isBlockerNotificationAccessDetailScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        if (!isNotificationAccessScreen(packageName, className, allScreenText)) return false
+        val t = allScreenText.lowercase()
+        val hasBlocker = matchesSelfIdentity(t) || t.contains("blocker") || t.contains("prachir") ||
+            t.contains("com.blocker") || t.contains("com.prachir.app") ||
+            t.contains("ব্লকার") || t.contains("প্রাচীর")
+        val isDetailAction = t.contains("allow notification access") ||
+            t.contains("turn off") ||
+            t.contains("read notifications") ||
+            t.contains("read, reply & control")
+        return hasBlocker && isDetailAction
+    }
+
+    private fun evaluateNotificationAccessFlowAccess(
+        packageName: String,
+        ev: AccessibilityEvent?,
+        root: AccessibilityNodeInfo?,
+        preCollectedText: String? = null
+    ): Pair<Boolean, Boolean> {
+        if (!isSettingsPkg(packageName) && packageName != "android" && !packageName.contains("permission", ignoreCase = true)) {
+            return false to true
+        }
+        val evCls = ev?.className?.toString().orEmpty()
+        val rootCls = root?.className?.toString().orEmpty()
+        val text = preCollectedText?.lowercase() ?: gatherSettingsContextText(root, ev)
+        val isNotifScreen = isNotificationAccessScreen(packageName, evCls, text) ||
+            isNotificationAccessScreen(packageName, rootCls, text)
+
+        val elapsed = SystemClock.elapsedRealtime() - PermissionFlowTracker.lastNotificationAccessRequestMs
+        val inRecentGrantWindow = PermissionFlowTracker.lastNotificationAccessRequestMs > 0L && elapsed in 0L..60_000L
+        val isGranted = isNotificationListenerGranted()
+
+        // Rule A: Notification Access not yet granted -> ALWAYS allow Notification Access flow or within 60s of request
+        if (!isGranted && (isNotifScreen || inRecentGrantWindow || PermissionFlowTracker.isLaunchingPermissionIntent)) {
+            return true to true
+        }
+        // Keep the active 60s grant session uninterrupted if user just toggled access ON
+        if (isNotifScreen && (inRecentGrantWindow || PermissionFlowTracker.isLaunchingPermissionIntent)) {
+            return true to true
+        }
+        if (!isNotifScreen) return false to true
+
+        // Rule B: Already granted -> allow general list; block Blocker row click OR Blocker detail page when armed
+        val armed = selfProtectionActive() || BlockerStore.studyActive(this) || BlockerStore.focusActive(this)
+        if (!armed) return true to true
+
+        if (ev?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val rowText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
+            val nameLower = if (appLabel.isNotBlank()) appLabel.lowercase() else "blocker"
+            val clickedSelf = matchesSelfIdentity(rowText) || "blocker" in rowText || "prachir" in rowText ||
+                "com.blocker" in rowText || "com.prachir.app" in rowText ||
+                "ব্লকার" in rowText || "প্রাচীর" in rowText ||
+                (nameLower.isNotEmpty() && nameLower in rowText)
+            if (clickedSelf) {
+                return true to false
+            }
+        }
+
+        val isSelfDetail = isBlockerNotificationAccessDetailScreen(packageName, evCls, text) ||
+            isBlockerNotificationAccessDetailScreen(packageName, rootCls, text)
+        return if (isSelfDetail) (true to false) else (true to true)
+    }
+
+    private fun shouldAllowNotificationAccessScreen(packageName: String, className: String, allScreenText: String): Boolean {
+        val (isNotifFlow, allowed) = evaluateNotificationAccessFlowAccess(
+            packageName = packageName,
+            ev = null,
+            root = null,
+            preCollectedText = if (className.isBlank()) allScreenText else "$className $allScreenText"
+        )
+        return isNotifFlow && allowed
+    }
+
     private fun isLegitimatePermissionTitle(title: String): Boolean {
         if (title.isEmpty()) return false
         val t = title.lowercase()
@@ -1455,6 +1573,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         val rootCls = root?.className?.toString()?.lowercase().orEmpty()
 
         if (shouldAllowDndScreen("com.android.settings", rootCls, t)) {
+            return true
+        }
+        if (shouldAllowNotificationAccessScreen("com.android.settings", rootCls, t)) {
             return true
         }
 
@@ -1774,6 +1895,15 @@ class BlockerAccessibilityService : AccessibilityService() {
             "block_insta_reels" -> blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
             "block_insta_search" -> blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
             "block_yt_shorts" -> blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+            "block_incognito_mode" -> {
+                blockIncognitoMode = BlockerStore.blockIncognitoMode(this)
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
+            "enforce_safesearch_guard" -> {
+                enforceSafeSearchGuard = BlockerStore.enforceSafeSearchGuard(this)
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
+            "suppress_notifications_in_focus" -> com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
             "app_limits" -> appLimits = BlockerStore.appLimits(this)
             "active", "shield", "admin_disable_requested" -> { /* state flags don't invalidate package sets */ }
             else -> {
@@ -1802,7 +1932,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
         blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
         blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        blockIncognitoMode = BlockerStore.blockIncognitoMode(this)
+        enforceSafeSearchGuard = BlockerStore.enforceSafeSearchGuard(this)
         appLimits = BlockerStore.appLimits(this)
+        com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
         enforceAdbOff(notify = false)
         updateMonitoredPackages()
     }
@@ -1908,6 +2041,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         val (isDndFlowNative, dndAllowedNative) = evaluateDndFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
         if (isDndFlowNative && dndAllowedNative) return false
+        val (isNotifFlowNative, notifAllowedNative) = evaluateNotificationAccessFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+        if (isNotifFlowNative && notifAllowedNative) return false
 
         // 0-microsecond fast-path filter: Skip 99% of apps that have no native rules
         val isTargetApp = isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android" ||
@@ -2185,6 +2320,10 @@ class BlockerAccessibilityService : AccessibilityService() {
                     PermissionFlowTracker.lastDndPermissionRequestMs = 0L
                     PermissionFlowTracker.isLaunchingPermissionIntent = false
                 }
+                if (isNotificationListenerGranted()) {
+                    PermissionFlowTracker.lastNotificationAccessRequestMs = 0L
+                    PermissionFlowTracker.isLaunchingPermissionIntent = false
+                }
                 return
             }
 
@@ -2233,6 +2372,27 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
             }
 
+            // --- TOP-PRIORITY NOTIFICATION ACCESS GATE (Before Scoped Tamper Guard, Native Engine, and AppInfo checks) ---
+            val (isNotifFlow, notifAllowed) = evaluateNotificationAccessFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+            if (isNotifFlow) {
+                if (notifAllowed) return
+                if (selfProtectionActive() || BlockerStore.studyActive(this) || BlockerStore.focusActive(this)) {
+                    TamperShieldManager.showInstantShield(this)
+                    autoCancelDialog(rootInActiveWindow)
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    OverlayHudManager.show(
+                        this,
+                        if (isBangla()) "নোটিফিকেশন অ্যাক্সেস সুরক্ষিত" else "Notification access is protected",
+                        2,
+                        BlockReason(BlockCategory.TAMPER_GUARD, "Notification Access")
+                    )
+                    pollKick(if (isBangla()) "সুরক্ষা বা ফোকাস মোড চলাকালীন নোটিফিকেশন অ্যাক্সেস পরিবর্তন করা যাবে না।" else "Notification access for Blocker cannot be modified while Protection or Focus Mode is active.")
+                    return
+                }
+            }
+
             // --- 0MS TOP-PRIORITY DEFENSE: Scoped Tamper Guard for Blocker / Prachir ---
             if (selfProtectionActive()) {
                 if (checkScopedTamperGuard(ev, pkg)) return
@@ -2259,8 +2419,13 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             // --- 0MS ZERO-LATENCY BROWSER GATEKEEPER: Instant check before throttles, usage, or settings ---
-            if (BlockerStore.active(this) && pkg in BROWSER_URL_IDS) {
-                if (checkBrowserFast(pkg, ev)) return
+            if (BlockerStore.active(this)) {
+                if (blockIncognitoMode && pkg in IncognitoDetector.RECOGNIZED_BROWSER_PACKAGES) {
+                    if (checkIncognitoFast(pkg)) return
+                }
+                if (pkg in BROWSER_URL_IDS) {
+                    if (checkBrowserFast(pkg, ev)) return
+                }
             }
 
             val isClickOrState = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
@@ -2523,7 +2688,13 @@ class BlockerAccessibilityService : AccessibilityService() {
                 )
                 return
             }
-            pkg in BROWSER_URL_IDS -> if (checkBrowserFast(pkg, ev)) return
+            pkg in BROWSER_URL_IDS -> {
+                if (blockIncognitoMode && pkg in IncognitoDetector.RECOGNIZED_BROWSER_PACKAGES && checkIncognitoFast(pkg)) return
+                if (checkBrowserFast(pkg, ev)) return
+            }
+            pkg in IncognitoDetector.RECOGNIZED_BROWSER_PACKAGES -> {
+                if (blockIncognitoMode && checkIncognitoFast(pkg)) return
+            }
             isSettingsPkg(pkg) -> {
                 startSettingsPoll()   // start continuous 200-ms guard whenever we enter settings
                 checkSettings(ev)
@@ -2623,7 +2794,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             val cls = root?.className?.toString().orEmpty().ifEmpty { ev.className?.toString().orEmpty() }
             val sb = StringBuilder()
             if (root != null) collectText(root, sb, 0, intArrayOf(150))
-            if (shouldAllowDndScreen(pkg, cls, sb.toString())) {
+            if (shouldAllowDndScreen(pkg, cls, sb.toString()) ||
+                shouldAllowNotificationAccessScreen(pkg, cls, sb.toString())
+            ) {
                 return false
             }
         }
@@ -2729,10 +2902,63 @@ class BlockerAccessibilityService : AccessibilityService() {
         return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
     }
 
-    // ---------- URL bar ----------
+    // ---------- Incognito & URL bar ----------
 
     private var lastCheckedUrlHash = 0L
     private val reusableCharBuffer = CharArray(4096)
+
+    private fun checkIncognitoFast(pkg: String): Boolean {
+        if (!blockIncognitoMode) return false
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastIncognitoKickElapsed < 400L) return false
+
+        val root = runCatching { rootInActiveWindow }.getOrNull()
+        val wins = runCatching { windows }.getOrNull()
+        val screenHeight = resources.displayMetrics.heightPixels
+        val isIncognito = try {
+            IncognitoDetector.isActiveIncognitoSession(root, wins, pkg, screenHeight)
+        } finally {
+            recycleNode(root)
+        }
+        if (!isIncognito) return false
+
+        lastIncognitoKickElapsed = nowElapsed
+        quietUntil[pkg] = System.currentTimeMillis() + 500L
+        val reason = BlockReason(
+            BlockCategory.INCOGNITO,
+            "Incognito / Private Browsing",
+            "ইনকগনিটো / প্রাইভেট ব্রাউজিং"
+        )
+        TamperShieldManager.showInstantShield(this)
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        BlockerStore.incr(this, "nsfw")
+        OverlayHudManager.show(
+            this,
+            if (isBangla()) "ইনকগনিটো / প্রাইভেট ব্রাউজিং ব্লক করা হয়েছে" else "Incognito / Private Browsing blocked",
+            1,
+            reason
+        )
+        showOverlay(
+            getFearAllahHeading(),
+            if (isBangla()) "সুরক্ষা মোড সক্রিয় থাকাকালীন ইনকগনিটো ও প্রাইভেট ট্যাব নিষিদ্ধ।" else "Incognito and Private browsing tabs are blocked while Protection Mode is active.",
+            5000,
+            getFearAllahSubheading(),
+            getAstaghfirullahButton(),
+            reason
+        )
+        main.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 90L)
+        return true
+    }
+
+    private fun nativeMatchTextForSearch(query: String): String? {
+        if (!NativeBlockerBridge.isEngineReady() || query.isBlank()) return null
+        val len = minOf(query.length, 2048)
+        val buf = CharArray(len)
+        for (i in 0 until len) {
+            buf[i] = query[i]
+        }
+        return NativeBlockerBridge.matchTextRule(buf, len)
+    }
 
     private fun checkBrowserFast(pkg: String, ev: AccessibilityEvent): Boolean {
         if (System.currentTimeMillis() < (quietUntil[pkg] ?: 0L)) return true
@@ -2787,6 +3013,46 @@ class BlockerAccessibilityService : AccessibilityService() {
                     if (matched) return true
                 }
             }
+
+            // SafeSearch Settings Guard: block attempts to select "Off" or "Blur" on search settings pages
+            val isSettingsInteract = ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+                ev.eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+                ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            val currentUrl = lastBrowserUrlMap[pkg].orEmpty()
+            if (enforceSafeSearchGuard && isSettingsInteract && currentUrl.isNotEmpty()) {
+                if (SafeSearchGuard.isSafeSearchDisableAttempt(ev, root, currentUrl)) {
+                    val nowElapsed = SystemClock.elapsedRealtime()
+                    if (nowElapsed - lastSafeSearchSettingsKickElapsed >= 500L) {
+                        lastSafeSearchSettingsKickElapsed = nowElapsed
+                        quietUntil[pkg] = System.currentTimeMillis() + 600L
+                        val reason = BlockReason(
+                            BlockCategory.SAFESEARCH,
+                            "SafeSearch settings cannot be disabled",
+                            "সেফসার্চ সেটিংস বন্ধ করা যাবে না"
+                        )
+                        TamperShieldManager.showInstantShield(this)
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                        BlockerStore.incr(this, "sites")
+                        OverlayHudManager.show(
+                            this,
+                            if (isBangla()) reason.banglaValue else reason.triggerValue,
+                            1,
+                            reason
+                        )
+                        showOverlay(
+                            getFearAllahHeading(),
+                            if (isBangla()) reason.banglaValue else reason.triggerValue,
+                            5000,
+                            getFearAllahSubheading(),
+                            getAstaghfirullahButton(),
+                            reason
+                        )
+                        main.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 80L)
+                        return true
+                    }
+                }
+            }
         } finally {
             recycleNode(root)
         }
@@ -2794,6 +3060,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun checkUrlText(text: CharSequence, pkg: String): Boolean {
+        val str = text.toString()
+        if (str.isNotBlank()) {
+            lastBrowserUrlMap[pkg] = str
+        }
         val len = minOf(text.length, reusableCharBuffer.size)
         for (i in 0 until len) {
             reusableCharBuffer[i] = text[i]
@@ -2805,9 +3075,34 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         lastCheckedUrlHash = currentHash
 
+        if (enforceSafeSearchGuard && str.isNotBlank()) {
+            val safeSearchViolation = SafeSearchGuard.inspectSearchUrl(
+                rawUrl = str,
+                nativeMatcher = ::nativeMatchTextForSearch,
+                customKeywordHit = ::wholeWordHit,
+                whitelistShieldedCheck = ::isMatchShieldedByWhitelist
+            )
+            if (safeSearchViolation != null) {
+                val reason = BlockReason(
+                    BlockCategory.SAFESEARCH,
+                    safeSearchViolation.englishReason,
+                    safeSearchViolation.banglaReason
+                )
+                TamperShieldManager.showInstantShield(this)
+                redirectBrowser(
+                    pkg,
+                    "sites",
+                    getFearAllahHeading(),
+                    if (isBangla()) safeSearchViolation.banglaReason else safeSearchViolation.englishReason,
+                    getFearAllahSubheading(),
+                    reason
+                )
+                return true
+            }
+        }
+
         var exactTrigger: String? = null
         var isDomain = false
-        val str = text.toString()
         val h = hostOf(str.trim().lowercase())
 
         // C++ Zero-Heap mmap engine check (sub-microsecond)
@@ -3536,7 +3831,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         val evCls = ev.className?.toString().orEmpty()
         val evText = ev.text.joinToString(" ").lowercase()
 
-        if (shouldAllowDndScreen("com.android.settings", cls, evText) || shouldAllowDndScreen("com.android.settings", evCls, evText)) {
+        if (shouldAllowDndScreen("com.android.settings", cls, evText) ||
+            shouldAllowDndScreen("com.android.settings", evCls, evText) ||
+            shouldAllowNotificationAccessScreen("com.android.settings", cls, evText) ||
+            shouldAllowNotificationAccessScreen("com.android.settings", evCls, evText)
+        ) {
             return
         }
 
@@ -4081,6 +4380,24 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val (clickDndFlow, clickDndAllowed) = evaluateDndFlowAccess(pkg, ev, rootForClick)
                 if (clickDndFlow && clickDndAllowed) return false
 
+                val (clickNotifFlow, clickNotifAllowed) = evaluateNotificationAccessFlowAccess(pkg, ev, rootForClick)
+                if (clickNotifFlow) {
+                    if (clickNotifAllowed) return false
+                    TamperShieldManager.showInstantShield(this)
+                    autoCancelDialog(rootInActiveWindow)
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    kickToHome()
+                    BlockerStore.incr(this, "tamper")
+                    OverlayHudManager.show(
+                        this,
+                        if (isBangla()) "নোটিফিকেশন অ্যাক্সেস সুরক্ষিত" else "Notification access is protected",
+                        2,
+                        BlockReason(BlockCategory.TAMPER_GUARD, "Notification Access")
+                    )
+                    return true
+                }
+
                 if (isSelfRowClick && !isDeviceAdminScreenOrSetup(rootForClick, rootClsForClick, rowText)) {
                     autoCancelDialog(rootInActiveWindow)
                     performGlobalAction(GLOBAL_ACTION_BACK)
@@ -4351,6 +4668,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         // If user is inside a legitimate permission grant screen (e.g. Do Not Disturb access, Battery optimization, Device Admin), allow it:
         val (rowDndFlow, rowDndAllowed) = evaluateDndFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
         if (rowDndFlow && rowDndAllowed) return
+        val (rowNotifFlow, rowNotifAllowed) = evaluateNotificationAccessFlowAccess(pkg, ev, runCatching { rootInActiveWindow }.getOrNull())
+        if (rowNotifFlow && rowNotifAllowed) return
         if (isLegitimatePermissionTitle(currentSettingsScreenTitle)) return
 
         val root = rootInActiveWindow ?: ev.source

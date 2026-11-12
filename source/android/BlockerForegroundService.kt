@@ -147,6 +147,7 @@ class BlockerForegroundService : Service {
     }
 
     @Volatile private var lastPrayerDndSyncElapsed = 0L
+    @Volatile private var wasSessionActiveForNotif = false
 
     private fun startWatchdog() {
         stopWatchdog()
@@ -155,6 +156,17 @@ class BlockerForegroundService : Service {
             if (elapsed - lastPrayerDndSyncElapsed >= 2000L) {
                 lastPrayerDndSyncElapsed = elapsed
                 runCatching { BlockerStore.syncPrayerAutoDnd(this) }
+                runCatching {
+                    val snap = com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+                    val sessionNow = snap.isManualFocusRunningNow() ||
+                        snap.isStudyModeRunningNow(this) ||
+                        snap.getActiveScheduleNow() != null ||
+                        snap.getActivePrayerSlotNow() != null
+                    if (sessionNow && !wasSessionActiveForNotif) {
+                        BlockerNotificationListenerService.sweepActiveNotificationsIfRunning()
+                    }
+                    wasSessionActiveForNotif = sessionNow
+                }
             }
             if (!isScreenInteractive) return@scheduleWithFixedDelay
             runCatching { inspectForegroundState() }

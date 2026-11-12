@@ -58,7 +58,8 @@ data class PermissionsState(
     val deviceAdmin: Boolean = false,
     val usageAccess: Boolean = false,
     val overlay: Boolean = false,
-    val batteryOptimizationsIgnored: Boolean = false
+    val batteryOptimizationsIgnored: Boolean = false,
+    val notificationAccess: Boolean = false
 ) {
     val allGranted: Boolean
         get() = accessibility && deviceAdmin && usageAccess && overlay
@@ -77,7 +78,10 @@ data class FocusState(
     val pendingAppsUnlockUntil: Long = 0L,
     val prayerSlots: List<PrayerSlot> = emptyList(),
     val pendingPrayerUnlocks: Map<String, Long> = emptyMap(),
-    val hasDndAccess: Boolean = false
+    val hasDndAccess: Boolean = false,
+    val suppressNotificationsInFocus: Boolean = true,
+    val hasNotificationAccess: Boolean = false,
+    val pendingNotificationSuppressorUnlockUntil: Long = 0L
 )
 
 data class StudyState(
@@ -109,6 +113,8 @@ data class DistractionShieldState(
     val blockInstaReels: Boolean = false,
     val blockInstaSearch: Boolean = false,
     val blockFbReels: Boolean = true,
+    val blockIncognitoMode: Boolean = true,
+    val enforceSafeSearchGuard: Boolean = true,
     val pendingUnlocks: Map<String, Long> = emptyMap()
 )
 
@@ -296,12 +302,16 @@ class BlockerRepository(private val context: Context) {
         val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val battery = pm?.isIgnoringBatteryOptimizations(pkg) == true
 
+        // Notification listener access
+        val notifAccess = com.blocker.BlockerNotificationListenerService.isGranted(appContext)
+
         _permissionsState.value = PermissionsState(
             accessibility = acc,
             deviceAdmin = adm,
             usageAccess = usage,
             overlay = overlay,
-            batteryOptimizationsIgnored = battery
+            batteryOptimizationsIgnored = battery,
+            notificationAccess = notifAccess
         )
     }
 
@@ -374,6 +384,16 @@ class BlockerRepository(private val context: Context) {
         }
         BlockerStore.syncPrayerAutoDnd(appContext)
         val dndAccess = hasDndAccess()
+        val notifAccess = com.blocker.BlockerNotificationListenerService.isGranted(appContext)
+        val pendingNotifTarget = BlockerStore.settingUnlockTarget(appContext, "suppress_notifications_in_focus")
+        if (pendingNotifTarget > 0L && now >= pendingNotifTarget) {
+            BlockerStore.cancelSettingUnlockTarget(appContext, "suppress_notifications_in_focus")
+            BlockerStore.setSuppressNotificationsInFocus(appContext, false)
+        }
+        val activePendingNotifTarget = BlockerStore.settingUnlockTarget(appContext, "suppress_notifications_in_focus")
+        val suppressNotifs = BlockerStore.suppressNotificationsInFocus(appContext)
+
+        RuleSnapshotHolder.syncFromStore(appContext)
 
         _focusState.value = FocusState(
             active = fActive,
@@ -388,7 +408,10 @@ class BlockerRepository(private val context: Context) {
             pendingAppsUnlockUntil = fAppsUnlockUntil,
             prayerSlots = prayers,
             pendingPrayerUnlocks = prayerUnlocks,
-            hasDndAccess = dndAccess
+            hasDndAccess = dndAccess,
+            suppressNotificationsInFocus = suppressNotifs,
+            hasNotificationAccess = notifAccess,
+            pendingNotificationSuppressorUnlockUntil = activePendingNotifTarget
         )
 
         val sActive = BlockerStore.studyActive(appContext)
@@ -421,6 +444,7 @@ class BlockerRepository(private val context: Context) {
         _blockedApps.value = BlockerStore.set(appContext, "apps")
         _blockedDomains.value = BlockerStore.set(appContext, "domains")
         _blockedKeywords.value = BlockerStore.set(appContext, "keywords")
+        RuleSnapshotHolder.syncFromStore(appContext)
     }
 
     fun refreshStats() {
@@ -542,7 +566,13 @@ class BlockerRepository(private val context: Context) {
             BlockerStore.syncPrayerAutoDnd(appContext)
         }
 
-        if (_focusState.value.active || _focusState.value.pendingUnlockUntil > 0L || _focusState.value.pendingScheduleUnlocks.isNotEmpty() || _focusState.value.pendingPrayerUnlocks.isNotEmpty() || prayerExpired) {
+        if (_focusState.value.active ||
+            _focusState.value.pendingUnlockUntil > 0L ||
+            _focusState.value.pendingScheduleUnlocks.isNotEmpty() ||
+            _focusState.value.pendingPrayerUnlocks.isNotEmpty() ||
+            _focusState.value.pendingNotificationSuppressorUnlockUntil > 0L ||
+            prayerExpired
+        ) {
             val rem = BlockerStore.focusRemainingMs(appContext)
             _focusState.value = _focusState.value.copy(remainingMs = rem)
             refreshFocusAndStudy()
@@ -564,13 +594,28 @@ class BlockerRepository(private val context: Context) {
         }
 
         // 6. Distraction Shield Pending Unlocks
-        for (key in listOf("block_yt_shorts", "block_insta_reels", "block_insta_search", "block_fb_reels")) {
+        for (key in listOf(
+            "block_yt_shorts",
+            "block_insta_reels",
+            "block_insta_search",
+            "block_fb_reels",
+            "block_incognito_mode",
+            "enforce_safesearch_guard"
+        )) {
             val target = BlockerStore.settingUnlockTarget(appContext, key)
             if (target > 0L && now >= target) {
                 BlockerStore.cancelSettingUnlockTarget(appContext, key)
                 BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
                 refreshDistractionShield()
             }
+        }
+
+        // 6b. Notification Suppressor Pending Unlock
+        val pendingNotifTarget = BlockerStore.settingUnlockTarget(appContext, "suppress_notifications_in_focus")
+        if (pendingNotifTarget > 0L && now >= pendingNotifTarget) {
+            BlockerStore.cancelSettingUnlockTarget(appContext, "suppress_notifications_in_focus")
+            BlockerStore.setSuppressNotificationsInFocus(appContext, false)
+            refreshFocusAndStudy()
         }
 
         // 7. Focus Mode Apps Unlock & Schedule Apps Unlocks
@@ -894,6 +939,72 @@ class BlockerRepository(private val context: Context) {
         }
     }
 
+    fun requestNotificationAccess(context: Context) {
+        com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
+        com.blocker.PermissionFlowTracker.lastNotificationAccessRequestMs = SystemClock.elapsedRealtime()
+        MainActivity.isLaunchingExternal = true
+        val act = context.findActivity() ?: (context as? Activity)
+        val listenerComponent = ComponentName(
+            appContext,
+            com.blocker.BlockerNotificationListenerService::class.java
+        ).flattenToString()
+        val launchedDetail = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                val detailIntent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, listenerComponent)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (act != null) act.startActivity(detailIntent) else context.startActivity(detailIntent)
+                true
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        if (!launchedDetail) {
+            runCatching {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (act != null) act.startActivity(intent) else context.startActivity(intent)
+            }
+        }
+    }
+
+    fun setSuppressNotificationsInFocus(enabled: Boolean) {
+        val key = "suppress_notifications_in_focus"
+        val now = System.currentTimeMillis()
+        if (enabled) {
+            BlockerStore.cancelSettingUnlockTarget(appContext, key)
+            BlockerStore.setSuppressNotificationsInFocus(appContext, true)
+            refreshFocusAndStudy()
+            com.blocker.BlockerNotificationListenerService.sweepActiveNotificationsIfRunning()
+        } else {
+            val protActive = BlockerStore.active(appContext)
+            val fActive = BlockerStore.focusActive(appContext)
+            val sActive = BlockerStore.studyActive(appContext)
+            if (protActive || fActive || sActive) {
+                val target = BlockerStore.settingUnlockTarget(appContext, key)
+                if (target > 0L && now >= target) {
+                    BlockerStore.cancelSettingUnlockTarget(appContext, key)
+                    BlockerStore.setSuppressNotificationsInFocus(appContext, false)
+                    refreshFocusAndStudy()
+                } else if (target == 0L) {
+                    val delayMs = BlockerStore.delayMs(appContext)
+                    BlockerStore.setSettingUnlockTarget(appContext, key, now + delayMs)
+                    refreshFocusAndStudy()
+                }
+            } else {
+                BlockerStore.setSuppressNotificationsInFocus(appContext, false)
+                refreshFocusAndStudy()
+            }
+        }
+    }
+
+    fun cancelSuppressNotificationsUnlock() {
+        BlockerStore.cancelSettingUnlockTarget(appContext, "suppress_notifications_in_focus")
+        refreshFocusAndStudy()
+    }
+
     fun setStudyAutoDnd(enabled: Boolean) {
         BlockerStore.prefs(appContext).edit().putBoolean("study_auto_dnd", enabled).apply()
         refreshFocusAndStudy()
@@ -964,6 +1075,7 @@ class BlockerRepository(private val context: Context) {
             BlockerStore.disableWifi(appContext)
         }
         refreshFocusAndStudy()
+        com.blocker.BlockerNotificationListenerService.sweepActiveNotificationsIfRunning()
     }
 
     fun endStudySession() {
@@ -984,6 +1096,7 @@ class BlockerRepository(private val context: Context) {
         BlockerStore.prefs(appContext).edit().putLong("focus_until", until).apply()
         BlockerStore.cancelPendingFocusUnlock(appContext)
         refreshFocusAndStudy()
+        com.blocker.BlockerNotificationListenerService.sweepActiveNotificationsIfRunning()
     }
 
     fun endQuickFocus() {
@@ -1018,7 +1131,14 @@ class BlockerRepository(private val context: Context) {
     fun refreshDistractionShield() {
         val p = BlockerStore.prefs(appContext)
         val pendingMap = mutableMapOf<String, Long>()
-        for (k in listOf("block_yt_shorts", "block_insta_reels", "block_insta_search", "block_fb_reels")) {
+        for (k in listOf(
+            "block_yt_shorts",
+            "block_insta_reels",
+            "block_insta_search",
+            "block_fb_reels",
+            "block_incognito_mode",
+            "enforce_safesearch_guard"
+        )) {
             val t = p.getLong("pending_setting_$k", 0L)
             if (t > 0L) pendingMap[k] = t
         }
@@ -1027,8 +1147,11 @@ class BlockerRepository(private val context: Context) {
             blockInstaReels = BlockerStore.granularToggle(appContext, "block_insta_reels"),
             blockInstaSearch = BlockerStore.granularToggle(appContext, "block_insta_search"),
             blockFbReels = BlockerStore.granularToggle(appContext, "block_fb_reels"),
+            blockIncognitoMode = BlockerStore.blockIncognitoMode(appContext),
+            enforceSafeSearchGuard = BlockerStore.enforceSafeSearchGuard(appContext),
             pendingUnlocks = pendingMap
         )
+        RuleSnapshotHolder.syncFromStore(appContext)
     }
 
     fun toggleDistraction(key: String, enabled: Boolean) {

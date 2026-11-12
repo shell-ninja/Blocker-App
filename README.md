@@ -32,6 +32,15 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ## What's New in v1.0.6.8
 
+- **Incognito & Private Tab Blocker (`Web` Tab):**
+  - Automatically detects and exits active Incognito, Private, InPrivate, and Secret browsing sessions across major Android browsers (Chrome, Brave, Edge, Firefox/Fenix/Focus, Samsung Internet, Opera, Vivaldi, Kiwi, DuckDuckGo, and Mi Browser) with zero false positives on normal tabs or browser overflow menus.
+  - Managed via a dedicated **Incognito & Private Tab Blocker** card on the **Web** screen (immediate ON, countdown-locked OFF while Master Protection is active).
+- **SafeSearch & Query Guard (`Web` Tab):**
+  - Enforces safe browsing at Stage-0 across Google, Bing, DuckDuckGo, Yahoo, Brave Search, Yandex, and Ecosia by blocking SafeSearch-off query parameters (`safe=off`, `adlt=off`, `kp=-2`, etc.), blocking attempts to select `"Off"` or `"Blur"` on SafeSearch settings pages, and scanning decoded search queries (`q=`, `p=`, `text=`) against the native C++ engine and custom keywords while honoring whitelisted phrases.
+  - Managed via the **SafeSearch & Query Guard** card on the **Web** screen with standard protection delay locks when disabling.
+- **Focus & Prayer Notification Suppressor (`Focus` Tab):**
+  - Added `BlockerNotificationListenerService` to automatically silence notifications from blocked apps during active **Focus**, **Study**, **Daily Schedule**, and **Prayer** sessions while always preserving incoming calls, missed calls, alarms, navigation, SMS/messaging essentials, whitelisted session apps, and Blocker's own status notifications.
+  - Includes a **Notification Suppressor** card on the **Focus** tab (`Granted` / `Permission Required` status pill, single-tap `"Grant Notification Access"` launcher, smart Settings allow-gate during grant and anti-tamper lock when armed, and countdown-protected toggle).
 - **Custom Manual Focus Duration Input:**
   - Added a `"Custom"` chip alongside the preset Focus durations (`15m`–`4h`) with an inline **Custom Duration (`1m – 24h`)** selector featuring single-line `Hours` (`0–23`) and `Minutes` (`0–59`) numeric inputs, `-` / `+` steppers, keyboard clearance, and `HH:MM:SS` active timer display.
 - **Prayer Time (Salah) Focus Mode (`Prayer` Tab):**

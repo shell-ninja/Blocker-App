@@ -712,25 +712,39 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
                 return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
             }
 
-            // Do Not Disturb Access / Notification Policy Access: let Kotlin's Rule A/B DND flow gate handle it
+            // Do Not Disturb Access & Notification Access: let Kotlin's Rule A/B flow gates handle them accurately
             bool is_dnd_screen =
-                contains_ci(cls, "zenaccess") || contains_ci(cls, "notificationaccess") ||
+                contains_ci(cls, "zenaccess") ||
                 contains_ci(cls, "policyaccess") || contains_ci(cls, "managezenaccess");
-            if (!is_dnd_screen) {
+            bool is_notification_access_screen =
+                contains_ci(cls, "notificationaccess") ||
+                contains_ci(cls, "notificationlistener") ||
+                contains_ci(cls, "managedservice") ||
+                contains_ci(cls, "notificationassistant");
+            if (!is_dnd_screen || !is_notification_access_screen) {
                 for (size_t i = 0; i < node_count; ++i) {
                     std::string_view t = nodes[i].text;
                     std::string_view c = nodes[i].cd;
-                    if (contains_ci(t, "do not disturb access") || contains_ci(c, "do not disturb access") ||
-                        contains_ci(t, "allow do not disturb") || contains_ci(c, "allow do not disturb") ||
-                        contains_ci(t, "notification policy access") || contains_ci(c, "notification policy access") ||
-                        contains_ci(t, "read, reply & control") || contains_ci(c, "read, reply & control") ||
-                        contains_ci(t, "do not disturb") || contains_ci(c, "do not disturb")) {
+                    if (!is_dnd_screen &&
+                        (contains_ci(t, "do not disturb access") || contains_ci(c, "do not disturb access") ||
+                         contains_ci(t, "allow do not disturb") || contains_ci(c, "allow do not disturb") ||
+                         contains_ci(t, "notification policy access") || contains_ci(c, "notification policy access") ||
+                         contains_ci(t, "do not disturb") || contains_ci(c, "do not disturb"))) {
                         is_dnd_screen = true;
-                        break;
                     }
+                    if (!is_notification_access_screen &&
+                        (contains_ci(t, "notification access") || contains_ci(c, "notification access") ||
+                         contains_ci(t, "device & app notifications") || contains_ci(c, "device & app notifications") ||
+                         contains_ci(t, "allow notification access") || contains_ci(c, "allow notification access") ||
+                         contains_ci(t, "read notifications") || contains_ci(c, "read notifications") ||
+                         contains_ci(t, "read, reply & control") || contains_ci(c, "read, reply & control") ||
+                         contains_ci(t, "notification listener") || contains_ci(c, "notification listener"))) {
+                        is_notification_access_screen = true;
+                    }
+                    if (is_dnd_screen && is_notification_access_screen) break;
                 }
             }
-            if (is_dnd_screen) {
+            if (is_dnd_screen || is_notification_access_screen) {
                 return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
             }
 

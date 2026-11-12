@@ -284,6 +284,16 @@ if "BlockerVpnService" not in t:
             <action android:name="android.net.VpnService"/>
         </intent-filter>
     </service>""")
+if "BlockerNotificationListenerService" not in t:
+    extra_components.append("""    <service
+        android:name=".BlockerNotificationListenerService"
+        android:label="@string/app_name"
+        android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.service.notification.NotificationListenerService"/>
+        </intent-filter>
+    </service>""")
 if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)

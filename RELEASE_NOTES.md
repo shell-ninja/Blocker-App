@@ -8,9 +8,21 @@ This document contains release notes, changelogs, and notable changes for all re
 
 **Release Date:** November 12, 2026  
 **Version:** 1.0.6.8  
-**Build:** 110 (`versionCode`: `1006909` debug / `1106909` release)  
+**Build:** 112 (`versionCode`: `1006911` debug / `1106911` release)  
 
 ### Major New Features & Enhancements:
+- **Incognito & Private Tab Blocker (`Web` Tab — Local Zero-VPN):**
+  - Added `IncognitoDetector` (`RECOGNIZED_BROWSER_PACKAGES`) covering Chrome, Brave, Edge, Firefox/Fenix/Focus, Samsung Internet, Opera, Vivaldi, Kiwi, DuckDuckGo, and Mi Browser.
+  - Triggers `BlockCategory.INCOGNITO` with a 400ms monotonic cooldown, instant `TamperShieldManager` shield, `GLOBAL_ACTION_BACK`, HUD alert, and bilingual overlay using view-ID signals, top-22% chrome badges, and active landing phrases while strictly ignoring normal page content and overflow menu items (`"New Incognito tab"`, `"New private tab"`, `"Turn on Secret mode"`).
+  - Added the **Incognito & Private Tab Blocker** toggle card on `BlocklistScreen` with immediate ON and countdown-protected OFF (`00:00:03` in Debug / `24h` in Release) + single-line `"Abort"` button.
+- **SafeSearch & Search Query Guard (`Web` Tab — Local Stage-0):**
+  - Added `SafeSearchGuard` inspecting URLs across Google, Bing, DuckDuckGo, Yahoo, Brave Search, Yandex, and Ecosia for SafeSearch-off query parameters (`safe=off`, `safe=0`, `safe=images`, `adlt=off`, `adlt=demote`, `kp=-2`, `kp=-1`, `vm=p`, `safesearch=off`, `family=0`, `family=no`, `fyandex=0`).
+  - Blocks selecting `"Off"` or `"Blur"` on search engine SafeSearch settings pages and inspects decoded search query parameters (`q=`, `p=`, `text=`) against `NativeBlockerBridge.matchTextRule` and custom keywords while honoring whitelisted phrases (`isMatchShieldedByWhitelist`).
+  - Added the **SafeSearch & Query Guard** toggle card on `BlocklistScreen` with standard delay lock when disabling.
+- **Focus & Prayer Notification Suppressor (`Focus` Tab):**
+  - Added `BlockerNotificationListenerService` (registered with `BIND_NOTIFICATION_LISTENER_SERVICE`) to cancel notifications from blocked apps and perform active status-bar sweeps (`sweepActiveNotificationsIfRunning()`) whenever Focus, Study, Daily Schedule, or Prayer sessions are active.
+  - Preserves incoming/missed calls, alarms, navigation, ongoing foreground services, car-category alerts, dialer/telecom/clock/SMS/system packages, whitelisted session apps, and Blocker notifications; Study Mode enforces full notification lockdown for non-essential packages.
+  - Added Android Notification Access allow-gate rules across Kotlin (`PermissionFlowTracker.lastNotificationAccessRequestMs` + Rule A / Rule B) and native C++ (`is_notification_access_screen` in `blocker_engine.cpp`), plus the **Notification Suppressor** card on `FocusScreen` with `"Granted"` / `"Permission Required"` status badge, single-line `"Grant Notification Access"` button, and countdown-locked toggle.
 - **Custom Manual Focus Duration Input (`Focus` Tab):**
   - Added a `"Custom"` chip alongside the Focus preset chips (`15m`, `30m`, `45m`, `1h`, `2h`, `4h`) with an inline **Custom Duration (`1m – 24h`)** row directly beneath the chips.
   - Added single-line `Hours` (`0–23`) and `Minutes` (`0–59`) numeric `OutlinedTextField` inputs with `-` / `+` stepper buttons, Royal Purple styling, `BringIntoViewRequester` + `imePadding()` keyboard clearance, automatic `1–1440` minute validation/clamping, and `HH:MM:SS` countdown formatting on the Start button and active timer badge.

@@ -38,6 +38,8 @@ fun BlocklistScreen(
     val keywords by repo.blockedKeywords.collectAsState()
     val protection by repo.protectionState.collectAsState()
     val focus by repo.focusState.collectAsState()
+    val distraction by repo.distractionShield.collectAsState()
+    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val isLocked = protection.isActive || focus.active
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
@@ -111,6 +113,33 @@ fun BlocklistScreen(
                 StatusPillBadge(label = "Active", tone = BadgeTone.OK, small = true)
             }
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Browser Incognito & SafeSearch Guards
+        DistractionItemCard(
+            title = "Incognito & Private Tab Blocker",
+            subtitle = "Automatically closes Incognito, Private, and Secret tabs across browsers",
+            icon = CyberIcons.EyeOff,
+            checked = distraction.blockIncognitoMode,
+            pendingUnlockUntil = distraction.pendingUnlocks["block_incognito_mode"] ?: 0L,
+            nowMillis = nowMillis,
+            onCancelUnlock = { repo.cancelDistractionUnlock("block_incognito_mode") },
+            onCheckedChange = { repo.toggleDistraction("block_incognito_mode", it) }
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        DistractionItemCard(
+            title = "SafeSearch & Query Guard",
+            subtitle = "Blocks SafeSearch bypasses and unfiltered explicit image/video search queries",
+            icon = CyberIcons.Search,
+            checked = distraction.enforceSafeSearchGuard,
+            pendingUnlockUntil = distraction.pendingUnlocks["enforce_safesearch_guard"] ?: 0L,
+            nowMillis = nowMillis,
+            onCancelUnlock = { repo.cancelDistractionUnlock("enforce_safesearch_guard") },
+            onCheckedChange = { repo.toggleDistraction("enforce_safesearch_guard", it) }
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 

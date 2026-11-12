@@ -1221,6 +1221,19 @@ object BlockerStore {
     fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
         prefs(c).edit().putBoolean(key, enabled).apply()
 
+    fun blockIncognitoMode(c: Context): Boolean = prefs(c).getBoolean("block_incognito_mode", true)
+    fun setBlockIncognitoMode(c: Context, enabled: Boolean) =
+        prefs(c).edit().putBoolean("block_incognito_mode", enabled).apply()
+
+    fun enforceSafeSearchGuard(c: Context): Boolean = prefs(c).getBoolean("enforce_safesearch_guard", true)
+    fun setEnforceSafeSearchGuard(c: Context, enabled: Boolean) =
+        prefs(c).edit().putBoolean("enforce_safesearch_guard", enabled).apply()
+
+    fun suppressNotificationsInFocus(c: Context): Boolean =
+        prefs(c).getBoolean("suppress_notifications_in_focus", true)
+    fun setSuppressNotificationsInFocus(c: Context, enabled: Boolean) =
+        prefs(c).edit().putBoolean("suppress_notifications_in_focus", enabled).apply()
+
     fun appLimits(c: Context): Map<String, Int> = runCatching {
         val json = prefs(c).getString("app_limits", "{}") ?: "{}"
         val obj = JSONObject(json)

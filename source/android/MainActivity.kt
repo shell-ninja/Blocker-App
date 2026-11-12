@@ -21,6 +21,8 @@ object PermissionFlowTracker {
     var isLaunchingPermissionIntent: Boolean = false
     @Volatile
     var lastDndPermissionRequestMs: Long = 0L
+    @Volatile
+    var lastNotificationAccessRequestMs: Long = 0L
 }
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +65,9 @@ class MainActivity : ComponentActivity() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
         if (nm?.isNotificationPolicyAccessGranted == true) {
             PermissionFlowTracker.lastDndPermissionRequestMs = 0L
+        }
+        if (BlockerNotificationListenerService.isGranted(this)) {
+            PermissionFlowTracker.lastNotificationAccessRequestMs = 0L
         }
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
