@@ -4,7 +4,26 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.7 (Current Release)
+## v1.0.6.8 (Current Release)
+
+**Release Date:** November 12, 2026  
+**Version:** 1.0.6.8  
+**Build:** 110 (`versionCode`: `1006909` debug / `1106909` release)  
+
+### Major New Features & Enhancements:
+- **Custom Manual Focus Duration Input (`Focus` Tab):**
+  - Added a `"Custom"` chip alongside the Focus preset chips (`15m`, `30m`, `45m`, `1h`, `2h`, `4h`) with an inline **Custom Duration (`1m – 24h`)** row directly beneath the chips.
+  - Added single-line `Hours` (`0–23`) and `Minutes` (`0–59`) numeric `OutlinedTextField` inputs with `-` / `+` stepper buttons, Royal Purple styling, `BringIntoViewRequester` + `imePadding()` keyboard clearance, automatic `1–1440` minute validation/clamping, and `HH:MM:SS` countdown formatting on the Start button and active timer badge.
+- **Manual Prayer Time (Salah) Focus Mode (`Prayer` Tab):**
+  - Added a dedicated `Prayer` segment next to `Focus` and `Study` on the Focus screen for configuring manual daily Salah focus schedules: **Fajr (ফজর)**, **Dhuhr (যোহর)**, **Asr (আসর)**, **Maghrib (মাগরিব)**, **Isha (ইশা)**, and **Jumu'ah (জুমু'আহ)** automatically replacing Dhuhr on Fridays.
+  - Added live **Next Prayer** countdown banner, per-prayer enable toggles, start time picker, focus duration selector, per-prayer Do Not Disturb override, and **Auto Do Not Disturb** synchronization (using existing notification policy permission grants safely).
+  - Enforced standard Protection delay locks whenever attempting to turn off an enabled Prayer Time focus window while Protection Mode is active.
+- **Documentation & Visual Preview Refresh:**
+  - Replaced all 10 `ScreenShots/*.jpg` captures with updated `v1.0.6.8` Royal Obsidian dark-theme UI screenshots and updated `README.md` / `RELEASE_NOTES.md`.
+
+---
+
+## v1.0.6.7
 
 **Release Date:** November 11, 2026  
 **Version:** 1.0.6.7  
