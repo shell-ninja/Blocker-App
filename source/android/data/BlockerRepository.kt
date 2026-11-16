@@ -59,10 +59,11 @@ data class PermissionsState(
     val usageAccess: Boolean = false,
     val overlay: Boolean = false,
     val batteryOptimizationsIgnored: Boolean = false,
-    val notificationAccess: Boolean = false
+    val notificationAccess: Boolean = false,
+    val dndAccess: Boolean = false
 ) {
     val allGranted: Boolean
-        get() = accessibility && deviceAdmin && usageAccess && overlay
+        get() = accessibility && deviceAdmin && usageAccess && overlay && dndAccess && notificationAccess
 }
 
 data class FocusState(
@@ -176,10 +177,35 @@ class BlockerRepository(private val context: Context) {
     val updateManager = UpdateManager(appContext)
     val updateState: StateFlow<UpdateState> = updateManager.updateState
 
+    fun hasActiveTimer(): Boolean {
+        val now = System.currentTimeMillis()
+        if (_focusState.value.active || _studyState.value.active) return true
+        if (_focusState.value.pendingUnlockUntil > now) return true
+        if (_focusState.value.pendingScheduleUnlocks.values.any { it > now }) return true
+        if (_focusState.value.pendingPrayerUnlocks.values.any { it > now }) return true
+        if (_focusState.value.pendingNotificationSuppressorUnlockUntil > now) return true
+        if (_focusState.value.pendingAppsUnlockUntil > now) return true
+
+        val p = BlockerStore.prefs(appContext)
+        val pendingProt = p.getLong("pending_protection", 0L)
+        if (pendingProt > now) return true
+
+        val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
+        if (pCooldownUntil > now) return true
+
+        if (_distractionShield.value.pendingUnlocks.values.any { it > now }) return true
+
+        val pendingRestore = BlockerStore.settingUnlockTarget(appContext, "restore_backup")
+        if (pendingRestore > now) return true
+
+        return false
+    }
+
     val currentTimeMillisFlow: StateFlow<Long> = flow {
         while (true) {
             emit(System.currentTimeMillis())
-            kotlinx.coroutines.delay(1000L)
+            val delayMs = if (hasActiveTimer()) 1000L else 10_000L
+            kotlinx.coroutines.delay(delayMs)
         }
     }.stateIn(scope, SharingStarted.WhileSubscribed(5000), System.currentTimeMillis())
 
@@ -192,7 +218,8 @@ class BlockerRepository(private val context: Context) {
         // Periodic ticker for active countdowns
         scope.launch {
             while (true) {
-                delay(1000L)
+                val delayMs = if (hasActiveTimer()) 1000L else 10_000L
+                delay(delayMs)
                 tickCountdowns()
             }
         }
@@ -305,13 +332,18 @@ class BlockerRepository(private val context: Context) {
         // Notification listener access
         val notifAccess = com.blocker.BlockerNotificationListenerService.isGranted(appContext)
 
+        // DND access
+        val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        val dnd = nm?.isNotificationPolicyAccessGranted == true
+
         _permissionsState.value = PermissionsState(
             accessibility = acc,
             deviceAdmin = adm,
             usageAccess = usage,
             overlay = overlay,
             batteryOptimizationsIgnored = battery,
-            notificationAccess = notifAccess
+            notificationAccess = notifAccess,
+            dndAccess = dnd
         )
     }
 
@@ -463,6 +495,12 @@ class BlockerRepository(private val context: Context) {
         BlockerStore.setOnboardingCompleted(appContext, completed)
     }
 
+    fun isInitialSetupActivated(): Boolean = BlockerStore.isInitialSetupActivated(appContext)
+
+    fun setInitialSetupActivated(activated: Boolean) {
+        BlockerStore.setInitialSetupActivated(appContext, activated)
+    }
+
     fun refreshInstalledApps(force: Boolean = false) {
         if (!force && _installedApps.value.isNotEmpty()) return
         scope.launch {
@@ -520,6 +558,7 @@ class BlockerRepository(private val context: Context) {
 
     private fun tickCountdowns() {
         val now = System.currentTimeMillis()
+        runCatching { com.blocker.FocusNotificationManager.onTick(appContext) }
 
         // 1. Study Mode session
         if (_studyState.value.active) {
@@ -1079,6 +1118,7 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun endStudySession() {
+        com.blocker.FocusNotificationManager.onSessionCancelled(appContext)
         BlockerStore.endStudySession(appContext)
         BlockerStore.restoreNotifications(appContext)
         BlockerStore.restoreWifi(appContext)
@@ -1097,9 +1137,11 @@ class BlockerRepository(private val context: Context) {
         BlockerStore.cancelPendingFocusUnlock(appContext)
         refreshFocusAndStudy()
         com.blocker.BlockerNotificationListenerService.sweepActiveNotificationsIfRunning()
+        runCatching { com.blocker.FocusNotificationManager.onTick(appContext) }
     }
 
     fun endQuickFocus() {
+        com.blocker.FocusNotificationManager.onSessionCancelled(appContext)
         BlockerStore.prefs(appContext).edit().putLong("focus_until", 0L).apply()
         BlockerStore.cancelPendingFocusUnlock(appContext)
         refreshFocusAndStudy()
@@ -1428,6 +1470,14 @@ class BlockerRepository(private val context: Context) {
         com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent = true
         MainActivity.isLaunchingExternal = true
 
+        if (kind == "dnd") {
+            com.blocker.PermissionFlowTracker.lastDndPermissionRequestMs = android.os.SystemClock.elapsedRealtime()
+        } else if (kind == "notification") {
+            com.blocker.PermissionFlowTracker.lastNotificationAccessRequestMs = android.os.SystemClock.elapsedRealtime()
+        } else if (kind == "battery") {
+            com.blocker.PermissionFlowTracker.lastBatteryPermissionRequestMs = android.os.SystemClock.elapsedRealtime()
+        }
+
         if (kind == "deviceAdmin") {
             val adminComponent = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
@@ -1475,9 +1525,14 @@ class BlockerRepository(private val context: Context) {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
             )
             "dnd" -> listOf(
+                Intent("android.settings.NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS", Uri.parse("package:$pkg")),
                 Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS),
                 Intent(Settings.ACTION_SOUND_SETTINGS),
                 Intent(Settings.ACTION_SETTINGS)
+            )
+            "notification" -> listOf(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
             )
             "settings" -> listOf(Intent(Settings.ACTION_SETTINGS))
             else -> emptyList()

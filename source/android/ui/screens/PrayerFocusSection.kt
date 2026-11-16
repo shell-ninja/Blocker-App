@@ -28,6 +28,8 @@ import com.blocker.data.BlockerRepository
 import com.blocker.data.FocusState
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.NordicColors
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.time.DayOfWeek
 import java.time.LocalDateTime
 
@@ -63,21 +65,115 @@ private fun prayerStartsInLabel(millis: Long): String {
     }
 }
 
+@Composable
+private fun PrayerHeroActiveCard(
+    activeSlot: PrayerSlot,
+    focus: FocusState,
+    jumuahEnabled: Boolean
+) {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(activeSlot) {
+        while (isActive) {
+            nowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
+    val nowDt = LocalDateTime.now()
+    val activeRemainingMs = activeSlot.getRemainingMillisNow(nowDt, jumuahEnabled)
+    val remSec = (activeRemainingMs / 1000L).coerceAtLeast(0L)
+    val totalSlotSec = (activeSlot.durationMinutes.coerceIn(10, 90) * 60L).toFloat()
+
+    NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            StatusPillBadge(
+                label = "PRAYER FOCUS ACTIVE",
+                tone = BadgeTone.ACCENT,
+                breathing = true,
+                icon = CyberIcons.Clock
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "${activeSlot.nameEn} • ${activeSlot.nameBn}",
+                color = NordicColors.TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            NordicArcGauge(
+                progress = (remSec / totalSlotSec).coerceIn(0f, 1f),
+                size = 175.dp
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = prayerHms(remSec),
+                        color = NordicColors.TextPrimary,
+                        fontSize = 25.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Remaining Time",
+                        color = NordicColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Runs until ${prayerClock12Total(activeSlot.endTotalMinutes())}",
+                        color = NordicColors.AccentPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val dndLabel = when {
+                !activeSlot.autoDnd -> "Auto-DND Off"
+                focus.hasDndAccess -> "Auto-DND Active"
+                else -> "Grant DND Access Below"
+            }
+            StatusPillBadge(
+                label = dndLabel,
+                tone = if (activeSlot.autoDnd && focus.hasDndAccess) BadgeTone.OK else BadgeTone.IDLE,
+                icon = CyberIcons.Dnd
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Only essential allowed apps are accessible during prayer",
+                color = NordicColors.TextSecondary,
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun PrayerFocusTab(
     focus: FocusState,
-    nowMillis: Long,
-    repo: BlockerRepository
+    repo: BlockerRepository,
+    nowMillis: Long = 0L
 ) {
     val context = LocalContext.current
     val slots = focus.prayerSlots
     val jumuahEnabled = remember(slots) { slots.any { it.id == "JUMUAH" && it.isEnabled } }
-    val nowDt = remember(nowMillis / 1000L) { LocalDateTime.now() }
-    val isFridayToday = nowDt.dayOfWeek == DayOfWeek.FRIDAY
 
+    var nowDt by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(30_000L)
+            nowDt = LocalDateTime.now()
+        }
+    }
+    val isFridayToday = nowDt.dayOfWeek == DayOfWeek.FRIDAY
     val activeSlot = slots.firstOrNull { it.isRunningAt(nowDt, jumuahEnabled) }
-    val activeRemainingMs = activeSlot?.getRemainingMillisNow(nowDt, jumuahEnabled) ?: 0L
 
     var editingSlot by remember { mutableStateOf<PrayerSlot?>(null) }
 
@@ -89,77 +185,11 @@ fun PrayerFocusTab(
         // 1. Hero Status / Readiness Card
         item(key = "prayer_hero_card") {
             if (activeSlot != null) {
-                val remSec = (activeRemainingMs / 1000L).coerceAtLeast(0L)
-                val totalSlotSec = (activeSlot.durationMinutes.coerceIn(10, 90) * 60L).toFloat()
-                NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        StatusPillBadge(
-                            label = "PRAYER FOCUS ACTIVE",
-                            tone = BadgeTone.ACCENT,
-                            breathing = true,
-                            icon = CyberIcons.Clock
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "${activeSlot.nameEn} • ${activeSlot.nameBn}",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        NordicArcGauge(
-                            progress = (remSec.toFloat() / totalSlotSec).coerceIn(0f, 1f),
-                            size = 175.dp
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = prayerHms(remSec),
-                                    color = NordicColors.TextPrimary,
-                                    fontSize = 25.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Remaining Time",
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Runs until ${prayerClock12Total(activeSlot.endTotalMinutes())}",
-                                    color = NordicColors.AccentPrimary,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        val dndLabel = when {
-                            !activeSlot.autoDnd -> "Auto-DND Off"
-                            focus.hasDndAccess -> "Auto-DND Active"
-                            else -> "Grant DND Access Below"
-                        }
-                        StatusPillBadge(
-                            label = dndLabel,
-                            tone = if (activeSlot.autoDnd && focus.hasDndAccess) BadgeTone.OK else BadgeTone.IDLE,
-                            icon = CyberIcons.Dnd
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Only essential allowed apps are accessible during prayer",
-                            color = NordicColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
+                PrayerHeroActiveCard(
+                    activeSlot = activeSlot,
+                    focus = focus,
+                    jumuahEnabled = jumuahEnabled
+                )
             } else {
                 val upcoming = slots
                     .mapNotNull { s -> s.getNextStartMillis(nowDt, jumuahEnabled)?.let { s to it } }
@@ -248,7 +278,6 @@ fun PrayerFocusTab(
         items(slots, key = { it.id }) { slot ->
             val pendingTarget = focus.pendingPrayerUnlocks[slot.id] ?: 0L
             val isPendingUnlock = pendingTarget > 0L
-            val unlockRemSec = ((pendingTarget - nowMillis) / 1000L).coerceAtLeast(0L)
             val isRunning = slot.isRunningAt(nowDt, jumuahEnabled)
             val isDhuhrOverriddenToday = (slot.id == "DHUHR" && isFridayToday && jumuahEnabled && slot.isEnabled)
 
@@ -428,12 +457,11 @@ fun PrayerFocusTab(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            StatusPillBadge(
-                                label = "Disabling in ${prayerHms(unlockRemSec)}",
+                            LiveCountdownBadge(
+                                targetEpochMs = pendingTarget,
+                                prefix = "Disabling in ",
                                 tone = BadgeTone.WARN,
-                                small = true,
-                                breathing = true,
-                                icon = CyberIcons.Clock
+                                small = true
                             )
                             Btn(
                                 label = "Cancel",

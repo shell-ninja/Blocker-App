@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,11 +46,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.blocker.BlockerStore
 import com.blocker.FocusSchedule
+import com.blocker.PrayerSlot
 import com.blocker.data.AppItem
 import com.blocker.data.BlockerRepository
+import com.blocker.data.FocusState
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -149,12 +153,10 @@ fun FocusScreen(
     val focus by repo.focusState.collectAsState()
     val study by repo.studyState.collectAsState()
     val protection by repo.protectionState.collectAsState()
-    val distraction by repo.distractionShield.collectAsState()
     val apps by repo.installedApps.collectAsState()
-    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val context = LocalContext.current
 
-    val isWifiOn = remember(nowMillis) { repo.isWifiEnabled() }
+    val isWifiOn = remember(focus.active) { repo.isWifiEnabled() }
 
     // Segmented page: 0 -> Focus Mode, 1 -> Study Mode
     var selectedTab by remember { mutableStateOf(if (study.active) 1 else 0) }
@@ -199,10 +201,16 @@ fun FocusScreen(
     var appFilterTab by remember { mutableStateOf(0) } // 0: User Apps, 1: System Apps, 2: All Apps
 
     // Active Status Calculations
-    val isManualActive = focus.focusUntil > nowMillis
+    var nowDt by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(15_000L)
+            nowDt = LocalDateTime.now()
+        }
+    }
+    val isManualActive = focus.active && focus.focusUntil > System.currentTimeMillis()
     val activeSchedule = focus.schedules.firstOrNull { it.isRunningAt() }
     val jumuahEnabled = remember(focus.prayerSlots) { focus.prayerSlots.any { it.id == "JUMUAH" && it.isEnabled } }
-    val nowDt = remember(nowMillis / 1000L) { LocalDateTime.now() }
     val activePrayer = focus.prayerSlots.firstOrNull { it.isRunningAt(nowDt, jumuahEnabled) }
     val isFocusRunningNow = isManualActive || activeSchedule != null || activePrayer != null
     val isFocusCurrentlyLocked = isFocusRunningNow || study.active
@@ -212,126 +220,164 @@ fun FocusScreen(
             .fillMaxSize()
             .background(Color.Transparent)
     ) {
-        // Top Segmented Tab Switcher (Focus Mode vs Study Mode vs Prayer)
-        Row(
+        // 3D Recessed Segmented Switcher (Focus Mode vs Study Mode vs Prayer)
+        val activeKeycapBrush = remember {
+            Brush.verticalGradient(
+                listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
+            )
+        }
+        val activeKeycapBorder = remember {
+            Brush.verticalGradient(
+                listOf(Color(0xFFA78BFA).copy(alpha = 0.85f), Color(0xFF4C1D95).copy(alpha = 0.35f))
+            )
+        }
+
+        Recessed3DWell(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(NordicColors.CardSurface)
-                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp))
-                .padding(4.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(4.dp)
         ) {
-            // Focus Tab
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedTab == 0) NordicColors.AccentPrimary else Color.Transparent)
-                    .clickable(enabled = !study.active) { selectedTab = 0 }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                // Focus Tab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (selectedTab == 0) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
+                        )
+                        .clickable(enabled = !study.active) { selectedTab = 0 }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = CyberIcons.Focus,
-                        contentDescription = null,
-                        tint = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = "Focus",
-                        color = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-
-            // Study Tab
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedTab == 1) NordicColors.AccentPrimary else Color.Transparent)
-                    .clickable { selectedTab = 1 }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = CyberIcons.Book,
-                        contentDescription = null,
-                        tint = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = "Study",
-                        color = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                    if (study.active) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Focus,
+                            contentDescription = null,
+                            tint = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            modifier = Modifier.size(15.dp)
+                        )
                         Spacer(modifier = Modifier.width(5.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.AccentPrimary)
+                        Text(
+                            text = "Focus",
+                            color = if (selectedTab == 0) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
-            }
 
-            // Prayer Tab
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedTab == 2) NordicColors.AccentPrimary else Color.Transparent)
-                    .clickable(enabled = !study.active) { selectedTab = 2 }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = CyberIcons.Clock,
-                        contentDescription = null,
-                        tint = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = "Prayer",
-                        color = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                    if (activePrayer != null) {
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.SuccessMuted)
+                // Study Tab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (selectedTab == 1) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
                         )
+                        .clickable { selectedTab = 1 }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Book,
+                            contentDescription = null,
+                            tint = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Study",
+                            color = if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        if (study.active) {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (selectedTab == 1) NordicColors.OnAccentPrimary else NordicColors.AccentPrimary)
+                            )
+                        }
+                    }
+                }
+
+                // Prayer Tab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (selectedTab == 2) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
+                        )
+                        .clickable(enabled = !study.active) { selectedTab = 2 }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Clock,
+                            contentDescription = null,
+                            tint = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Prayer",
+                            color = if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        if (activePrayer != null) {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (selectedTab == 2) NordicColors.OnAccentPrimary else NordicColors.SuccessMuted)
+                            )
+                        }
                     }
                 }
             }
@@ -368,121 +414,16 @@ fun FocusScreen(
                 // ----------------------------------------------------
                 item(key = "focus_status_hero") {
                     if (isFocusRunningNow) {
-                        val remainingSec = when {
-                            isManualActive -> ((focus.focusUntil - nowMillis) / 1000L).coerceAtLeast(0L)
-                            activeSchedule != null -> (activeSchedule.getRemainingMillisNow() / 1000L).coerceAtLeast(0L)
-                            else -> (activePrayer!!.getRemainingMillisNow(nowDt, jumuahEnabled) / 1000L).coerceAtLeast(0L)
-                        }
-                        val timeStr = formatHms(remainingSec)
-                        val finishClock = when {
-                            isManualActive -> formatClockTime(focus.focusUntil)
-                            activeSchedule != null -> clock12(activeSchedule.endMin)
-                            else -> clock12(activePrayer!!.endTotalMinutes())
-                        }
-                        val sessionSubtitle = when {
-                            isManualActive -> "Manual Session"
-                            activeSchedule != null -> "Schedule: ${activeSchedule.label}"
-                            else -> "Prayer: ${activePrayer!!.nameEn}"
-                        }
-
-                        NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                StatusPillBadge(
-                                    label = "FOCUS SESSION ACTIVE",
-                                    tone = BadgeTone.ACCENT,
-                                    breathing = true,
-                                    icon = CyberIcons.Focus
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = sessionSubtitle,
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-
-                                Spacer(modifier = Modifier.height(14.dp))
-
-                                NordicArcGauge(
-                                    progress = (remainingSec % 3600L).toFloat() / 3600f,
-                                    size = 175.dp
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Text(
-                                            text = timeStr,
-                                            color = NordicColors.TextPrimary,
-                                            fontSize = 26.sp,
-                                            fontWeight = FontWeight.Black,
-                                            letterSpacing = 1.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "Remaining Time",
-                                            color = NordicColors.TextSecondary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "Runs until $finishClock",
-                                            color = NordicColors.AccentPrimary,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Only essential allowed apps are accessible",
-                                    color = NordicColors.TextSecondary,
-                                    fontSize = 12.sp
-                                )
-
-                                val hasPendingUnlock = focus.pendingUnlockUntil > 0L
-                                val unlockRemMs = (focus.pendingUnlockUntil - nowMillis).coerceAtLeast(0L)
-                                if (hasPendingUnlock) {
-                                    val totalSec = unlockRemMs / 1000L
-                                    val unlockTimeStr = formatHms(totalSec)
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    StatusPillBadge(
-                                        label = "Unlocking in $unlockTimeStr",
-                                        tone = BadgeTone.WARN,
-                                        breathing = true,
-                                        icon = CyberIcons.Clock
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Btn(
-                                        label = "Cancel Unlock",
-                                        icon = CyberIcons.Close,
-                                        onClick = { repo.cancelFocusUnlock() },
-                                        kind = BtnKind.GHOST
-                                    )
-                                } else if (!isManualActive && activeSchedule == null && activePrayer != null) {
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Btn(
-                                        label = "Manage in Prayer Tab",
-                                        icon = CyberIcons.Clock,
-                                        onClick = { selectedTab = 2 },
-                                        kind = BtnKind.SECONDARY
-                                    )
-                                } else {
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Btn(
-                                        label = "Stop Focus Mode",
-                                        icon = CyberIcons.Stop,
-                                        onClick = { repo.requestEndQuickFocus() },
-                                        kind = BtnKind.SECONDARY
-                                    )
-                                }
-                            }
-                        }
+                        FocusStatusHeroCard(
+                            focus = focus,
+                            isManualActive = isManualActive,
+                            activeSchedule = activeSchedule,
+                            activePrayer = activePrayer,
+                            jumuahEnabled = jumuahEnabled,
+                            onStopFocus = { repo.requestEndQuickFocus() },
+                            onCancelUnlock = { repo.cancelFocusUnlock() },
+                            onManagePrayer = { selectedTab = 2 }
+                        )
                     } else {
                         // Focus Mode Inactive
                         val nextUpcomingSched = focus.schedules
@@ -941,7 +882,6 @@ fun FocusScreen(
 
                                             val schedPendingUntil = focus.pendingScheduleUnlocks[s.id] ?: 0L
                                             val hasSchedPending = schedPendingUntil > 0L
-                                            val schedRemMs = (schedPendingUntil - nowMillis).coerceAtLeast(0L)
                                             val action = focus.pendingScheduleActions[s.id] ?: "delete"
 
                                             // Row 4: Allowed Apps Chip (Left) + Action Controls (Right)
@@ -964,10 +904,10 @@ fun FocusScreen(
                                                 Spacer(modifier = Modifier.weight(1f))
 
                                                 if (hasSchedPending) {
-                                                    val timeStr = formatHms(schedRemMs / 1000L)
                                                     val actionLabel = if (action == "delete") "Deleting" else "Disabling"
-                                                    StatusPillBadge(
-                                                        label = "$actionLabel in $timeStr",
+                                                    LiveCountdownBadge(
+                                                        targetEpochMs = schedPendingUntil,
+                                                        prefix = "$actionLabel in ",
                                                         tone = BadgeTone.WARN,
                                                         small = true
                                                     )
@@ -1030,68 +970,6 @@ fun FocusScreen(
                     }
                 }
 
-                // ----------------------------------------------------
-                // Section 2.5: Distraction & Short-Form Shield
-                // ----------------------------------------------------
-                item(key = "distraction_shield_section") {
-                    SectionHeader(
-                        title = "Distraction & Short-Form Shield",
-                        icon = CyberIcons.ShieldCheck,
-                        subtitle = "Exit short-form video feeds and algorithms while keeping communication intact"
-                    )
-                }
-
-                item(key = "distraction_yt") {
-                    DistractionItemCard(
-                        title = "Block YouTube Shorts",
-                        subtitle = "Immediately ejects Shorts back to Home feed or subscription tab",
-                        icon = CyberIcons.Movie,
-                        checked = distraction.blockYtShorts,
-                        pendingUnlockUntil = distraction.pendingUnlocks["block_yt_shorts"] ?: 0L,
-                        nowMillis = nowMillis,
-                        onCancelUnlock = { repo.cancelDistractionUnlock("block_yt_shorts") },
-                        onCheckedChange = { repo.toggleDistraction("block_yt_shorts", it) }
-                    )
-                }
-
-                item(key = "distraction_insta_reels") {
-                    DistractionItemCard(
-                        title = "Block Instagram Reels",
-                        subtitle = "Immediately exits Reels back to your main timeline and messages",
-                        icon = CyberIcons.Movie,
-                        checked = distraction.blockInstaReels,
-                        pendingUnlockUntil = distraction.pendingUnlocks["block_insta_reels"] ?: 0L,
-                        nowMillis = nowMillis,
-                        onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_reels") },
-                        onCheckedChange = { repo.toggleDistraction("block_insta_reels", it) }
-                    )
-                }
-
-                item(key = "distraction_insta_explore") {
-                    DistractionItemCard(
-                        title = "Block Instagram Explore",
-                        subtitle = "Blocks discovery algorithm and search tab to prevent doom-scrolling",
-                        icon = CyberIcons.Search,
-                        checked = distraction.blockInstaSearch,
-                        pendingUnlockUntil = distraction.pendingUnlocks["block_insta_search"] ?: 0L,
-                        nowMillis = nowMillis,
-                        onCancelUnlock = { repo.cancelDistractionUnlock("block_insta_search") },
-                        onCheckedChange = { repo.toggleDistraction("block_insta_search", it) }
-                    )
-                }
-
-                item(key = "distraction_fb_reels") {
-                    DistractionItemCard(
-                        title = "Block Facebook Reels & Videos",
-                        subtitle = "Exits Reels, Watch and video feeds (Stories and text posts stay open)",
-                        icon = CyberIcons.Movie,
-                        checked = distraction.blockFbReels,
-                        pendingUnlockUntil = distraction.pendingUnlocks["block_fb_reels"] ?: 0L,
-                        nowMillis = nowMillis,
-                        onCancelUnlock = { repo.cancelDistractionUnlock("block_fb_reels") },
-                        onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
-                    )
-                }
 
                 // ----------------------------------------------------
                 // Section 2.6: Focus & Prayer Notification Suppressor
@@ -1174,9 +1052,7 @@ fun FocusScreen(
                         }
 
                         val notifUnlockUntil = focus.pendingNotificationSuppressorUnlockUntil
-                        if (notifUnlockUntil > nowMillis) {
-                            val remSec = ((notifUnlockUntil - nowMillis).coerceAtLeast(0L)) / 1000L
-                            val timeStr = formatHms(remSec)
+                        if (notifUnlockUntil > 0L) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(
                                 modifier = Modifier
@@ -1188,13 +1064,12 @@ fun FocusScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Unlocking in $timeStr",
+                                LiveCountdownText(
+                                    targetEpochMs = notifUnlockUntil,
+                                    prefix = "Unlocking in ",
                                     color = NordicColors.AlertMuted,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = "Abort",
@@ -1256,8 +1131,6 @@ fun FocusScreen(
                         } else if (protection.isActive) {
                             val pendingAppsUnlock = focus.pendingAppsUnlockUntil
                             if (pendingAppsUnlock > 0L) {
-                                val remSec = ((pendingAppsUnlock - nowMillis) / 1000L).coerceAtLeast(0L)
-                                val timeStr = formatHms(remSec)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1279,11 +1152,11 @@ fun FocusScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Modifying allowed apps unlocking in $timeStr",
+                                        LiveCountdownText(
+                                            targetEpochMs = pendingAppsUnlock,
+                                            prefix = "Modifying allowed apps unlocking in ",
                                             color = NordicColors.TextPrimary,
                                             fontSize = 12.5.sp,
-                                            lineHeight = 16.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
@@ -1380,7 +1253,7 @@ fun FocusScreen(
                         )
                     }
                 } else {
-                    items(filteredApps.take(40), key = { it.packageName }) { app ->
+                    items(filteredApps.take(40), key = { it.packageName }, contentType = { "app_row" }) { app ->
                         val isAllowed = focus.allowedApps.contains(app.packageName)
                         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
@@ -1392,7 +1265,11 @@ fun FocusScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                                 ) {
-                                    AppIconView(drawable = app.icon, modifier = Modifier.size(32.dp))
+                                    AppIconView(
+                                        drawable = app.icon,
+                                        packageName = app.packageName,
+                                        modifier = Modifier.size(32.dp)
+                                    )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1834,7 +1711,6 @@ fun FocusScreen(
             // ==========================================
             PrayerFocusTab(
                 focus = focus,
-                nowMillis = nowMillis,
                 repo = repo
             )
         }
@@ -2089,7 +1965,6 @@ fun FocusScreen(
             allApps = apps,
             isLocked = false,
             unlockTargetMs = 0L,
-            nowMillis = nowMillis,
             onToggleApp = { pkg ->
                 scheduleFormAllowedApps = if (scheduleFormAllowedApps.contains(pkg)) {
                     scheduleFormAllowedApps - pkg
@@ -2113,7 +1988,6 @@ fun FocusScreen(
             allApps = apps,
             isLocked = isLocked,
             unlockTargetMs = unlockTarget,
-            nowMillis = nowMillis,
             onToggleApp = { pkg ->
                 repo.toggleScheduleAllowedApp(sched.id, pkg)
             },
@@ -2133,8 +2007,8 @@ internal fun DistractionItemCard(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     pendingUnlockUntil: Long = 0L,
-    nowMillis: Long = 0L,
     onCancelUnlock: () -> Unit = {},
+    nowMillis: Long = 0L,
     modifier: Modifier = Modifier
 ) {
     val isPending = pendingUnlockUntil > 0L
@@ -2187,16 +2061,15 @@ internal fun DistractionItemCard(
                 )
             }
             if (isPending) {
-                val remSec = ((pendingUnlockUntil - nowMillis) / 1000L).coerceAtLeast(0L)
-                val timeStr = formatHms(remSec)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End
                 ) {
-                    StatusPillBadge(
-                        label = "Unlocking in $timeStr",
+                    LiveCountdownBadge(
+                        targetEpochMs = pendingUnlockUntil,
+                        prefix = "Unlocking in ",
                         tone = BadgeTone.WARN,
                         small = true
                     )
@@ -2225,10 +2098,10 @@ fun ScheduleAppPickerDialog(
     allApps: List<AppItem>,
     isLocked: Boolean,
     unlockTargetMs: Long,
-    nowMillis: Long,
     onToggleApp: (String) -> Unit,
     onAbortUnlock: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    nowMillis: Long = 0L
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var tabIndex by remember { mutableStateOf(0) } // 0: User, 1: System, 2: All
@@ -2281,8 +2154,6 @@ fun ScheduleAppPickerDialog(
 
                 // Locked or Ticking Countdown Banner
                 if (unlockTargetMs > 0L) {
-                    val remSec = ((unlockTargetMs - nowMillis) / 1000L).coerceAtLeast(0L)
-                    val timeStr = formatHms(remSec)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2299,11 +2170,11 @@ fun ScheduleAppPickerDialog(
                         ) {
                             Icon(CyberIcons.Lock, contentDescription = null, tint = NordicColors.AlertMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Modifying apps unlocking in $timeStr",
+                            LiveCountdownText(
+                                targetEpochMs = unlockTargetMs,
+                                prefix = "Modifying apps unlocking in ",
                                 color = NordicColors.TextPrimary,
                                 fontSize = 12.5.sp,
-                                lineHeight = 16.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -2421,8 +2292,7 @@ fun ScheduleAppPickerDialog(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(filtered.size) { i ->
-                        val app = filtered[i]
+                    items(filtered, key = { it.packageName }, contentType = { "app_row" }) { app ->
                         val isAllowed = initialAllowed.contains(app.packageName)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -2433,7 +2303,11 @@ fun ScheduleAppPickerDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f).padding(end = 8.dp)
                             ) {
-                                AppIconView(drawable = app.icon, modifier = Modifier.size(32.dp))
+                                AppIconView(
+                                    drawable = app.icon,
+                                    packageName = app.packageName,
+                                    modifier = Modifier.size(32.dp)
+                                )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2470,6 +2344,143 @@ fun ScheduleAppPickerDialog(
                     icon = CyberIcons.Check,
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusStatusHeroCard(
+    focus: FocusState,
+    isManualActive: Boolean,
+    activeSchedule: FocusSchedule?,
+    activePrayer: PrayerSlot?,
+    jumuahEnabled: Boolean,
+    onStopFocus: () -> Unit,
+    onCancelUnlock: () -> Unit,
+    onManagePrayer: () -> Unit
+) {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(focus.focusUntil, activeSchedule, activePrayer, focus.pendingUnlockUntil) {
+        while (isActive) {
+            nowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
+    val nowDt = LocalDateTime.now()
+    val remainingSec = when {
+        isManualActive -> ((focus.focusUntil - nowMs) / 1000L).coerceAtLeast(0L)
+        activeSchedule != null -> (activeSchedule.getRemainingMillisNow() / 1000L).coerceAtLeast(0L)
+        else -> (activePrayer?.getRemainingMillisNow(nowDt, jumuahEnabled) ?: 0L) / 1000L
+    }.coerceAtLeast(0L)
+
+    val timeStr = formatHms(remainingSec)
+    val finishClock = when {
+        isManualActive -> formatClockTime(focus.focusUntil)
+        activeSchedule != null -> clock12(activeSchedule.endMin)
+        else -> activePrayer?.let { clock12(it.endTotalMinutes()) } ?: ""
+    }
+    val sessionSubtitle = when {
+        isManualActive -> "Manual Session"
+        activeSchedule != null -> "Schedule: ${activeSchedule.label}"
+        else -> "Prayer: ${activePrayer?.nameEn ?: "Salah"}"
+    }
+
+    NordicFoliageHeroCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            StatusPillBadge(
+                label = "FOCUS SESSION ACTIVE",
+                tone = BadgeTone.ACCENT,
+                breathing = true,
+                icon = CyberIcons.Focus
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = sessionSubtitle,
+                color = NordicColors.TextSecondary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            NordicArcGauge(
+                progress = (remainingSec % 3600L).toFloat() / 3600f,
+                size = 175.dp
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = timeStr,
+                        color = NordicColors.TextPrimary,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Remaining Time",
+                        color = NordicColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Runs until $finishClock",
+                        color = NordicColors.AccentPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Only essential allowed apps are accessible",
+                color = NordicColors.TextSecondary,
+                fontSize = 12.sp
+            )
+
+            val hasPendingUnlock = focus.pendingUnlockUntil > 0L
+            val unlockRemMs = (focus.pendingUnlockUntil - nowMs).coerceAtLeast(0L)
+            if (hasPendingUnlock) {
+                val totalSec = unlockRemMs / 1000L
+                val unlockTimeStr = formatHms(totalSec)
+                Spacer(modifier = Modifier.height(14.dp))
+                StatusPillBadge(
+                    label = "Unlocking in $unlockTimeStr",
+                    tone = BadgeTone.WARN,
+                    breathing = true,
+                    icon = CyberIcons.Clock
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Btn(
+                    label = "Cancel Unlock",
+                    icon = CyberIcons.Close,
+                    onClick = onCancelUnlock,
+                    kind = BtnKind.GHOST
+                )
+            } else if (!isManualActive && activeSchedule == null && activePrayer != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Btn(
+                    label = "Manage in Prayer Tab",
+                    icon = CyberIcons.Clock,
+                    onClick = onManagePrayer,
+                    kind = BtnKind.SECONDARY
+                )
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
+                Btn(
+                    label = "Stop Focus Mode",
+                    icon = CyberIcons.Stop,
+                    onClick = onStopFocus,
+                    kind = BtnKind.SECONDARY
                 )
             }
         }

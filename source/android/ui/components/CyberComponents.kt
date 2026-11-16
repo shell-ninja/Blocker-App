@@ -703,3 +703,102 @@ fun SectionHeader(
         }
     }
 }
+
+/**
+ * Isolated leaf card for Prevent Power Off with local ticking cooldown.
+ * Eliminates screen-wide 1-second recomposition while cooldown is running or idle.
+ */
+@Composable
+fun PreventPowerOffCard(
+    preventPowerOff: Boolean,
+    powerShieldCooldownUntil: Long,
+    onCheckedChange: (Boolean) -> Unit,
+    onCancelCooldown: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val hasPowerCooldown = powerShieldCooldownUntil > 0L
+
+    LaunchedEffect(powerShieldCooldownUntil) {
+        while (isActive && powerShieldCooldownUntil > System.currentTimeMillis()) {
+            nowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+        nowMs = System.currentTimeMillis()
+    }
+
+    val powerCooldownRem = (powerShieldCooldownUntil - nowMs).coerceAtLeast(0L)
+    val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
+
+    NordicMicroGridCard(modifier = modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NordicColors.CardSurfaceHero)
+                            .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = CyberIcons.Power,
+                            contentDescription = null,
+                            tint = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.AccentPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Prevent Power Off",
+                            color = NordicColors.TextPrimary,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (hasPowerCooldown && !isCooldownFinished) {
+                                val totalSec = (powerCooldownRem / 1000).coerceAtLeast(0)
+                                val h = totalSec / 3600
+                                val m = (totalSec % 3600) / 60
+                                val s = totalSec % 60
+                                val timeStr = String.format("%02d:%02d:%02d", h, m, s)
+                                "Cooldown: $timeStr before unlock"
+                            } else if (isCooldownFinished) {
+                                "Cooldown complete — Tap toggle to turn off"
+                            } else {
+                                "Blocks power menu tampering while protected"
+                            },
+                            color = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+                NordicSwitch(
+                    checked = preventPowerOff,
+                    onCheckedChange = onCheckedChange
+                )
+            }
+
+            if (hasPowerCooldown && !isCooldownFinished) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Btn(
+                        label = "Cancel Cooldown",
+                        icon = CyberIcons.Close,
+                        onClick = onCancelCooldown,
+                        kind = BtnKind.GHOST
+                    )
+                }
+            }
+        }
+    }
+}

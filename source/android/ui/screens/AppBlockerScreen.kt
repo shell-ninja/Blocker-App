@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +37,7 @@ fun AppBlockerScreen(
     var searchQuery by remember { mutableStateOf("") }
     var filterTab by remember { mutableStateOf(0) } // 0 = All, 1 = Blocked, 2 = User, 3 = System
     var selectedAppForLimit by remember { mutableStateOf<AppItem?>(null) }
+    var appsSubTab by remember { mutableStateOf(0) } // 0 = Block Apps, 1 = Daily Usage
 
     val filteredApps = remember(apps, searchQuery, filterTab) {
         apps.filter { app ->
@@ -60,85 +62,259 @@ fun AppBlockerScreen(
             .background(Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        SectionHeader(
-            title = "Apps & packages",
-            icon = CyberIcons.Apps,
-            subtitle = "Prevent launches of distracting or addictive applications"
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Search Input
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search installed apps...", color = NordicColors.TextSecondary, fontSize = 13.5.sp) },
-            leadingIcon = {
-                Icon(
-                    imageVector = CyberIcons.Search,
-                    contentDescription = null,
-                    tint = NordicColors.TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = NordicColors.CardSurfaceHero,
-                unfocusedContainerColor = NordicColors.CardSurfaceHero,
-                focusedTextColor = NordicColors.TextPrimary,
-                unfocusedTextColor = NordicColors.TextPrimary,
-                focusedBorderColor = NordicColors.AccentPrimary,
-                unfocusedBorderColor = NordicColors.HairlineBorder
+        // Top Sub-Tab Switcher: Block Apps vs Usage Limits vs Daily Usage
+        val activeKeycapBrush = remember {
+            Brush.verticalGradient(
+                listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
             )
-        )
+        }
+        val activeKeycapBorder = remember {
+            Brush.verticalGradient(
+                listOf(Color(0xFFA78BFA).copy(alpha = 0.85f), Color(0xFF4C1D95).copy(alpha = 0.35f))
+            )
+        }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Filter Tabs
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Recessed3DWell(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(4.dp)
         ) {
-            val tabs = listOf("All", "Blocked (${apps.count { it.isBlocked }})", "User", "System")
-            tabs.forEachIndexed { index, label ->
-                val isSelected = filterTab == index
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 1. Block Apps
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSelected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
-                        .border(1.dp, if (isSelected) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
-                        .clickable { filterTab = index }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (appsSubTab == 0) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
+                        )
+                        .clickable { appsSubTab = 0 }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = label,
-                        color = if (isSelected) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        text = "Block Apps",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (appsSubTab == 0) Color.White else NordicColors.TextSecondary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // 2. Usage Limits
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (appsSubTab == 1) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
+                        )
+                        .clickable { appsSubTab = 1 }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Usage Limits",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (appsSubTab == 1) Color.White else NordicColors.TextSecondary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // 3. Daily Usage
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(
+                            if (appsSubTab == 2) {
+                                Modifier
+                                    .background(activeKeycapBrush)
+                                    .border(1.2.dp, activeKeycapBorder, RoundedCornerShape(12.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
+                        )
+                        .clickable { appsSubTab = 2 }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Daily Usage",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (appsSubTab == 2) Color.White else NordicColors.TextSecondary,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        if (appsSubTab == 2) {
+            DailyAppUsageView(repo = repo)
+        } else if (appsSubTab == 1) {
+            SectionHeader(
+                title = "App Usage Limits",
+                icon = CyberIcons.Clock,
+                subtitle = "Set daily runtime allowances before apps are automatically locked"
+            )
 
-        if (isRefreshing && apps.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = NordicColors.AccentPrimary)
-            }
-        } else {
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Search Input
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search apps to limit...", color = NordicColors.TextSecondary, fontSize = 13.5.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = CyberIcons.Search,
+                        contentDescription = null,
+                        tint = NordicColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = NordicColors.CardSurfaceHero,
+                    unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                    focusedTextColor = NordicColors.TextPrimary,
+                    unfocusedTextColor = NordicColors.TextPrimary,
+                    focusedBorderColor = NordicColors.AccentPrimary,
+                    unfocusedBorderColor = NordicColors.HairlineBorder
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val appsWithLimits = remember(apps) { apps.count { it.limitMinutes > 0 } }
+            Text(
+                text = "$appsWithLimits application(s) have daily time limits active",
+                color = NordicColors.AccentSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(filteredApps, key = { it.packageName }) { app ->
+                items(filteredApps, key = { it.packageName }, contentType = { "app_row_limit" }) { app ->
                     AppRow(
                         app = app,
                         onToggle = { repo.toggleAppBlock(app.packageName) },
-                        onLimitClick = { selectedAppForLimit = app }
+                        onLimitClick = { selectedAppForLimit = app },
+                        showLimitSetterOnly = true
                     )
+                }
+            }
+        } else {
+            SectionHeader(
+                title = "Apps & packages",
+                icon = CyberIcons.Apps,
+                subtitle = "Prevent launches of distracting or addictive applications"
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Search Input
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search installed apps...", color = NordicColors.TextSecondary, fontSize = 13.5.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = CyberIcons.Search,
+                        contentDescription = null,
+                        tint = NordicColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = NordicColors.CardSurfaceHero,
+                    unfocusedContainerColor = NordicColors.CardSurfaceHero,
+                    focusedTextColor = NordicColors.TextPrimary,
+                    unfocusedTextColor = NordicColors.TextPrimary,
+                    focusedBorderColor = NordicColors.AccentPrimary,
+                    unfocusedBorderColor = NordicColors.HairlineBorder
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Filter Tabs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val tabs = listOf("All", "Blocked (${apps.count { it.isBlocked }})", "User", "System")
+                tabs.forEachIndexed { index, label ->
+                    val isSelected = filterTab == index
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSelected) NordicColors.AccentPrimary else NordicColors.CardSurfaceHero)
+                            .border(1.dp, if (isSelected) NordicColors.AccentPrimary else NordicColors.HairlineBorder, RoundedCornerShape(10.dp))
+                            .clickable { filterTab = index }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (isRefreshing && apps.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = NordicColors.AccentPrimary)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredApps, key = { it.packageName }, contentType = { "app_row" }) { app ->
+                        AppRow(
+                            app = app,
+                            onToggle = { repo.toggleAppBlock(app.packageName) },
+                            onLimitClick = { selectedAppForLimit = app },
+                            showLimitSetterOnly = false
+                        )
+                    }
                 }
             }
         }
@@ -218,89 +394,131 @@ fun AppBlockerScreen(
 private fun AppRow(
     app: AppItem,
     onToggle: () -> Unit,
-    onLimitClick: () -> Unit
+    onLimitClick: () -> Unit,
+    showLimitSetterOnly: Boolean = false
 ) {
-    val shape = RoundedCornerShape(16.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(NordicColors.CardSurface)
-            .border(1.dp, if (app.isBlocked) NordicColors.AccentPrimary.copy(alpha = 0.35f) else NordicColors.HairlineBorder, shape)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Elevated3DCard(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(12.dp)
     ) {
-        // App Icon
-        AppIconView(
-            drawable = app.icon,
-            modifier = Modifier.size(42.dp)
-        )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // App Icon on Raised Squircle Pedestal
+                RaisedSquirclePedestal(size = 44.dp) {
+                    AppIconView(
+                        drawable = app.icon,
+                        modifier = Modifier.size(34.dp),
+                        packageName = app.packageName
+                    )
+                }
 
-        Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-        // Label and Usage
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = app.label,
-                color = NordicColors.TextPrimary,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val usageMins = app.todayUsageMs / 60_000L
-                Text(
-                    text = "${usageMins}m today",
-                    color = NordicColors.TextSecondary,
-                    fontSize = 11.5.sp
-                )
-
-                if (app.limitMinutes > 0) {
-                    Text(text = " • ", color = NordicColors.TrackMuted, fontSize = 11.sp)
+                // Label and Usage
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Limit: ${app.limitMinutes}m",
-                        color = NordicColors.AlertMuted,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
+                        text = app.label,
+                        color = NordicColors.TextPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val usageMins = app.todayUsageMs / 60_000L
+                        Text(
+                            text = "${usageMins}m today",
+                            color = NordicColors.TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+
+                        if (app.limitMinutes > 0) {
+                            Text(text = " • ", color = NordicColors.TrackMuted, fontSize = 11.sp)
+                            Text(
+                                text = "Limit: ${app.limitMinutes}m",
+                                color = NordicColors.AlertMuted,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // Limit Picker Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (app.limitMinutes > 0) NordicColors.AccentPrimary.copy(alpha = 0.25f) else Color(0xFF1E153D))
+                        .border(1.dp, if (app.limitMinutes > 0) NordicColors.AccentPrimary else Color(0xFF2B224D), RoundedCornerShape(8.dp))
+                        .clickable(onClick = onLimitClick)
+                        .padding(horizontal = 9.dp, vertical = 6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(
+                            imageVector = CyberIcons.Clock,
+                            contentDescription = null,
+                            tint = if (app.limitMinutes > 0) NordicColors.AccentPrimary else NordicColors.TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        if (showLimitSetterOnly) {
+                            Text(
+                                text = if (app.limitMinutes > 0) "${app.limitMinutes}m" else "Set limit",
+                                color = if (app.limitMinutes > 0) NordicColors.AccentPrimary else NordicColors.TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                if (!showLimitSetterOnly) {
+                    Spacer(modifier = Modifier.width(10.dp))
+                    NordicSwitch(
+                        checked = app.isBlocked,
+                        onCheckedChange = { onToggle() }
+                    )
+                }
+            }
+
+            // Recessed usage track when limit is configured
+            if (app.limitMinutes > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val usageRatio = ((app.todayUsageMs / 60_000L).toFloat() / app.limitMinutes.toFloat()).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF080512))
+                        .border(0.6.dp, Color(0xFF1E153D), RoundedCornerShape(2.dp))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(usageRatio)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                if (usageRatio >= 1f) NordicColors.AlertMuted
+                                else NordicColors.AccentPrimary
+                            )
                     )
                 }
             }
         }
-
-        // Limit Picker Button
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(NordicColors.CardSurfaceHero)
-                .clickable(onClick = onLimitClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-        ) {
-            Icon(
-                imageVector = CyberIcons.Clock,
-                contentDescription = null,
-                tint = NordicColors.TextSecondary,
-                modifier = Modifier.size(15.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        // Block Toggle Switch
-        NordicSwitch(
-            checked = app.isBlocked,
-            onCheckedChange = { onToggle() }
-        )
     }
 }
 
 @Composable
 fun AppIconView(
     drawable: Drawable?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    packageName: String? = null
 ) {
     if (drawable == null) {
         Box(
@@ -319,19 +537,30 @@ fun AppIconView(
         return
     }
 
-    val bitmap = remember(drawable) {
-        val width = drawable.intrinsicWidth.takeIf { it > 0 } ?: 96
-        val height = drawable.intrinsicHeight.takeIf { it > 0 } ?: 96
-        val bm = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(bm)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        bm.asImageBitmap()
+    val bitmap = remember(drawable, packageName) {
+        if (packageName != null) {
+            com.blocker.ui.components.AppIconCache.getOrCreate(packageName, drawable)
+        } else {
+            val targetSize = 96
+            val bm = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bm)
+            drawable.setBounds(0, 0, targetSize, targetSize)
+            drawable.draw(canvas)
+            bm.asImageBitmap()
+        }
     }
 
-    Image(
-        bitmap = bitmap,
-        contentDescription = null,
-        modifier = modifier.clip(RoundedCornerShape(12.dp))
-    )
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = null,
+            modifier = modifier.clip(RoundedCornerShape(12.dp))
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(CyberCardSurface)
+        )
+    }
 }

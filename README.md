@@ -2,17 +2,17 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.8`
+# Blocker `v1.0.6.9`
 
-> **Current Version:** `v1.0.6.8` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.6.9` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with Pure Kotlin, Jetpack Compose, a native C++ matching engine, and Android Accessibility Services.
 
 > [!IMPORTANT]
 > **Recommendation: Install the Debug Version First!**  
-> We strongly recommend installing and testing the **Debug version** (`Blocker-debug-1.0.6.8.apk`) before installing the Release build.  
+> We strongly recommend installing and testing the **Debug version** (`Blocker-debug-1.0.6.9.apk`) before installing the Release build.  
 > - **Test with 3-Second Timers:** The Debug build uses short **3-second** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
-> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-1.0.6.8.apk`), which enforces real **1 to 30 day** / 24-hour covenant delayed-unlock timers with strict anti-tamper security and no backdoors.
+> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-1.0.6.9.apk`), which enforces real **1 to 30 day** / 24-hour covenant delayed-unlock timers with strict anti-tamper security and no backdoors.
 
 > [!WARNING]
 > **Play Protect Warning During Installation**  
@@ -30,26 +30,32 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## What's New in v1.0.6.8
+## What's New in v1.0.6.9
 
-- **Incognito & Private Tab Blocker (`Web` Tab):**
-  - Automatically detects and exits active Incognito, Private, InPrivate, and Secret browsing sessions across major Android browsers (Chrome, Brave, Edge, Firefox/Fenix/Focus, Samsung Internet, Opera, Vivaldi, Kiwi, DuckDuckGo, and Mi Browser) with zero false positives on normal tabs or browser overflow menus.
-  - Managed via a dedicated **Incognito & Private Tab Blocker** card on the **Web** screen (immediate ON, countdown-locked OFF while Master Protection is active).
-- **SafeSearch & Query Guard (`Web` Tab):**
-  - Enforces safe browsing at Stage-0 across Google, Bing, DuckDuckGo, Yahoo, Brave Search, Yandex, and Ecosia by blocking SafeSearch-off query parameters (`safe=off`, `adlt=off`, `kp=-2`, etc.), blocking attempts to select `"Off"` or `"Blur"` on SafeSearch settings pages, and scanning decoded search queries (`q=`, `p=`, `text=`) against the native C++ engine and custom keywords while honoring whitelisted phrases.
-  - Managed via the **SafeSearch & Query Guard** card on the **Web** screen with standard protection delay locks when disabling.
-- **Focus & Prayer Notification Suppressor (`Focus` Tab):**
-  - Added `BlockerNotificationListenerService` to automatically silence notifications from blocked apps during active **Focus**, **Study**, **Daily Schedule**, and **Prayer** sessions while always preserving incoming calls, missed calls, alarms, navigation, SMS/messaging essentials, whitelisted session apps, and Blocker's own status notifications.
-  - Includes a **Notification Suppressor** card on the **Focus** tab (`Granted` / `Permission Required` status pill, single-tap `"Grant Notification Access"` launcher, smart Settings allow-gate during grant and anti-tamper lock when armed, and countdown-protected toggle).
-- **Custom Manual Focus Duration Input:**
-  - Added a `"Custom"` chip alongside the preset Focus durations (`15m`–`4h`) with an inline **Custom Duration (`1m – 24h`)** selector featuring single-line `Hours` (`0–23`) and `Minutes` (`0–59`) numeric inputs, `-` / `+` steppers, keyboard clearance, and `HH:MM:SS` active timer display.
-- **Prayer Time (Salah) Focus Mode (`Prayer` Tab):**
-  - Added a dedicated **Prayer** tab next to `Focus` and `Study` for configuring daily Salah focus windows (**Fajr**, **Dhuhr**, **Asr**, **Maghrib**, **Isha**) plus automatic **Jumu'ah (Friday)** replacement on Fridays.
-  - Supports customizable start times and focus durations per prayer, optional **Auto Do Not Disturb** synchronization, live next-prayer countdown status, and Protection delay locks when attempting to disable armed prayer windows.
-- **Refreshed Royal Obsidian UI & Screenshots:**
-  - Updated all store/documentation previews showcasing Home analytics, Focus custom duration, Whitelist picker, Study Mode, Prayer Mode, Distraction Shields, Apps & Web filtering, and Settings.
-- **Core Protection & Stability (from v1.0.6.7+):**
-  - Conditional `ETag` + web-fallback GitHub update checker (`HTTP 403` resilient), live 1-second reactive countdown tickers, DND & Device Admin smart allow-gates, exact blocked URL/keyword HUD reporting, and surgical Facebook Reels ejection.
+- **Strict Focus Mode App Blocking & Exact System Whitelist:**
+  - Enforced instantaneous (0ms) app blocking during manual Focus, Daily Schedules, and Prayer Focus sessions: any non-allowed application is kicked to Home with an instant blackout shield and counted in daily blocked statistics.
+  - Eliminated all risky `contains("android")` substring matching in favor of an exact system whitelist (`isStrictCoreSystemExempt`): only exact `"com.android.systemui"`, exact `"android"`, Blocker package, default launcher, active IMEs, and dialers are exempt. Settings (`com.android.settings`) is blocked during Focus Mode unless explicitly whitelisted or launching permission intents.
+  - Added dual-engine enforcement: runs on every Accessibility event and backed by a 250ms foreground watchdog (`BlockerForegroundService`) to ensure non-allowed apps cannot stay in the foreground.
+- **Dedicated Distraction Shields & Clean Page Hierarchy:**
+  - Cleaned up the **Focus** page to strictly house Focus Session Status/Timer, Daily Schedules, Allowed Essential Apps Whitelist, and Focus Notification Suppressor.
+  - Social media and short-form distraction controls are unified on the **Home** Executive Dashboard:
+    - **Separate Instagram Shields:** Independent toggles for **"Block Instagram Reels"** (`block_insta_reels`) and **"Block Instagram Explore"** (`block_insta_search`).
+    - **Complete Facebook Video & Reels Shield:** Blocks both Facebook Reels and all playing Facebook Videos (Watch/Video tabs, dedicated video player classes `VideoPlayer`, `FullScreenVideo`, `WatchFeed`, `VideoHome`, `Tahoe`, etc., active playback controls `"Pause video"`, `"Enter fullscreen"`, `"Rewind 10 seconds"`, and click-to-play thumbnails) while **100% preserving Facebook Stories** (`isFacebookStoryViewerOrStoryClick` evaluated first).
+    - **YouTube Shorts Shield:** Rapid ejection from Shorts player back to subscriptions or timeline.
+- **Focus Mode Notification Bar Turn-off Time:**
+  - Streamlined the notification panel during active Focus sessions: removed CPU-draining chronometer ticking and progress bars in favor of a clean, quiet ongoing notification: `"Focus Mode Active  •  Focus mode will be off at [time]"` which dismisses automatically upon completion.
+- **Onboarding Keep-Alive & Unrestricted Battery Usage Option:**
+  - Added an **"Unrestricted Battery Usage"** row to the initial permission setup with title (`maxLines = 1`), subtitle, and lifecycle intent tracking.
+  - Enhanced permission lifecycle so the app never accidentally closes or minimizes when navigating to Android Settings during onboarding, requiring core permissions before the final **"Start Protection & Enter Blocker"** button.
+- **3D Tactile Card Architecture & Visual Design:**
+  - Modernized the UI with multi-stop vertical beveled borders and purple ambient/spot colored shadows (`ambientColor = Color.Black, spotColor = Color(0xFF7C3AED)`).
+  - Upgraded the Home screen with an Executive Dashboard, 3-tile bento, and recessed 3D well for the Daily Blocked Activity chart.
+- **Daily App Usage Studio & Usage Limits (`App Blocker` Tab):**
+  - Added a 3-way switcher: **"Block Apps"**, **"Usage Limits"**, and **"Daily Usage"** with interactive screen time bar charts and top app breakdown.
+- **Local Backup & Restore (`Settings` Tab):**
+  - Added local encrypted/checksummed backup and restore for focus schedules, allowed apps, and custom blocking rules.
+- **Incognito & SafeSearch Guard (`Web` Tab):**
+  - Real-time Stage-0 browser inspection preventing private tabs and enforcing SafeSearch parameters across all major Android browsers.
 
 ---
 
@@ -237,7 +243,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```
 * Uses **3-second** delay timers for protection unlocks so you do not get locked out while testing.
 * Automatically imports blocklists, increments the build number, patches Android project files, and compiles.
-* Outputs the binary to: `apk/Blocker-debug-1.0.6.8.apk`.
+* Outputs the binary to: `apk/Blocker-debug-1.0.6.9.apk`.
 
 #### Release Build (When Ready for Real Protection):
 ```bash
@@ -245,7 +251,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```
 * Enforces real **24-hour / 1 to 30 day** delayed-unlock timers.
 * Strict anti-tamper security: settings changes cannot be bypassed without waiting the full duration.
-* Outputs the binaries to: `apk/Blocker-release-1.0.6.8.apk` and `apk/Blocker-debug-1.0.6.8.apk`.
+* Outputs the binaries to: `apk/Blocker-release-1.0.6.9.apk` and `apk/Blocker-debug-1.0.6.9.apk`.
 
 ### 3. Install on Device
 

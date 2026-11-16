@@ -3,6 +3,7 @@ package com.blocker
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Bundle
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,10 @@ object PermissionFlowTracker {
     var lastDndPermissionRequestMs: Long = 0L
     @Volatile
     var lastNotificationAccessRequestMs: Long = 0L
+    @Volatile
+    var lastBatteryPermissionRequestMs: Long = 0L
+    @Volatile
+    var isOnPermissionSetupScreen: Boolean = true
 }
 
 class MainActivity : ComponentActivity() {
@@ -33,6 +38,8 @@ class MainActivity : ComponentActivity() {
             set(value) {
                 PermissionFlowTracker.isLaunchingPermissionIntent = value
             }
+        @Volatile
+        var requestedTab: String? = null
     }
 
     private lateinit var repo: BlockerRepository
@@ -40,6 +47,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val tab = intent?.getStringExtra("tab")
+        if (tab != null) {
+            requestedTab = tab
+        }
 
         BlockerStore.autoClampStuckTimers(this)
         repo = BlockerRepository(this)
@@ -69,30 +81,60 @@ class MainActivity : ComponentActivity() {
         if (BlockerNotificationListenerService.isGranted(this)) {
             PermissionFlowTracker.lastNotificationAccessRequestMs = 0L
         }
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm?.isIgnoringBatteryOptimizations(packageName) == true) {
+            PermissionFlowTracker.lastBatteryPermissionRequestMs = 0L
+        }
+        val isActivated = BlockerStore.isInitialSetupActivated(this)
+        val shouldKeepAlive = !isActivated || PermissionFlowTracker.isOnPermissionSetupScreen || PermissionFlowTracker.isLaunchingPermissionIntent
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-        am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
+        am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(!shouldKeepAlive) } }
         if (::repo.isInitialized) {
             repo.refreshAll()
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val tab = intent?.getStringExtra("tab")
+        if (tab != null) {
+            requestedTab = tab
+        }
+    }
+
     override fun onStop() {
         super.onStop()
+        val isActivated = BlockerStore.isInitialSetupActivated(this)
+        val shouldKeepAlive = !isActivated || PermissionFlowTracker.isOnPermissionSetupScreen || PermissionFlowTracker.isLaunchingPermissionIntent
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        if (shouldKeepAlive) {
+            am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(false) } }
+            // Keep alive and visible in Recents so user can switch between Settings and App
+            return
+        }
         am?.appTasks?.forEach { runCatching { it.setExcludeFromRecents(true) } }
-        if (!isChangingConfigurations && !PermissionFlowTracker.isLaunchingPermissionIntent) {
-            finishAndRemoveTask()
+        if (!isChangingConfigurations) {
+            finish()
         }
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (PermissionFlowTracker.isLaunchingPermissionIntent) return
-        finishAndRemoveTask()
+        val isActivated = BlockerStore.isInitialSetupActivated(this)
+        val shouldKeepAlive = !isActivated || PermissionFlowTracker.isOnPermissionSetupScreen || PermissionFlowTracker.isLaunchingPermissionIntent
+        if (shouldKeepAlive) return
+        finish()
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        finishAndRemoveTask()
+        val isActivated = BlockerStore.isInitialSetupActivated(this)
+        val shouldKeepAlive = !isActivated || PermissionFlowTracker.isOnPermissionSetupScreen
+        if (shouldKeepAlive) {
+            moveTaskToBack(true)
+            return
+        }
+        finish()
     }
 }

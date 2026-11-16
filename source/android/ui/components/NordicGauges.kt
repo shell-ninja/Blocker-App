@@ -71,13 +71,36 @@ fun BrandTopBar(
             fontWeight = FontWeight.SemiBold
         )
 
-        // Right shield/status vector icon
-        Icon(
-            imageVector = Icons.Rounded.Shield,
-            contentDescription = "Status",
-            tint = if (isProtected) NordicColors.AccentPrimary else NordicColors.AlertMuted,
-            modifier = Modifier.size(18.dp)
-        )
+        // Right live status pill with glowing 3D status dot
+        val pillBg = if (isProtected) Color(0xFF1E153D) else Color(0xFF241420)
+        val pillBorder = if (isProtected) Color(0xFF7C3AED).copy(alpha = 0.5f) else Color(0xFFF43F5E).copy(alpha = 0.4f)
+        val dotColor = if (isProtected) Color(0xFF10B981) else Color(0xFFF43F5E)
+        val statusText = if (isProtected) "Protected" else "Standby"
+
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(pillBg)
+                .border(1.dp, pillBorder, RoundedCornerShape(16.dp))
+                .padding(horizontal = 9.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+            )
+            Text(
+                text = statusText,
+                color = NordicColors.TextPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
@@ -127,20 +150,11 @@ fun HeroNumeral(
     }
 }
 
-/**
- * Solid-to-Dotted Circular Arc Gauge (NordicArcGauge):
- * Draws a 2.5.dp solid 0xFFECEFF4 arc for active progress ending in a hollow 5.dp 0xFFECEFF4
- * circle node, transitioning seamlessly into evenly spaced 2.dp circular dots in 0xFF3B4154.
- */
 @Composable
-fun NordicArcGauge(
-    progress: Float,
-    modifier: Modifier = Modifier,
-    size: Dp = 150.dp,
-    content: (@Composable BoxScope.() -> Unit)? = null
-) {
-    val p = progress.coerceIn(0f, 1f)
-
+private fun rememberArcPulse(active: Boolean): Pair<Float, Float> {
+    if (!active) {
+        return Pair(1f, 0f)
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "arc_pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -160,6 +174,23 @@ fun NordicArcGauge(
         ),
         label = "pulse_alpha"
     )
+    return Pair(pulseScale, pulseAlpha)
+}
+
+/**
+ * Solid-to-Dotted Circular Arc Gauge (NordicArcGauge):
+ * Draws a 2.5.dp solid 0xFFECEFF4 arc for active progress ending in a hollow 5.dp 0xFFECEFF4
+ * circle node, transitioning seamlessly into evenly spaced 2.dp circular dots in 0xFF3B4154.
+ */
+@Composable
+fun NordicArcGauge(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    size: Dp = 150.dp,
+    content: (@Composable BoxScope.() -> Unit)? = null
+) {
+    val p = progress.coerceIn(0f, 1f)
+    val (pulseScale, pulseAlpha) = rememberArcPulse(active = p > 0f)
 
     Box(
         modifier = modifier.size(size),

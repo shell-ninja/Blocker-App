@@ -183,6 +183,8 @@ if "BlockerAccessibilityService" not in t:
         android:name=".BlockerAccessibilityService"
         android:label="@string/app_name"
         android:exported="false"
+        android:stopWithTask="false"
+        android:foregroundServiceType="specialUse"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
         <intent-filter>
             <action android:name="android.accessibilityservice.AccessibilityService"/>
@@ -190,6 +192,9 @@ if "BlockerAccessibilityService" not in t:
         <meta-data
             android:name="android.accessibilityservice"
             android:resource="@xml/accessibility_service_config"/>
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="accessibility_protection_engine"/>
     </service>
 
     <receiver
@@ -298,6 +303,31 @@ if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)
 
+# Upgrade BlockerAccessibilityService declaration with foregroundServiceType, stopWithTask and property
+t = read(mf)
+if 'android:name=".BlockerAccessibilityService"' in t:
+    changed = False
+    m = re.search(r'(<service\s+android:name="\.BlockerAccessibilityService"[^>]*)(>)', t)
+    if m:
+        svc_tag = m.group(1)
+        new_tag = svc_tag
+        if 'android:stopWithTask="false"' not in svc_tag:
+            new_tag += '\n        android:stopWithTask="false"'
+        if 'android:foregroundServiceType="specialUse"' not in svc_tag:
+            new_tag += '\n        android:foregroundServiceType="specialUse"'
+        if new_tag != svc_tag:
+            t = t[:m.start(1)] + new_tag + t[m.end(1):]
+            changed = True
+    m_full = re.search(r'(<service\s+android:name="\.BlockerAccessibilityService".*?)(</service>)', t, re.DOTALL)
+    if m_full and 'accessibility_protection_engine' not in m_full.group(1):
+        prop = """        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="accessibility_protection_engine"/>"""
+        t = t[:m_full.start(2)] + prop + "\n    " + t[m_full.start(2):]
+        changed = True
+    if changed:
+        write(mf, t)
+
 # FileProvider for in-app APK installer
 t = read(mf)
 if "androidx.core.content.FileProvider" not in t:
@@ -314,15 +344,19 @@ if "androidx.core.content.FileProvider" not in t:
     t = t.replace("</application>", provider_xml + "</application>", 1)
     write(mf, t)
 
-# 4c. Set excludeFromRecents, autoRemoveFromRecents, singleTask and resizeableActivity=false on MainActivity
+# 4c. Set excludeFromRecents="false", autoRemoveFromRecents="false", singleTask and resizeableActivity=false on MainActivity
 t = read(mf)
 if 'android:name=".MainActivity"' in t:
     if 'android:windowSoftInputMode="adjustResize"' not in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:windowSoftInputMode="adjustResize"', 1)
-    if 'android:excludeFromRecents="true"' not in t:
-        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="true"', 1)
-    if 'android:autoRemoveFromRecents="true"' not in t:
-        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:autoRemoveFromRecents="true"', 1)
+    if 'android:excludeFromRecents=' in t:
+        t = re.sub(r'android:excludeFromRecents="[^"]*"', 'android:excludeFromRecents="false"', t)
+    else:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:excludeFromRecents="false"', 1)
+    if 'android:autoRemoveFromRecents=' in t:
+        t = re.sub(r'android:autoRemoveFromRecents="[^"]*"', 'android:autoRemoveFromRecents="false"', t)
+    else:
+        t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:autoRemoveFromRecents="false"', 1)
     if 'android:resizeableActivity="false"' not in t:
         t = t.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n        android:resizeableActivity="false"', 1)
     if 'android:noHistory="true"' in t:
@@ -377,8 +411,8 @@ patch = digits[2] if len(digits) > 2 else 0
 hotfix = digits[3] if len(digits) > 3 else 0
 
 semver_base = (major * 1_000_000) + (minor * 100_000) + (patch * 1_000) + (hotfix * 100)
-# Minimum 1006811 ensures monotonic increase over any previous v1.0.6.8 / v1.0.6.7 (1006810) build to prevent INSTALL_FAILED_VERSION_DOWNGRADE
-version_code = max(1006811, semver_base + (build_number % 100) + 100)
+# Minimum 1006912 ensures monotonic increase over any previous v1.0.6.8 (1006911) build to prevent INSTALL_FAILED_VERSION_DOWNGRADE
+version_code = max(1006912, semver_base + (build_number % 100) + 100)
 g, n1 = re.subn(r"versionCode\s+\d+", f"versionCode {version_code}", g, count=1)
 g, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{app_version}"', g, count=1)
 if not n1 or not n2:

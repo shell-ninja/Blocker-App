@@ -13,7 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,8 +47,22 @@ fun BlockerAppRoot(
     val securityLock by repo.securityLockState.collectAsState()
 
     var currentTab by remember { mutableStateOf(NavTab.HOME) }
-    val isOnboardingDone = remember { repo.isOnboardingCompleted() }
-    var showOnboarding by remember { mutableStateOf(!isOnboardingDone && !perms.accessibility) }
+
+    LaunchedEffect(com.blocker.MainActivity.requestedTab) {
+        if (com.blocker.MainActivity.requestedTab == "focus") {
+            currentTab = NavTab.FOCUS
+            com.blocker.MainActivity.requestedTab = null
+        }
+    }
+    val isActivated = remember { repo.isInitialSetupActivated() }
+    var showOnboarding by remember { mutableStateOf(!isActivated) }
+
+    DisposableEffect(showOnboarding) {
+        com.blocker.PermissionFlowTracker.isOnPermissionSetupScreen = showOnboarding
+        onDispose {
+            com.blocker.PermissionFlowTracker.isOnPermissionSetupScreen = false
+        }
+    }
     val isAppLocked = securityLock.isParentLockEnabled && !securityLock.isAppUnlocked
 
     // Back button interception during active lockouts
@@ -82,6 +98,8 @@ fun BlockerAppRoot(
                             repo = repo,
                             onComplete = {
                                 repo.setOnboardingCompleted(true)
+                                repo.setInitialSetupActivated(true)
+                                repo.toggleProtection(true)
                                 showOnboarding = false
                             }
                         )
@@ -127,14 +145,36 @@ fun CyberBottomNav(
     onTabSelected: (NavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val navShape = RoundedCornerShape(24.dp)
+    val navShape = RoundedCornerShape(28.dp)
+    val dockBorder = remember {
+        Brush.verticalGradient(
+            listOf(
+                Color(0xFFA78BFA).copy(alpha = 0.50f),
+                Color(0xFF3B2B6E).copy(alpha = 0.25f),
+                Color(0xFF05030A).copy(alpha = 0.90f)
+            )
+        )
+    }
+    val dockBg = remember {
+        Brush.verticalGradient(
+            listOf(Color(0xFF1B1438), Color(0xFF100B24), Color(0xFF080514))
+        )
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                this.shadowElevation = 18.dp.toPx()
+                this.shape = navShape
+                this.clip = false
+                this.spotShadowColor = Color(0xFF7C3AED)
+                this.ambientShadowColor = Color(0xFF7C3AED)
+            }
             .clip(navShape)
-            .background(NordicColors.CardSurface)
-            .border(1.dp, NordicColors.HairlineBorder, navShape)
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .background(dockBg)
+            .border(1.2.dp, dockBorder, navShape)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -143,18 +183,34 @@ fun CyberBottomNav(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .clickable { onTabSelected(tab) }
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val activePillBrush = remember {
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
+                    )
+                }
+                val activePillBorder = remember {
+                    Brush.verticalGradient(
+                        listOf(Color(0xFFA78BFA).copy(alpha = 0.8f), Color(0xFF4C1D95).copy(alpha = 0.3f))
+                    )
+                }
+
                 Box(
                     modifier = Modifier
-                        .size(width = 46.dp, height = 28.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            if (isSelected) NordicColors.AccentPrimary
-                            else Color.Transparent
+                        .size(width = 48.dp, height = 30.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .then(
+                            if (isSelected) {
+                                Modifier
+                                    .background(activePillBrush)
+                                    .border(1.2.dp, activePillBorder, RoundedCornerShape(15.dp))
+                            } else {
+                                Modifier.background(Color.Transparent)
+                            }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -170,7 +226,9 @@ fun CyberBottomNav(
                     text = tab.label,
                     color = if (isSelected) NordicColors.TextPrimary else NordicColors.TextSecondary,
                     fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }

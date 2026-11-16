@@ -11,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -117,6 +118,7 @@ class BlockerForegroundService : Service {
         unregisterScreenReceiver()
         runCatching { updateExecutor.shutdownNow() }
         runCatching { watchdogExecutor.shutdownNow() }
+        runCatching { FocusNotificationManager.cancelTimer(this) }
         super.onDestroy()
         if (BlockerStore.active(this)) {
             start(this)
@@ -153,9 +155,10 @@ class BlockerForegroundService : Service {
         stopWatchdog()
         watchdogFuture = watchdogExecutor.scheduleWithFixedDelay({
             val elapsed = android.os.SystemClock.elapsedRealtime()
-            if (elapsed - lastPrayerDndSyncElapsed >= 2000L) {
+            if (elapsed - lastPrayerDndSyncElapsed >= 1000L) {
                 lastPrayerDndSyncElapsed = elapsed
                 runCatching { BlockerStore.syncPrayerAutoDnd(this) }
+                runCatching { FocusNotificationManager.onTick(this) }
                 runCatching {
                     val snap = com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
                     val sessionNow = snap.isManualFocusRunningNow() ||
@@ -180,17 +183,32 @@ class BlockerForegroundService : Service {
 
     private fun inspectForegroundState() {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
+        val topPkg = getTopPackage() ?: return
+        if (topPkg == packageName) return
+        val isBn = BlockerStore.popupLanguage(this) == "bn"
+
+        // 1. Focus Mode Watchdog Enforcement (Immediate fallback even if accessibility is interrupted)
+        if (BlockerStore.focusActive(this) && !isStrictCoreSystemExempt(topPkg)) {
+            val allowed = getAllowedFocusPackages()
+            if (topPkg !in allowed) {
+                kickToHome()
+                BlockerStore.incr(this, "blocked_apps")
+                BlockerStore.incr(this, "app_block")
+                showTamperAlert(
+                    title = if (isBn) "ফোকাস মোড সক্রিয়" else "Focus Mode Active",
+                    message = if (isBn) "ফোকাস মোড চলাকালীন এই অ্যাপটি বন্ধ রাখা হয়েছে।"
+                              else "This app is not allowed during your active Focus session."
+                )
+                return
+            }
+        }
+
         val active = BlockerStore.active(this)
         val shield = BlockerStore.shield(this)
         val guardOpen = BlockerStore.guardOpen(this, "shield") || BlockerStore.guardOpen(this, "protection")
 
         // If protection is not engaged or user deliberately passed delay timer, skip
         if (!active || !shield || guardOpen) return
-
-        val topPkg = getTopPackage() ?: return
-        if (topPkg == packageName) return
-
-        val isBn = BlockerStore.popupLanguage(this) == "bn"
 
         // Blocked app enforcement fallback (even if accessibility is off/interrupted)
         val blockedApps = BlockerStore.set(this, "apps")
@@ -202,6 +220,66 @@ class BlockerForegroundService : Service {
                           else "This app is restricted to help maintain focus."
             )
         }
+    }
+
+    private fun getDefaultLauncherPackage(): String? = runCatching {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        resolveInfo?.activityInfo?.packageName
+    }.getOrNull()
+
+    private fun isStrictCoreSystemExempt(pkg: String): Boolean {
+        if (pkg.isEmpty() || pkg == packageName) return true
+        if (pkg == "com.android.systemui" || pkg == "android") return true
+        val defaultLauncher = getDefaultLauncherPackage()
+        if (pkg == defaultLauncher) return true
+        val lower = pkg.lowercase()
+        if (lower.contains("launcher") || lower.contains("home") ||
+            lower == "com.sec.android.app.launcher" || lower == "com.miui.home" ||
+            lower == "com.oppo.launcher" || lower == "com.transsion.hilauncher" ||
+            lower == "com.google.android.apps.nexuslauncher") {
+            return true
+        }
+        val imeManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        val imes = imeManager?.enabledInputMethodList?.map { it.packageName } ?: emptyList()
+        if (pkg in imes) return true
+
+        if (pkg == "com.android.server.telecom" ||
+            pkg == "com.android.incallui" ||
+            pkg == "com.samsung.android.incallui" ||
+            pkg == "com.android.dialer" ||
+            pkg == "com.google.android.dialer" ||
+            pkg == "com.samsung.android.dialer" ||
+            pkg == "com.android.phone"
+        ) {
+            return true
+        }
+        if (com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent) {
+            if (pkg == "com.android.permissioncontroller" ||
+                pkg == "com.google.android.permissioncontroller" ||
+                pkg == "com.android.settings"
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun getAllowedFocusPackages(): Set<String> {
+        val now = SecureTime.now(this)
+        val isManual = BlockerStore.focusUntil(this) > now
+        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
+        val activePrayer = BlockerStore.activePrayerSlot(this)
+
+        val allowed = mutableSetOf<String>()
+        if (isManual || activePrayer != null) {
+            allowed.addAll(BlockerStore.focusApps(this))
+        }
+        for (s in activeSchedules) {
+            allowed.addAll(s.allowedApps)
+            allowed.addAll(s.allowedPackages)
+        }
+        return allowed
     }
 
     private fun getTopPackage(): String? {

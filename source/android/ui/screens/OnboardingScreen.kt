@@ -1,12 +1,10 @@
 package com.blocker.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -15,15 +13,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocker.R
 import com.blocker.data.BlockerRepository
-import com.blocker.ui.components.*
-import com.blocker.ui.theme.NordicColors
+import com.blocker.ui.components.CyberIcons
 
 @Composable
 fun OnboardingScreen(
@@ -33,438 +33,295 @@ fun OnboardingScreen(
 ) {
     val context = LocalContext.current
     val perms by repo.permissionsState.collectAsState()
-    val protection by repo.protectionState.collectAsState()
     val scrollState = rememberScrollState()
 
-    var currentStep by remember { mutableStateOf(0) } // 0 = Language, 1 = Permissions, 2 = Confirmation
-    var selectedLang by remember { mutableStateOf(protection.popupLanguage) }
-    var enableProtection by remember { mutableStateOf(true) }
-    var enableShield by remember { mutableStateOf(true) }
+    val totalCount = 7
+    val grantedCount = listOf(
+        perms.accessibility,
+        perms.deviceAdmin,
+        perms.overlay,
+        perms.dndAccess,
+        perms.notificationAccess,
+        perms.usageAccess,
+        perms.batteryOptimizationsIgnored
+    ).count { it }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 48.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Flagship Botanical Hero Welcome Card
-        NordicFoliageHeroCard(
-            modifier = Modifier.fillMaxWidth()
+        // Top Header Section
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF1B1536)),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "Blocker Icon",
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = "System Permissions",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFF5F3FF),
+            textAlign = TextAlign.Center
+        )
+
+        Text(
+            text = "Grant the permissions below so Blocker can enforce focus, silence distractions, and prevent tampering.",
+            fontSize = 13.sp,
+            color = Color(0xFF9E94C4),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        Surface(
+            color = Color(0xFF1B1536),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF4C3B87))
+        ) {
+            Text(
+                text = "$grantedCount of $totalCount Granted",
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (grantedCount == totalCount) Color(0xFF34D399) else Color(0xFFA78BFA),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // 1. Accessibility Service
+        PermissionSetupCard(
+            title = "Accessibility Service",
+            description = "Reads browser address bar URLs and detects blocked apps in 0ms.",
+            iconVector = CyberIcons.Eye,
+            isGranted = perms.accessibility,
+            onGrantClick = { repo.openPermissionSettings(context, "accessibility") }
+        )
+
+        // 2. Device Administrator
+        PermissionSetupCard(
+            title = "Device Administrator",
+            description = "Prevents Blocker from being uninstalled or bypassed while active.",
+            iconVector = CyberIcons.ShieldCheck,
+            isGranted = perms.deviceAdmin,
+            onGrantClick = { repo.openPermissionSettings(context, "deviceAdmin") }
+        )
+
+        // 3. Display Over Other Apps
+        PermissionSetupCard(
+            title = "Display Over Other Apps",
+            description = "Shows blocking warning HUD and reminder screens over restricted content.",
+            iconVector = CyberIcons.Layers,
+            isGranted = perms.overlay,
+            onGrantClick = { repo.openPermissionSettings(context, "overlay") }
+        )
+
+        // 4. Do Not Disturb Access
+        PermissionSetupCard(
+            title = "Do Not Disturb Access",
+            description = "Auto-silences incoming sounds and alerts during Study & Prayer focus sessions.",
+            iconVector = CyberIcons.Dnd,
+            isGranted = perms.dndAccess,
+            onGrantClick = { repo.openPermissionSettings(context, "dnd") }
+        )
+
+        // 5. Notification Access
+        PermissionSetupCard(
+            title = "Notification Access",
+            description = "Suppresses distracting notifications from blocked apps during focus.",
+            iconVector = CyberIcons.NotificationsOff,
+            isGranted = perms.notificationAccess,
+            onGrantClick = { repo.openPermissionSettings(context, "notification") }
+        )
+
+        // 6. Usage Access
+        PermissionSetupCard(
+            title = "Usage Access",
+            description = "Enables Daily Usage tracking, screen time graphs, and daily app limits.",
+            iconVector = CyberIcons.Apps,
+            isGranted = perms.usageAccess,
+            onGrantClick = { repo.openPermissionSettings(context, "usageAccess") }
+        )
+
+        // 7. Unrestricted Battery Usage
+        PermissionSetupCard(
+            title = "Unrestricted Battery Usage",
+            description = "Prevents Android from pausing Blocker in the background.",
+            iconVector = CyberIcons.Battery,
+            isGranted = perms.batteryOptimizationsIgnored,
+            onGrantClick = { repo.openPermissionSettings(context, "battery") }
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        val coreGranted = perms.accessibility && perms.deviceAdmin && perms.overlay && perms.dndAccess && perms.batteryOptimizationsIgnored
+
+        if (coreGranted) {
+            Button(
+                onClick = {
+                    repo.toggleProtection(true)
+                    repo.setInitialSetupActivated(true)
+                    com.blocker.PermissionFlowTracker.isOnPermissionSetupScreen = false
+                    onComplete()
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF8B5CF6),
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(NordicColors.CardSurfaceHero)
-                        .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(16.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.mipmap.ic_launcher),
-                        contentDescription = "Blocker Icon",
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column {
-                    Text(
-                        text = "Welcome to Blocker",
-                        color = NordicColors.TextPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Airtight focus, Islamic reminders, and distraction defense",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        when (currentStep) {
-            0 -> {
-                // Step 0: Language Selection
-                SectionHeader(
-                    title = "Popup Message Language",
-                    icon = CyberIcons.ShieldCheck,
-                    subtitle = "Choose your preferred language for warning popups, Quranic reminders, and Hadiths.\n(Settings and navigation remain in English.)"
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // English Option
-                val isEn = selectedLang == "en"
-                NordicMicroGridCard(
-                    onClick = {
-                        selectedLang = "en"
-                        repo.setPopupLanguage("en")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, if (isEn) NordicColors.AccentPrimary else NordicColors.TextSecondary, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isEn) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(NordicColors.AccentPrimary)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "English",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        if (isEn) {
-                            StatusPillBadge(label = "Selected", tone = BadgeTone.OK, small = true)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "Reminders and popup warnings will be shown in English:\n\"Tell the believing men to reduce [some] of their vision...\" (24:30)",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Bengali Option
-                val isBn = selectedLang == "bn"
-                NordicMicroGridCard(
-                    onClick = {
-                        selectedLang = "bn"
-                        repo.setPopupLanguage("bn")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, if (isBn) NordicColors.AccentPrimary else NordicColors.TextSecondary, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isBn) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(NordicColors.AccentPrimary)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "বাংলা (Bengali)",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        if (isBn) {
-                            StatusPillBadge(label = "Selected", tone = BadgeTone.OK, small = true)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "কোরআনের আয়াত ও সতর্কবার্তা বাংলায় দেখানো হবে:\n“মুমিন পুরুষদের বলুন, তারা যেন তাদের দৃষ্টি অবনত রাখে…” (২৪:৩০)",
-                        color = NordicColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Btn(
-                    label = "Continue to Permissions",
-                    icon = CyberIcons.ChevronRight,
-                    onClick = { currentStep = 1 },
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = "Start Protection & Enter Blocker",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
-
-            1 -> {
-                // Step 1: Permissions Wizard
-                SectionHeader(
-                    title = "System Permissions",
-                    icon = CyberIcons.ShieldCheck,
-                    subtitle = "Grant permissions to activate zero-latency content filtering and airtight anti-uninstall protection."
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 1. Device Administrator (Direct system redirect to BlockerDeviceAdminReceiver)
-                PermissionItemCard(
-                    title = "Device admin",
-                    icon = CyberIcons.ShieldCheck,
-                    why = "Prevents Blocker from being uninstalled while protection is active.",
-                    buttonLabel = "Set Device Admin",
-                    isGranted = perms.deviceAdmin,
-                    onGrant = { repo.openPermissionSettings(context, "deviceAdmin") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 2. Usage Access
-                PermissionItemCard(
-                    title = "Usage access",
-                    icon = CyberIcons.Apps,
-                    why = "Lets Blocker monitor foreground app usage and enforce daily limits.",
-                    buttonLabel = "Grant",
-                    isGranted = perms.usageAccess,
-                    onGrant = { repo.openPermissionSettings(context, "usageAccess") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 3. Display Over Other Apps
-                PermissionItemCard(
-                    title = "Display over other apps",
-                    icon = CyberIcons.Layers,
-                    why = "Shows blocking HUD warnings and reminder overlays over restricted content.",
-                    buttonLabel = "Grant",
-                    isGranted = perms.overlay,
-                    onGrant = { repo.openPermissionSettings(context, "overlay") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 4. Accessibility Service
-                PermissionItemCard(
-                    title = "Accessibility service",
-                    icon = CyberIcons.Eye,
-                    why = "Reads browser address bar URLs and detects blocked apps in 0ms.",
-                    buttonLabel = "Enable",
-                    isGranted = perms.accessibility,
-                    onGrant = { repo.openPermissionSettings(context, "accessibility") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 5. Unrestricted Battery Execution
-                PermissionItemCard(
-                    title = "Unrestricted battery",
-                    icon = CyberIcons.Battery,
-                    why = "Exempts Blocker from OEM battery killers so protection never stops.",
-                    buttonLabel = "Unrestricted Battery",
-                    isGranted = perms.batteryOptimizationsIgnored,
-                    onGrant = { repo.openPermissionSettings(context, "battery") }
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Btn(
-                    label = if (perms.allGranted) "Continue to Protection" else "Proceed Anyway",
-                    icon = CyberIcons.ChevronRight,
-                    onClick = { currentStep = 2 },
-                    kind = if (perms.allGranted) BtnKind.PRIMARY else BtnKind.SECONDARY,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            2 -> {
-                // Step 2: Protection Confirmation & Defaults
-                SectionHeader(
-                    title = "Confirm Initial Defenses",
-                    icon = CyberIcons.Lock,
-                    subtitle = "Verify starting security policies before entering Blocker."
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Master Protection Toggle Card
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                            Text(
-                                text = "Master Protection",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Block 9,350+ adult websites, porn domains, and restricted apps.",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                        NordicSwitch(
-                            checked = enableProtection,
-                            onCheckedChange = { enableProtection = it }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Anti-Tamper Shield Toggle Card
-                NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                            Text(
-                                text = "Anti-Tamper & Uninstall Guard",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Locks Settings, launcher shortcuts, and device admin deactivation.",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                        NordicSwitch(
-                            checked = enableShield,
-                            onCheckedChange = { enableShield = it }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Btn(
-                    label = "Launch Blocker Fortress",
-                    icon = CyberIcons.ShieldCheck,
-                    onClick = {
-                        if (enableProtection) repo.toggleProtection(true)
-                        onComplete()
-                    },
-                    modifier = Modifier.fillMaxWidth()
+        } else {
+            Button(
+                onClick = { },
+                enabled = false,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    disabledContainerColor = Color(0xFF2B224D).copy(alpha = 0.5f),
+                    disabledContentColor = Color(0xFF9E94C4).copy(alpha = 0.6f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+            ) {
+                Text(
+                    text = "Enable Required Permissions Above ($grantedCount/$totalCount)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun PermissionItemCard(
+fun PermissionSetupCard(
     title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    why: String,
-    buttonLabel: String = "Grant",
+    description: String,
+    iconVector: ImageVector,
     isGranted: Boolean,
-    onGrant: () -> Unit
+    onGrantClick: () -> Unit
 ) {
-    GlowCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        active = isGranted,
-        tone = if (isGranted) CardTone.OK else CardTone.DEFAULT
+        shape = RoundedCornerShape(18.dp),
+        color = Color(0xFF110D22),
+        border = BorderStroke(1.dp, if (isGranted) Color(0xFF10B981) else Color(0xFF2B224D))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // 1. Left Icon Box (Fixed 42.dp)
             Box(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(NordicColors.CardSurfaceHero)
-                    .border(
-                        1.dp,
-                        if (isGranted) NordicColors.AccentPrimary else NordicColors.HairlineBorder,
-                        RoundedCornerShape(11.dp)
-                    ),
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1B1536)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = icon,
+                    iconVector,
                     contentDescription = null,
-                    tint = if (isGranted) NordicColors.AccentPrimary else NordicColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
+                    tint = Color(0xFFA78BFA),
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
+            // 2. Center Title & Description Column (Takes remaining width cleanly)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
                 Text(
                     text = title,
-                    color = NordicColors.TextPrimary,
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFF5F3FF),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = why,
-                    color = NordicColors.TextSecondary,
-                    fontSize = 11.5.sp,
-                    lineHeight = 15.sp
+                    text = description,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = Color(0xFF9E94C4),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            if (!isGranted) {
-                Btn(
-                    label = buttonLabel,
-                    onClick = onGrant,
-                    kind = BtnKind.PRIMARY
-                )
+            // 3. Right Action Button or Granted Badge (Fixed single-line pill, never wraps!)
+            if (isGranted) {
+                Surface(
+                    color = Color(0xFF064E3B).copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
+                ) {
+                    Text(
+                        text = "Granted",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF34D399),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             } else {
-                StatusPillBadge(
-                    label = "Granted",
-                    tone = BadgeTone.OK,
-                    icon = CyberIcons.Check,
-                    small = true
-                )
+                Button(
+                    onClick = onGrantClick,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        text = "Enable",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
     }

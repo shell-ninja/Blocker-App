@@ -393,8 +393,8 @@ object SecureTime {
 
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
-    const val APP_VERSION = "1.0.6.8"
-    const val DISPLAY_VERSION = "1.0.6.8"
+    const val APP_VERSION = "1.0.6.9"
+    const val DISPLAY_VERSION = "1.0.6.9"
     const val BUILD_NUMBER = 100
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
@@ -651,6 +651,13 @@ object BlockerStore {
 
     fun setOnboardingCompleted(c: Context, completed: Boolean) {
         prefs(c).edit().putBoolean("onboarding_completed", completed).apply()
+    }
+
+    fun isInitialSetupActivated(c: Context): Boolean =
+        prefs(c).getBoolean("initial_setup_activated", false) || (isOnboardingCompleted(c) && prefs(c).getBoolean("active", false))
+
+    fun setInitialSetupActivated(c: Context, activated: Boolean) {
+        prefs(c).edit().putBoolean("initial_setup_activated", activated).apply()
     }
 
     // --- Parental Security & App Lock ---

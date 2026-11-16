@@ -825,6 +825,28 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
             return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
         }
 
+        // Fast Newsfeed Safe-Guard: If not an explicit click event and feed chrome is visible, allow!
+        if (hdr->event_type != 1) {
+            bool is_feed_chrome = false;
+            for (size_t i = 0; i < node_count; ++i) {
+                std::string_view t = nodes[i].text;
+                std::string_view id = nodes[i].id;
+                if (contains_ci(t, "what's on your mind") || contains_ci(t, "কী ভাবছেন") ||
+                    contains_ci(t, "create a post") || contains_ci(t, "write something") ||
+                    contains_ci(id, "feed_composer") || contains_ci(id, "feed_recycler_view") ||
+                    contains_ci(id, "newsfeed_fragment") || contains_ci(id, "primary_feed") ||
+                    contains_ci(id, "feed_list") || contains_ci(id, "search_button") ||
+                    contains_ci(id, "messages_jewel") || contains_ci(id, "jewel_inbox") ||
+                    contains_ci(id, "stories_tray") || contains_ci(id, "stories_carousel")) {
+                    is_feed_chrome = true;
+                    break;
+                }
+            }
+            if (is_feed_chrome) {
+                return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+            }
+        }
+
         // ---------------------------------------------------------------------
         // STATE C FIRST: Full-Screen / Clicked Player, Litho Action Rail, Transport
         // Evaluated BEFORE the newsfeed tab bar safe-guard so that videos and Reels

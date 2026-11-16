@@ -99,7 +99,7 @@ object IncognitoDetector {
         "browse in private"
     )
 
-    private const val MAX_VISITED_NODES = 160
+    private const val MAX_VISITED_NODES = 120
 
     /**
      * Inspects browser windows for an active Incognito/Private session.
@@ -159,6 +159,10 @@ object IncognitoDetector {
             visitedCount++
 
             val isVisible = runCatching { node.isVisibleToUser }.getOrDefault(true)
+            if (!isVisible && node !== startRoot) {
+                node.safeRecycle()
+                continue
+            }
             if (isVisible && evaluateNode(node, topChromeLimitPx, bounds)) {
                 detected = true
                 if (node !== startRoot) node.safeRecycle()

@@ -3,7 +3,14 @@ package com.blocker.ui.screens
 import android.content.Intent
 import android.net.Uri
 import com.blocker.MainActivity
+import com.blocker.PermissionFlowTracker
+import com.blocker.data.BlockerBackupManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,7 +62,6 @@ fun SettingsScreen(
     val securityLock by repo.securityLockState.collectAsState()
     val permissions by repo.permissionsState.collectAsState()
     val updateState by repo.updateState.collectAsState()
-    val nowMillis by repo.currentTimeMillisFlow.collectAsState()
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
@@ -65,6 +71,49 @@ fun SettingsScreen(
     var showUpdateModal by remember { mutableStateOf(false) }
     var cacheStats by remember { mutableStateOf(repo.getCacheStats()) }
 
+    val focus by repo.focusState.collectAsState()
+    val study by repo.studyState.collectAsState()
+    var backupStatusMessage by remember { mutableStateOf("") }
+    var restoreUnlockTarget by remember { mutableStateOf(0L) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        PermissionFlowTracker.isLaunchingPermissionIntent = false
+        if (uri != null) {
+            runCatching {
+                val json = BlockerBackupManager.exportBackupJson(context)
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(json.toByteArray(Charsets.UTF_8))
+                }
+                backupStatusMessage = "Backup exported successfully"
+            }.onFailure {
+                backupStatusMessage = "Failed to export backup: ${it.localizedMessage}"
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        PermissionFlowTracker.isLaunchingPermissionIntent = false
+        if (uri != null) {
+            runCatching {
+                val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Could not read backup file")
+                val res = BlockerBackupManager.restoreBackupJson(context, json)
+                if (res.isSuccess) {
+                    repo.refreshAll()
+                    backupStatusMessage = "Settings restored successfully"
+                } else {
+                    backupStatusMessage = "Failed to restore: ${res.exceptionOrNull()?.message ?: "Invalid file"}"
+                }
+            }.onFailure {
+                backupStatusMessage = "Failed to restore: ${it.localizedMessage}"
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -73,8 +122,8 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         SectionHeader(
-            title = "Settings & Security",
-            icon = CyberIcons.Settings,
+            title = "Hardware & Tamper Defense",
+            icon = CyberIcons.ShieldCheck,
             subtitle = "Parental safety, 24-hour covenant lock, and hardware protection"
         )
 
@@ -356,76 +405,12 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Prevent Power Off
-        val hasPowerCooldown = protection.powerShieldCooldownUntil > 0L
-        val powerCooldownRem = (protection.powerShieldCooldownUntil - nowMillis).coerceAtLeast(0L)
-        val isCooldownFinished = hasPowerCooldown && powerCooldownRem <= 0L
-
-        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(NordicColors.CardSurfaceHero)
-                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = CyberIcons.Power,
-                                contentDescription = null,
-                                tint = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.AccentPrimary,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Prevent Power Off",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (hasPowerCooldown && !isCooldownFinished) {
-                                    "Cooldown active: ${formatCountdown(powerCooldownRem)} remaining before Power Shield can be disabled"
-                                } else if (isCooldownFinished) {
-                                    "Cooldown complete — Tap toggle to turn off"
-                                } else {
-                                    "Blocks device power down attempts while protected"
-                                },
-                                color = if (hasPowerCooldown) NordicColors.AlertMuted else NordicColors.TextSecondary,
-                                fontSize = 11.5.sp
-                            )
-                        }
-                    }
-                    NordicSwitch(
-                        checked = protection.preventPowerOff,
-                        onCheckedChange = { repo.setPreventPowerOff(it) }
-                    )
-                }
-
-                if (hasPowerCooldown && !isCooldownFinished) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Btn(
-                            label = "Cancel Cooldown",
-                            icon = CyberIcons.Close,
-                            onClick = { repo.cancelPowerOffCooldown() },
-                            kind = BtnKind.GHOST
-                        )
-                    }
-                }
-            }
-        }
+        PreventPowerOffCard(
+            preventPowerOff = protection.preventPowerOff,
+            powerShieldCooldownUntil = protection.powerShieldCooldownUntil,
+            onCheckedChange = { repo.setPreventPowerOff(it) },
+            onCancelCooldown = { repo.cancelPowerOffCooldown() }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -484,7 +469,148 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 5. App Updates Card
+        // Backup & Restore Card
+        SectionHeader(
+            title = "Backup & Restore Configuration",
+            icon = CyberIcons.Download,
+            subtitle = "Export or restore blocked apps, schedules, prayer slots, and safety configurations"
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Save all settings to a JSON backup file or restore previously saved configurations. Guarded by covenant timer when protection or focus is active.",
+                    color = NordicColors.TextSecondary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+
+                // Restore Unlock Countdown (Anti-Bypass Security Gate)
+                if (restoreUnlockTarget > 0L) {
+                    RestoreGateView(
+                        targetEpochMs = restoreUnlockTarget,
+                        onAbort = { restoreUnlockTarget = 0L },
+                        onReady = {
+                            restoreUnlockTarget = 0L
+                            PermissionFlowTracker.isLaunchingPermissionIntent = true
+                            MainActivity.isLaunchingExternal = true
+                            importLauncher.launch(arrayOf("application/json", "*/*"))
+                        }
+                    )
+                }
+
+                // Two Side-by-Side Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Left Button: Primary Royal Purple 0xFF8B5CF6
+                    Button(
+                        onClick = {
+                            PermissionFlowTracker.isLaunchingPermissionIntent = true
+                            MainActivity.isLaunchingExternal = true
+                            val todayStr = java.time.LocalDate.now().toString()
+                            exportLauncher.launch("blocker-backup-$todayStr.json")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = CyberIcons.Download,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Backup Settings",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    // Right Button: Outlined 0xFF1B1536 with 1.dp 0xFF4C3B87 border
+                    Surface(
+                        onClick = {
+                            val isGuarded = protection.isActive || focus.active || study.active
+                            if (!isGuarded) {
+                                PermissionFlowTracker.isLaunchingPermissionIntent = true
+                                MainActivity.isLaunchingExternal = true
+                                importLauncher.launch(arrayOf("application/json", "*/*"))
+                            } else {
+                                val delayMs = BlockerStore.resolveUnlockDelayDurationMs(context)
+                                restoreUnlockTarget = System.currentTimeMillis() + delayMs
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1B1536),
+                        border = BorderStroke(1.dp, Color(0xFF4C3B87)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = CyberIcons.Refresh,
+                                contentDescription = null,
+                                tint = Color(0xFFA78BFA),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Restore Backup",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFF5F3FF),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+
+                if (backupStatusMessage.isNotBlank()) {
+                    Text(
+                        text = backupStatusMessage,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (backupStatusMessage.contains("successfully", ignoreCase = true)) Color(0xFF34D399) else Color(0xFFEF4444)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 5. App Updates & About Card
+        SectionHeader(
+            title = "App Updates & About",
+            icon = CyberIcons.Shield,
+            subtitle = "Direct GitHub release delivery, build version & cache"
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1290,6 +1416,78 @@ private fun ChangePasswordDialog(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RestoreGateView(
+    targetEpochMs: Long,
+    onAbort: () -> Unit,
+    onReady: () -> Unit
+) {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(targetEpochMs) {
+        while (isActive && targetEpochMs > System.currentTimeMillis()) {
+            nowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+        nowMs = System.currentTimeMillis()
+    }
+    val remSec = ((targetEpochMs - nowMs) / 1000L).coerceAtLeast(0L)
+
+    if (remSec > 0L) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF1B1536),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF4C3B87))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                StatusPillBadge(
+                    label = "Unlocking Restore in ${formatCountdown(remSec * 1000L)}",
+                    tone = BadgeTone.WARN,
+                    small = true
+                )
+                Button(
+                    onClick = onAbort,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text(
+                        text = "Abort",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+    } else {
+        Button(
+            onClick = onReady,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp)
+        ) {
+            Text(
+                text = "Unlock Ready — Choose Backup File",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false
+            )
         }
     }
 }

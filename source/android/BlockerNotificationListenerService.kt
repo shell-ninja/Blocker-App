@@ -1,7 +1,10 @@
 package com.blocker
 
 import android.app.Notification
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -48,6 +51,16 @@ class BlockerNotificationListenerService : NotificationListenerService() {
         fun sweepActiveNotificationsIfRunning() {
             runCatching { instance?.sweepActiveNotifications() }
         }
+
+        fun checkAndRebindIfDisconnected(context: Context) {
+            if (instance == null && isGranted(context)) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    runCatching {
+                        requestRebind(ComponentName(context, BlockerNotificationListenerService::class.java))
+                    }
+                }
+            }
+        }
     }
 
     override fun onListenerConnected() {
@@ -66,7 +79,17 @@ class BlockerNotificationListenerService : NotificationListenerService() {
                 instance = null
             }
             super.onListenerDisconnected()
+            if (isGranted(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                runCatching {
+                    requestRebind(ComponentName(this, BlockerNotificationListenerService::class.java))
+                }
+            }
         } catch (_: Throwable) {}
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        runCatching { BlockerForegroundService.start(this) }
     }
 
     override fun onDestroy() {
@@ -81,6 +104,10 @@ class BlockerNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         try {
             if (sbn == null) return
+            // Self-healing wake check: ensure accessibility service/watchdogs are alive
+            if (BlockerAccessibilityService.instance == null) {
+                runCatching { BlockerForegroundService.start(this) }
+            }
             if (shouldSuppressNotification(sbn)) {
                 runCatching { cancelNotification(sbn.key) }
             }

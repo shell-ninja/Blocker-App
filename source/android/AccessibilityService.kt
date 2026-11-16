@@ -4,13 +4,20 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import androidx.core.app.NotificationCompat
+import java.util.concurrent.atomic.AtomicBoolean
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -171,10 +178,28 @@ class BlockerAccessibilityService : AccessibilityService() {
         private val INSTA_REELS_PLAYER_IDS = listOf(
             "com.instagram.android:id/clips_video_container",
             "com.instagram.android:id/clips_viewer_view_pager",
-            "com.instagram.android:id/reel_viewer_root",
             "com.instagram.android:id/clips_viewer_container",
-            "com.instagram.android:id/feed_reel_viewer",
             "com.instagram.android:id/clips_swipe_refresh_layout"
+        )
+        private val INSTA_STORY_IDS = listOf(
+            "com.instagram.android:id/reel_viewer_progress_bar",
+            "com.instagram.android:id/story_item_container",
+            "com.instagram.android:id/toolbar_container",
+            "com.instagram.android:id/reel_viewer_tall_story_container",
+            "com.instagram.android:id/reel_viewer_root"
+        )
+        private val INSTA_HOME_FEED_IDS = listOf(
+            "com.instagram.android:id/action_bar_home",
+            "com.instagram.android:id/action_bar_container",
+            "com.instagram.android:id/action_bar_title_chevron",
+            "com.instagram.android:id/action_bar_inbox_button",
+            "com.instagram.android:id/newsfeed_action_bar",
+            "com.instagram.android:id/stories_tray",
+            "com.instagram.android:id/reel_recycler_view",
+            "com.instagram.android:id/tray_recycler_view",
+            "com.instagram.android:id/tray_container",
+            "com.instagram.android:id/story_tray_avatar",
+            "com.instagram.android:id/feed_reel_viewer"
         )
         private val INSTA_SEARCH_INPUT_IDS = listOf(
             "com.instagram.android:id/action_bar_search_edit_text",
@@ -878,6 +903,53 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var currentFgPkg: String? = null
     @Volatile private var fgStartTime: Long = 0L
 
+    private val isScanningAtomic = AtomicBoolean(false)
+    @Volatile private var lastEventProcessedElapsedMs = 0L
+    @Volatile private var isScreenInteractive = true
+    @Volatile private var lastContentChangedScanTime = 0L
+    @Volatile private var lastActiveAppPackage: String? = null
+
+    private fun ensureQuietNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            if (nm.getNotificationChannel("blocker_protection_channel") == null) {
+                val channel = NotificationChannel(
+                    "blocker_protection_channel",
+                    "Blocker Protection",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Keeps Blocker running reliably in the background."
+                    setShowBadge(false)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
+                }
+                nm.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun buildQuietOngoingNotification(): Notification {
+        ensureQuietNotificationChannel()
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = if (launchIntent != null) PendingIntent.getActivity(this, 0, launchIntent, flags) else null
+
+        return NotificationCompat.Builder(this, "blocker_protection_channel")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Blocker Active")
+            .setContentText("Content protection & focus guard active")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .apply {
+                if (pendingIntent != null) setContentIntent(pendingIntent)
+            }
+            .build()
+    }
+
     private val appLimitWatchdog = object : Runnable {
         override fun run() {
             try {
@@ -896,11 +968,19 @@ class BlockerAccessibilityService : AccessibilityService() {
     private val appBlockWatchdog = object : Runnable {
         override fun run() {
             try {
+                val pm = powerManager ?: (getSystemService(Context.POWER_SERVICE) as? PowerManager)
+                if (pm?.isInteractive == false || !isScreenInteractive) return
+
+                val nowElapsed = SystemClock.elapsedRealtime()
+                if (nowElapsed - lastEventProcessedElapsedMs < 300L || isScanningAtomic.get()) {
+                    return
+                }
+
                 if (BlockerStore.active(this@BlockerAccessibilityService)) {
                     val root = runCatching { rootInActiveWindow }.getOrNull()
                     val rootPkg = root?.packageName?.toString()
-                    val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else currentFgPkg
-                    if (activePkg != null && activePkg in apps) {
+                    val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else getActiveApplicationPackage() ?: currentFgPkg
+                    if (activePkg != null && activePkg in apps && !isEssentialSystemOrNavigationPackage(activePkg, labelOf(activePkg))) {
                         hit(
                             "apps",
                             getFearAllahHeading(),
@@ -911,6 +991,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                             BlockReason(BlockCategory.BLOCKED_APP, labelOf(activePkg))
                         )
                     }
+                    recycleNode(root)
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "Error in appBlockWatchdog", t)
@@ -945,6 +1026,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    isScreenInteractive = false
                     if (currentFgPkg != null && fgStartTime > 0L) {
                         val delta = (System.currentTimeMillis() - fgStartTime).coerceAtLeast(0L)
                         if (delta > 0L) {
@@ -954,8 +1036,28 @@ class BlockerAccessibilityService : AccessibilityService() {
                     currentFgPkg = null
                     fgStartTime = 0L
                 }
-                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                Intent.ACTION_SCREEN_ON -> {
+                    isScreenInteractive = true
                     fgStartTime = System.currentTimeMillis()
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    isScreenInteractive = true
+                    fgStartTime = System.currentTimeMillis()
+                    if (instance == null) {
+                        instance = this@BlockerAccessibilityService
+                    }
+                    runCatching {
+                        main.removeCallbacks(appBlockWatchdog)
+                        main.post(appBlockWatchdog)
+                        main.removeCallbacks(appLimitWatchdog)
+                        main.post(appLimitWatchdog)
+                    }
+                    runCatching {
+                        BlockerNotificationListenerService.checkAndRebindIfDisconnected(this@BlockerAccessibilityService)
+                    }
+                    runCatching {
+                        BlockerForegroundService.start(this@BlockerAccessibilityService)
+                    }
                     if (BlockerStore.studyActive(this@BlockerAccessibilityService)) {
                         main.postDelayed({ bringBlockerToForeground() }, 150)
                     }
@@ -968,7 +1070,36 @@ class BlockerAccessibilityService : AccessibilityService() {
         try {
             super.onStartCommand(intent, flags, startId)
         } catch (_: Throwable) {}
+        runCatching {
+            val notif = buildQuietOngoingNotification()
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    1001,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(1001, notif)
+            }
+        }
         return android.app.Service.START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        runCatching {
+            val notif = buildQuietOngoingNotification()
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    1001,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(1001, notif)
+            }
+        }
+        runCatching { BlockerForegroundService.start(this) }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -986,6 +1117,18 @@ class BlockerAccessibilityService : AccessibilityService() {
         try {
             super.onServiceConnected()
             instance = this
+            runCatching {
+                val notif = buildQuietOngoingNotification()
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(
+                        1001,
+                        notif,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                } else {
+                    startForeground(1001, notif)
+                }
+            }
             runCatching {
                 val originalHandler = Thread.getDefaultUncaughtExceptionHandler()
                 Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -2077,6 +2220,39 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         if (configFlags == 0) return false
 
+        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+            if (eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                val r = runCatching { rootInActiveWindow }.getOrNull() ?: ev?.source
+                if (r != null) {
+                    val dm = resources.displayMetrics
+                    val sW = dm.widthPixels.coerceAtLeast(1)
+                    val sH = dm.heightPixels.coerceAtLeast(1)
+                    if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, ev, sW, sH) || isFacebookStory(r, ev)) {
+                        runCatching { r.safeRecycle() }
+                        return false
+                    }
+                    val isReels = FacebookReelsDetector.isDedicatedFullScreenReelsOrVideoViewer(r, ev, sW, sH)
+                    if (isReels) {
+                        runCatching { r.safeRecycle() }
+                        escapeClickedFacebookPlayer()
+                        main.postDelayed({ verifyAndEscapeFacebookReels(pkg) }, 100L)
+                        OverlayHudManager.show(
+                            this,
+                            if (isBangla()) "ফেসবুক রিলস ব্লক করা হয়েছে" else "Facebook Reels blocked",
+                            6,
+                            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Reels")
+                        )
+                        return true
+                    }
+                    val isFeed = isNormalFacebookFeedScreen(r)
+                    runCatching { r.safeRecycle() }
+                    if (isFeed) {
+                        return false // Allow normal newsfeed scrolling without running C++ video/transport detection
+                    }
+                }
+            }
+        }
+
         queueNodes.clear()
         passNodes.clear()
 
@@ -2096,14 +2272,22 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
 
             var nodeCount = 0
-            while (queueNodes.isNotEmpty() && nodeCount < 180) {
+            while (queueNodes.isNotEmpty() && nodeCount < 120) {
                 val curr = queueNodes.removeAt(0)
+                if (!curr.isVisibleToUser && nodeCount > 0) {
+                    curr.safeRecycle()
+                    continue
+                }
                 passNodes.add(curr)
                 nodeCount++
                 val childCount = curr.childCount
                 for (i in 0 until childCount) {
-                    if (nodeCount + queueNodes.size >= 180) break
+                    if (nodeCount + queueNodes.size >= 120) break
                     val child = curr.getChild(i) ?: continue
+                    if (!child.isVisibleToUser) {
+                        child.safeRecycle()
+                        continue
+                    }
                     queueNodes.add(child)
                 }
             }
@@ -2296,6 +2480,16 @@ class BlockerAccessibilityService : AccessibilityService() {
             val ev = e ?: return
             val pkg = ev.packageName?.toString() ?: return
 
+            if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                lastEventProcessedElapsedMs = SystemClock.elapsedRealtime()
+            }
+
+            // Track last active non-system application package
+            if (!isEssentialSystemOrNavigationPackage(pkg, labelOf(pkg))) {
+                lastActiveAppPackage = pkg
+            }
+
             // 0. Top-priority defense: Check if Power Menu Dialog is showing over any app
             if (checkPowerMenuDialog(ev, pkg)) return
 
@@ -2349,6 +2543,27 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
             if (powerManager?.isInteractive == false) {
                 return
+            }
+
+            // Fast-path throttling on TYPE_WINDOW_CONTENT_CHANGED:
+            // Never throttle TYPE_WINDOW_STATE_CHANGED, TYPE_VIEW_CLICKED, or TYPE_VIEW_LONG_CLICKED (0ms always).
+            // On TYPE_WINDOW_CONTENT_CHANGED, if active package is not browser, not social media,
+            // not settings/installer/launcher/permission, throttle full tree scans to at most once per 150ms.
+            if (ev.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                val isExemptFromContentThrottle = pkg in BROWSER_URL_IDS ||
+                    pkg in IncognitoDetector.RECOGNIZED_BROWSER_PACKAGES ||
+                    pkg == "com.facebook.katana" || pkg == "com.facebook.lite" ||
+                    pkg == "com.instagram.android" || pkg == "com.google.android.youtube" ||
+                    pkg == "com.reddit.frontpage" || pkg in GRANULAR_TARGET_PKGS ||
+                    isSettingsPkg(pkg) || isInstallerPkg(pkg) || isLauncherPkg(pkg) ||
+                    pkg.contains("permissioncontroller") || pkg == "android"
+                if (!isExemptFromContentThrottle) {
+                    val nowUptime = SystemClock.uptimeMillis()
+                    if (nowUptime - lastContentChangedScanTime < 150L) {
+                        return
+                    }
+                    lastContentChangedScanTime = nowUptime
+                }
             }
 
             // Cleanly dismiss shield whenever we are on a launcher screen
@@ -2523,8 +2738,8 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (isSettingsPkg(pkg) || isInstallerPkg(pkg) || pkg == "android") {
             if (checkDangerDialog(pkg, ev)) return
         }
-        if (pkg in neverBlock) return
         if (BlockerStore.focusActive(this) && focusBlocks(ev, pkg)) return
+        if (pkg in neverBlock) return
         if (!BlockerStore.active(this)) return
 
         // OEM-agnostic proactive intercept: fires on the window-open event BEFORE the screen is visible
@@ -2766,11 +2981,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         // 3. SystemUI handling (Notification shade, Quick Settings tiles for Wi-Fi / Mobile Data):
         // Automatically collapse the notification panel so Wi-Fi, Mobile Data, and alerts are shielded.
         // Navigation bar touches are preserved so in-app buttons continue to function.
-        if (pkg == "com.android.systemui") {
+        if (pkg == "com.android.systemui" || isEssentialSystemOrNavigationPackage(pkg, labelOf(pkg))) {
             val cls = ev.className?.toString().orEmpty()
-            val isNavBar = cls.contains("NavigationBar", ignoreCase = true) || cls.contains("Navigation", ignoreCase = true)
+            val label = labelOf(pkg).lowercase()
+            val isNavBar = cls.contains("NavigationBar", ignoreCase = true) || cls.contains("Navigation", ignoreCase = true) ||
+                label.contains("navigation") || label.contains("gesture")
             if (!isNavBar) {
-                if (now - lastShadeDismiss >= 400L) {
+                if (pkg == "com.android.systemui" && now - lastShadeDismiss >= 400L) {
                     lastShadeDismiss = now
                     collapseNotificationShade()
                 }
@@ -2832,43 +3049,223 @@ class BlockerAccessibilityService : AccessibilityService() {
         return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
     }
 
-    // ---------- Focus mode ----------
+    // ---------- Focus mode & Navigation Whitelist ----------
 
-    /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
-    private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
-        // Essential system packages, launcher, IME, dialer/emergency, and Blocker itself are ALWAYS permitted
-        if (pkg == packageName || pkg in neverBlock || pkg in FOCUS_SYSTEM_PKGS || pkg in imePackages() || pkg in launcherPackages() || pkg in EMERGENCY_CALL_PKGS) {
-            return false
-        }
+    /**
+     * Permanent core system & navigation whitelist in Focus / Prayer / App enforcers.
+     * ALWAYS returns true (ALLOWED) during Focus Mode, Scheduled Focus, and Prayer Mode for:
+     * - System Navigation, System UI, Navigation bar, Status bar, Android System
+     * - com.android.systemui, android, com.google.android.ext.services, com.android.providers.*
+     * - Default Home Launcher + common OEM launchers
+     * - Keyboards / IMEs
+     * - Permission, credential, autofill & share overlays
+     * - Essential Telecom, In-Call UI, Dialer
+     */
+    fun isEssentialSystemOrNavigationPackage(pkg: String, label: String = ""): Boolean {
+        if (pkg.isEmpty() || pkg == packageName) return true
+        val lowerPkg = pkg.lowercase()
+        val lowerLabel = label.lowercase()
 
-        val isManualFocusActive = BlockerStore.focusUntil(this) > SecureTime.now(this)
-        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
-        val isScheduledFocusActive = activeSchedules.isNotEmpty()
-        val activePrayer = BlockerStore.activePrayerSlot(this)
-        val isPrayerFocusActive = activePrayer != null
-
-        // If manual focus or prayer focus is active, check global focus allowed packages
-        if (isManualFocusActive || isPrayerFocusActive) {
-            val manualAllowed = BlockerStore.focusApps(this)
-            if (pkg in manualAllowed) return false
-        }
-
-        // If scheduled focus is active, check that active schedule's allowedPackages
-        if (isScheduledFocusActive) {
-            for (s in activeSchedules) {
-                if (pkg in s.allowedApps || pkg in s.allowedPackages) return false
+        // 1. Label or window title matching system navigation / UI
+        if (lowerLabel.isNotEmpty()) {
+            if (lowerLabel.contains("system navigation") ||
+                lowerLabel.contains("system ui") ||
+                lowerLabel.contains("navigation bar") ||
+                lowerLabel.contains("status bar") ||
+                lowerLabel.contains("gesture navigation") ||
+                lowerLabel.contains("3-button navigation") ||
+                lowerLabel.contains("2-button navigation") ||
+                lowerLabel.contains("android system")
+            ) {
+                return true
             }
         }
 
-        // If none is active, not blocked
-        if (!isManualFocusActive && !isScheduledFocusActive && !isPrayerFocusActive) {
+        // 2. Core system packages
+        if (lowerPkg == "com.android.systemui" ||
+            lowerPkg == "android" ||
+            lowerPkg == "com.google.android.ext.services" ||
+            lowerPkg.startsWith("com.android.providers.") ||
+            lowerPkg.startsWith("com.google.android.providers.") ||
+            lowerPkg.contains(".systemui.") ||
+            lowerPkg.contains("navigationbar")
+        ) {
+            return true
+        }
+
+        // 3. Home launchers (default launcher + common OEM launchers)
+        if (isLauncherPkg(lowerPkg)) {
+            return true
+        }
+
+        // 4. Input Methods / Keyboards
+        if (isImePkg(lowerPkg) || lowerPkg in imePackages()) {
+            return true
+        }
+
+        // 5. System permission, credential, autofill & share overlays
+        if (lowerPkg.contains("permissioncontroller") ||
+            lowerPkg == "com.android.intentresolver" ||
+            lowerPkg == "com.google.android.gms" ||
+            lowerPkg == "com.android.settings.intelligence" ||
+            lowerPkg.contains("autofill") ||
+            lowerPkg.contains("credentialmanager") ||
+            lowerPkg == "com.android.documentsui" ||
+            lowerPkg == "com.google.android.documentsui"
+        ) {
+            return true
+        }
+
+        // 6. Essential Telecom / In-Call UI / Dialer
+        if (lowerPkg == "com.android.server.telecom" ||
+            lowerPkg == "com.android.incallui" ||
+            lowerPkg == "com.samsung.android.incallui" ||
+            lowerPkg == "com.android.dialer" ||
+            lowerPkg == "com.google.android.dialer" ||
+            lowerPkg in EMERGENCY_CALL_PKGS
+        ) {
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Inspects active windows filtering strictly for TYPE_APPLICATION windows.
+     * Completely ignores TYPE_SYSTEM, TYPE_INPUT_METHOD, TYPE_ACCESSIBILITY_OVERLAY,
+     * and TYPE_SPLIT_SCREEN_DIVIDER.
+     */
+    fun getActiveApplicationPackage(): String? {
+        val wins = runCatching { windows }.getOrNull()
+        if (!wins.isNullOrEmpty()) {
+            // First pass: Active application window
+            for (w in wins) {
+                if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION && w.isActive) {
+                    val root = runCatching { w.root }.getOrNull()
+                    val p = root?.packageName?.toString()
+                    recycleNode(root)
+                    if (!p.isNullOrEmpty()) return p
+                }
+            }
+            // Second pass: Top-most application window in Z-order
+            for (w in wins) {
+                if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    val root = runCatching { w.root }.getOrNull()
+                    val p = root?.packageName?.toString()
+                    recycleNode(root)
+                    if (!p.isNullOrEmpty()) return p
+                }
+            }
+        }
+        val root = runCatching { rootInActiveWindow }.getOrNull()
+        val p = root?.packageName?.toString()
+        recycleNode(root)
+        return p
+    }
+
+    fun isStrictCoreSystemExempt(pkg: String): Boolean {
+        if (pkg.isEmpty() || pkg == packageName) return true
+        if (pkg == "com.android.systemui" || pkg == "android") return true
+        if (isLauncherPkg(pkg)) return true
+        if (isImePkg(pkg) || pkg in imePackages()) return true
+        if (pkg in EMERGENCY_CALL_PKGS ||
+            pkg == "com.android.server.telecom" ||
+            pkg == "com.android.incallui" ||
+            pkg == "com.samsung.android.incallui" ||
+            pkg == "com.android.dialer" ||
+            pkg == "com.google.android.dialer" ||
+            pkg == "com.samsung.android.dialer" ||
+            pkg == "com.android.phone"
+        ) {
+            return true
+        }
+        if (com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent) {
+            if (pkg == "com.android.permissioncontroller" ||
+                pkg == "com.google.android.permissioncontroller" ||
+                isSettingsPkg(pkg)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun getAllowedFocusPackages(): Set<String> {
+        val now = SecureTime.now(this)
+        val isManualFocusActive = BlockerStore.focusUntil(this) > now
+        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
+        val activePrayer = BlockerStore.activePrayerSlot(this)
+
+        val allowed = mutableSetOf<String>()
+        if (isManualFocusActive || activePrayer != null) {
+            allowed.addAll(BlockerStore.focusApps(this))
+        }
+        for (s in activeSchedules) {
+            allowed.addAll(s.allowedApps)
+            allowed.addAll(s.allowedPackages)
+        }
+        return allowed
+    }
+
+    fun isAppAllowedInFocus(targetPkg: String): Boolean {
+        if (isStrictCoreSystemExempt(targetPkg)) return true
+        val isAnyFocusActive = BlockerStore.focusActive(this)
+        if (!isAnyFocusActive) return true
+        return targetPkg in getAllowedFocusPackages()
+    }
+
+    /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
+    private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
+        // 1. Permanent core system & navigation whitelist: NEVER block
+        if (isStrictCoreSystemExempt(pkg)) {
             return false
         }
 
-        val trusted = ev.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            rootInActiveWindow?.packageName?.toString() == pkg
-        if (!trusted) return false
-        val isPrayerOnly = isPrayerFocusActive && !isManualFocusActive && !isScheduledFocusActive
+        val isAnyFocusActive = BlockerStore.focusActive(this)
+        if (!isAnyFocusActive) {
+            return false
+        }
+
+        val allowed = getAllowedFocusPackages()
+
+        // 2. Direct check on current event package
+        if (pkg in allowed) {
+            lastActiveAppPackage = pkg
+            return false
+        }
+
+        // 3. Transient system event (e.g. System UI, gesture pill, volume bar, shade):
+        // If last active application package is allowed, return ALLOW immediately
+        val lastApp = lastActiveAppPackage
+        if (lastApp != null && lastApp in allowed) {
+            val appPkg = getActiveApplicationPackage()
+            if (appPkg == null || appPkg in allowed || isStrictCoreSystemExempt(appPkg)) {
+                return false
+            }
+        }
+
+        // 4. Resolve the underlying TYPE_APPLICATION window
+        val foregroundApp = getActiveApplicationPackage() ?: pkg
+        if (isStrictCoreSystemExempt(foregroundApp)) {
+            return false
+        }
+        if (foregroundApp in allowed) {
+            lastActiveAppPackage = foregroundApp
+            return false
+        }
+
+        // 0ms kick to home and shield
+        kickToHome()
+        TamperShieldManager.showInstantShield(this)
+        BlockerStore.incr(this, "blocked_apps")
+        BlockerStore.incr(this, "app_block")
+
+        val isManualFocusActive = BlockerStore.focusUntil(this) > SecureTime.now(this)
+        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
+        val activePrayer = BlockerStore.activePrayerSlot(this)
+        val isPrayerFocusActive = activePrayer != null
+
+        val isPrayerOnly = isPrayerFocusActive && !isManualFocusActive && activeSchedules.isEmpty()
         val dialogTitle = when {
             isPrayerOnly && isBangla() -> "নামাজের সময় সক্রিয় (${activePrayer!!.nameBn})"
             isPrayerOnly -> "Prayer Focus (${activePrayer!!.nameEn})"
@@ -2882,14 +3279,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
         val dialogTag = when {
             isPrayerOnly -> "${activePrayer!!.nameEn} (${leftText()})"
-            else -> labelOf(pkg)
+            else -> labelOf(foregroundApp)
         }
         hit(
             "focus",
             dialogTitle,
             dialogVerse,
             if (isBangla()) "কল্যাণকর কাজে সময় ব্যয় করুন" else "Guard your time for what benefits you",
-            pkg,
+            foregroundApp,
             getUnderstoodButton(),
             BlockReason(BlockCategory.STUDY_LOCKDOWN, dialogTag)
         )
@@ -3191,6 +3588,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
         lastScan[pkg] = now
+        isScanningAtomic.set(true)
 
         try {
             val sb = StringBuilder()
@@ -3215,6 +3613,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             val kw = wholeWordHit(sb.toString().lowercase()) ?: return
             screenHit(pkg, kw)
         } finally {
+            isScanningAtomic.set(false)
             recycleNode(root)
         }
     }
@@ -5881,7 +6280,8 @@ class BlockerAccessibilityService : AccessibilityService() {
 
             when (pkg) {
                 "com.google.android.youtube" -> {
-                    if (!blockYtShorts && !BlockerStore.granularToggle(this, "block_yt_shorts")) return false
+                    val isYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+                    if (!isYtShorts) return false
                     val isShortsTab = isTabSelectedById(root, "com.google.android.youtube:id/pivot_shorts") ||
                         scanSelectedTab(root, listOf("shorts"))
                     val isShortsPlayer = hasAnyNodeId(root, YT_SHORTS_PLAYER_IDS) ||
@@ -5892,17 +6292,17 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
                 "com.instagram.android" -> {
-                    if (blockInstaReels || BlockerStore.granularToggle(this, "block_insta_reels")) {
-                        val isReelsTab = isTabSelectedById(root, "com.instagram.android:id/clips_tab") ||
-                            scanSelectedTab(root, listOf("reels"))
-                        val isReelsPlayer = hasAnyNodeId(root, INSTA_REELS_PLAYER_IDS) ||
-                            evCls.contains("clipsviewer") || rootCls.contains("clipsviewer")
-                        if (isReelsTab || isReelsPlayer) {
+                    val isInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
+                    val isInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
+                    if (!isInstaReels && !isInstaSearch) return false
+
+                    if (isInstaReels) {
+                        if (isInstagramDedicatedReelsViewer(root, evCls, rootCls)) {
                             exitSubFeature(pkg, "Instagram Reels")
                             return true
                         }
                     }
-                    if (blockInstaSearch || BlockerStore.granularToggle(this, "block_insta_search")) {
+                    if (isInstaSearch) {
                         val isSearchTab = isTabSelectedById(root, "com.instagram.android:id/search_tab") ||
                             scanSelectedTab(root, listOf("search and explore", "search & explore", "explore tab"))
                         val isSearchInput = isSearchInputFocused(root, INSTA_SEARCH_INPUT_IDS)
@@ -5913,11 +6313,12 @@ class BlockerAccessibilityService : AccessibilityService() {
                     }
                 }
                 "com.facebook.katana", "com.facebook.lite" -> {
-                    if (blockFbReels || BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")) {
-                        if (isFacebookVideoOrReels(root, ev)) {
-                            exitSubFeature(pkg, "Facebook Reels")
-                            return true
-                        }
+                    val isFbReels = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
+                    if (!isFbReels) return false
+
+                    if (isFacebookVideoOrReels(root, ev)) {
+                        exitSubFeature(pkg, "Facebook Reels")
+                        return true
                     }
                 }
             }
@@ -6050,9 +6451,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (r != null) {
                     try {
                         val stillInSubFeature = when (pkg) {
-                            "com.facebook.katana", "com.facebook.lite" -> isFacebookVideoOrReels(r, null)
-                            "com.google.android.youtube" -> hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts")
-                            "com.instagram.android" -> hasAnyNodeId(r, INSTA_REELS_PLAYER_IDS) || isTabSelectedById(r, "com.instagram.android:id/clips_tab")
+                            "com.facebook.katana", "com.facebook.lite" -> {
+                                val blockFb = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
+                                blockFb && isDedicatedFullScreenReelsOrVideoViewer(r, null)
+                            }
+                            "com.google.android.youtube" -> {
+                                val blockYt = BlockerStore.granularToggle(this, "block_yt_shorts")
+                                blockYt && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
+                            }
+                            "com.instagram.android" -> {
+                                val blockInsta = BlockerStore.granularToggle(this, "block_insta_reels")
+                                blockInsta && isInstagramDedicatedReelsViewer(r, "", "")
+                            }
                             else -> false
                         }
                         if (stillInSubFeature) {
@@ -6072,9 +6482,18 @@ class BlockerAccessibilityService : AccessibilityService() {
                 if (r != null) {
                     try {
                         val stillInSubFeature = when (pkg) {
-                            "com.facebook.katana", "com.facebook.lite" -> isFacebookVideoOrReels(r, null)
-                            "com.google.android.youtube" -> hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts")
-                            "com.instagram.android" -> hasAnyNodeId(r, INSTA_REELS_PLAYER_IDS) || isTabSelectedById(r, "com.instagram.android:id/clips_tab")
+                            "com.facebook.katana", "com.facebook.lite" -> {
+                                val blockFb = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
+                                blockFb && isDedicatedFullScreenReelsOrVideoViewer(r, null)
+                            }
+                            "com.google.android.youtube" -> {
+                                val blockYt = BlockerStore.granularToggle(this, "block_yt_shorts")
+                                blockYt && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
+                            }
+                            "com.instagram.android" -> {
+                                val blockInsta = BlockerStore.granularToggle(this, "block_insta_reels")
+                                blockInsta && isInstagramDedicatedReelsViewer(r, "", "")
+                            }
                             else -> false
                         }
                         if (stillInSubFeature) {
@@ -6117,6 +6536,98 @@ class BlockerAccessibilityService : AccessibilityService() {
             }
         }
         return findNodeMatchingText(root, listOf("home, tab", "home tab", "home", "feed", "feeds", "হোম"))
+    }
+
+    private fun isInstagramStory(root: AccessibilityNodeInfo): Boolean {
+        if (hasAnyNodeId(root, INSTA_STORY_IDS)) return true
+        val sb = StringBuilder()
+        collectText(root, sb, 0, intArrayOf(100))
+        val t = sb.toString().lowercase()
+        return "send message" in t || "reply to" in t || "send a message" in t ||
+               "your story" in t || "story by" in t
+    }
+
+    private fun isInstagramHomeFeedChromeVisible(root: AccessibilityNodeInfo): Boolean {
+        // 1. Home feed tab selected
+        if (isTabSelectedById(root, "com.instagram.android:id/feed_tab") ||
+            isTabSelectedById(root, "com.instagram.android:id/tab_home")) {
+            return true
+        }
+
+        // 2. Home feed action bar or stories tray view IDs
+        if (hasAnyNodeId(root, INSTA_HOME_FEED_IDS)) return true
+
+        val dm = resources.displayMetrics
+        val screenH = dm.heightPixels.coerceAtLeast(1)
+        val rect = Rect()
+
+        var hasHomeChromeText = false
+        fun scanHomeChrome(node: AccessibilityNodeInfo?, depth: Int, budget: IntArray) {
+            if (node == null || depth > 15 || budget[0]-- <= 0) return
+            val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
+            val text = node.text?.toString()?.lowercase().orEmpty()
+
+            node.getBoundsInScreen(rect)
+            if (rect.top < screenH * 0.18f) {
+                if (cd.contains("instagram") || text.contains("instagram") ||
+                    cd.contains("direct") || cd.contains("messages") ||
+                    cd.contains("activity") || cd.contains("your story")) {
+                    hasHomeChromeText = true
+                }
+            }
+            for (i in 0 until node.childCount) {
+                if (hasHomeChromeText) break
+                val child = node.getChild(i) ?: continue
+                scanHomeChrome(child, depth + 1, budget)
+                child.safeRecycle()
+            }
+        }
+        scanHomeChrome(root, 0, intArrayOf(120))
+        return hasHomeChromeText
+    }
+
+    private fun isInstagramDedicatedReelsViewer(root: AccessibilityNodeInfo, evCls: String, rootCls: String): Boolean {
+        // Fast story whitelist: Instagram Stories must NEVER be blocked
+        if (isInstagramStory(root)) return false
+
+        // 1. Bottom Clips/Reels tab selected
+        if (isTabSelectedById(root, "com.instagram.android:id/clips_tab") ||
+            scanSelectedTab(root, listOf("reels, tab", "reels tab", "reels"))) {
+            return true
+        }
+
+        // 2. Dedicated Full-screen viewer:
+        // Top home feed header / stories tray must NOT be visible
+        if (isInstagramHomeFeedChromeVisible(root)) {
+            return false
+        }
+
+        // Dedicated Clips Viewer Activity/Fragment
+        if (evCls.contains("clipsviewer") || rootCls.contains("clipsviewer")) {
+            return true
+        }
+
+        // Dedicated Clips View IDs filling >= 80% screen height
+        val dm = resources.displayMetrics
+        val screenH = dm.heightPixels.coerceAtLeast(1)
+        val rect = Rect()
+
+        for (id in INSTA_REELS_PLAYER_IDS) {
+            val list = root.findAccessibilityNodeInfosByViewId(id)
+            if (!list.isNullOrEmpty()) {
+                var fillsScreen = false
+                for (n in list) {
+                    n.getBoundsInScreen(rect)
+                    if (rect.height() >= screenH * 0.80f) {
+                        fillsScreen = true
+                    }
+                    n.safeRecycle()
+                }
+                if (fillsScreen) return true
+            }
+        }
+
+        return false
     }
 
     private fun findYtHomeTabNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -6237,12 +6748,27 @@ class BlockerAccessibilityService : AccessibilityService() {
             return false
         }
 
+        val dm = resources.displayMetrics
+        val sW = dm.widthPixels.coerceAtLeast(1)
+        val sH = dm.heightPixels.coerceAtLeast(1)
+
         val src = ev.source
         // Whitelist stories: Clicking on a Story must never be blocked
-        if (isFacebookStoryClick(ev, src)) {
+        if (FacebookReelsDetector.isFacebookStoryClick(ev) || isFacebookStoryClick(ev, src)) {
             runCatching { src?.safeRecycle() }
             return false
         }
+
+        if (FacebookReelsDetector.isFacebookReelClick(ev, sW, sH)) {
+            runCatching { src?.safeRecycle() }
+            return true
+        }
+
+        val screenH = sH
+        val rect = Rect()
+        src?.getBoundsInScreen(rect)
+        // User clicked small node / container (< 25% screen height)
+        val isCompactTarget = rect.isEmpty || rect.height() <= 0.25f * screenH
 
         val evCd = ev.contentDescription?.toString().orEmpty().lowercase().trim()
         val evText = ev.text.joinToString(" ").lowercase().trim()
@@ -6253,25 +6779,31 @@ class BlockerAccessibilityService : AccessibilityService() {
         fun isReelOrVideoAction(s: String): Boolean {
             if (s.isEmpty()) return false
             val lower = s.trim().lowercase()
-            return lower.contains("reel") || lower.contains("shorts") ||
-                   lower.contains("video") || lower.contains("watch") ||
-                   lower.contains("play video") || lower.contains("view reel") ||
-                   lower.contains("watch reel") || lower.contains("রিল") ||
-                   lower.contains("ভিডিও") || lower.contains("ভিডিও প্লে করুন")
+            if (lower.contains("story") || lower.contains("stories")) return false
+            return lower.contains("play video") || lower.contains("view reel") ||
+                   lower.contains("watch reel") || lower.contains("reels") ||
+                   lower.contains("watch more") || lower.contains("watch") ||
+                   lower.contains("shorts") || lower.contains("play") ||
+                   lower.contains("unmute") || lower.contains("fullscreen") ||
+                   lower.contains("pause video") || lower.contains("pause") ||
+                   lower.contains("rewind") || lower.contains("রিল") || lower.contains("ভিডিও") ||
+                   (lower.contains("video") && (lower.contains("play") || lower.contains("watch") || lower.contains("tab")))
         }
 
         fun isReelOrVideoId(id: String): Boolean {
             if (id.isEmpty()) return false
             val lower = id.lowercase()
+            if (lower.contains("story")) return false
             return lower.contains("reel") || lower.contains("shorts") ||
-                   lower.contains("video") || lower.contains("player") ||
-                   lower.contains("watch") || lower.contains("fb_shorts")
+                   lower.contains("video_player") || lower.contains("watch_tab") ||
+                   lower.contains("reels_tab") || lower.contains("fb_shorts") ||
+                   lower.contains("video") || lower.contains("player")
         }
 
         // 1. Direct event text / contentDescription / id
-        if (isReelOrVideoAction(evCd) || isReelOrVideoAction(evText) ||
+        if (isCompactTarget && (isReelOrVideoAction(evCd) || isReelOrVideoAction(evText) ||
             isReelOrVideoAction(srcCd) || isReelOrVideoAction(srcText) ||
-            isReelOrVideoId(srcId)) {
+            isReelOrVideoId(srcId))) {
             runCatching { src?.safeRecycle() }
             return true
         }
@@ -6341,18 +6873,83 @@ class BlockerAccessibilityService : AccessibilityService() {
         ))
     }
 
-    private fun isFacebookHomeFeed(root: AccessibilityNodeInfo): Boolean {
-        // If Reels or Video tab is selected, this is NEVER the Home Newsfeed
-        if (isFacebookReelsOrVideoTabSelected(root)) return false
-        if (isFacebookHomeTabSelected(root)) return true
-        if (hasAnyNodeId(root, FB_NEWSFEED_IDS)) return true
+    private fun isNormalFacebookFeedScreen(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
 
-        val sb = StringBuilder()
-        collectText(root, sb, 0, intArrayOf(250))
-        val t = sb.toString().lowercase()
-        return "what's on your mind" in t || "কী ভাবছেন" in t || "create a post" in t ||
-               "stories" in t || "স্টোরিজ" in t || ("like" in t && "comment" in t) ||
-               ("news feed" in t || "feeds" in t)
+        // If Reels or Video tab is explicitly selected, this is definitely NOT the normal feed
+        if (isFacebookReelsOrVideoTabSelected(root)) return false
+
+        // Check if Home tab is selected
+        if (isFacebookHomeTabSelected(root)) return true
+
+        // Check common Facebook Newsfeed container IDs
+        val feedIds = listOf(
+            "com.facebook.katana:id/feed_composer",
+            "com.facebook.katana:id/composer_entry_point",
+            "com.facebook.katana:id/feed_recycler_view",
+            "com.facebook.katana:id/newsfeed_fragment",
+            "com.facebook.katana:id/primary_feed",
+            "com.facebook.katana:id/feed_list",
+            "com.facebook.katana:id/stories_tray",
+            "com.facebook.katana:id/stories_carousel",
+            "com.facebook.katana:id/story_tray",
+            "com.facebook.katana:id/stories_tray_container",
+            "com.facebook.katana:id/search_button",
+            "com.facebook.katana:id/search_edit_text",
+            "com.facebook.katana:id/messages_jewel",
+            "com.facebook.katana:id/jewel_inbox",
+            "com.facebook.lite:id/feed_list",
+            "com.facebook.lite:id/composer"
+        )
+        if (hasAnyNodeId(root, feedIds)) return true
+
+        val dm = resources.displayMetrics
+        val screenH = dm.heightPixels.coerceAtLeast(1)
+        val rect = Rect()
+
+        var hasTopBarChrome = false
+        var hasComposerOrFeedText = false
+
+        fun scanFeedChrome(node: AccessibilityNodeInfo?, depth: Int, budget: IntArray) {
+            if (node == null || depth > 20 || budget[0]-- <= 0) return
+            val text = node.text?.toString()?.lowercase().orEmpty()
+            val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
+
+            // 1. Top bar chrome: Facebook logo, Search, Messenger in top 18% of screen
+            node.getBoundsInScreen(rect)
+            if (rect.top < screenH * 0.18f && rect.bottom < screenH * 0.24f) {
+                if (text == "facebook" || cd == "facebook" ||
+                    text.contains("search") || cd.contains("search") ||
+                    text.contains("messages") || cd.contains("messages") ||
+                    text.contains("chats") || cd.contains("messenger")) {
+                    hasTopBarChrome = true
+                }
+            }
+
+            // 2. Composer / Feed text
+            if (text.contains("what's on your mind") || cd.contains("what's on your mind") ||
+                text.contains("কী ভাবছেন") || cd.contains("কী ভাবছেন") ||
+                text.contains("create a post") || text.contains("stories") || cd.contains("stories") ||
+                text.contains("স্টোরিজ") || cd.contains("স্টোরিজ") ||
+                text.contains("write something") || text.contains("write something here") ||
+                text.contains("news feed") || text.contains("feeds")) {
+                hasComposerOrFeedText = true
+            }
+
+            for (i in 0 until node.childCount) {
+                if (hasTopBarChrome && hasComposerOrFeedText) break
+                val child = node.getChild(i) ?: continue
+                scanFeedChrome(child, depth + 1, budget)
+                child.safeRecycle()
+            }
+        }
+
+        scanFeedChrome(root, 0, intArrayOf(180))
+        return hasTopBarChrome || hasComposerOrFeedText
+    }
+
+    private fun isFacebookHomeFeed(root: AccessibilityNodeInfo): Boolean {
+        return isNormalFacebookFeedScreen(root)
     }
 
     private fun isFacebookLithoReelsRail(root: AccessibilityNodeInfo): Boolean {
@@ -6447,25 +7044,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         return hasTopReelsOrWatchTitle || hasSeekBarOrTransport
     }
 
-    private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
-        // Fast story whitelist: NEVER block Facebook Stories
-        if (isFacebookStory(root, ev)) {
-            return false
-        }
+    private fun isDedicatedFullScreenReelsOrVideoViewer(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        // Feed chrome MUST NOT be visible
+        if (isNormalFacebookFeedScreen(root)) return false
 
-        // 0. Intercept click / tap on Reels tabs, shortcuts, video posts, or Reels cards FIRST
-        if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            if (isFacebookVideoOrReelClick(ev)) {
-                return true
-            }
-        }
-
-        // 1. STATE C FIRST: Full-Screen / Clicked Player, Litho Action Rail, Transport
-        // Evaluated BEFORE the newsfeed tab bar safe-guard so that videos and Reels
-        // clicked from the newsfeed are blocked immediately even if the main tab bar
-        // remains present in the underlying accessibility hierarchy.
-
-        // Dedicated Activity Class
+        // 1. Dedicated player Activity class
         val evCls = ev?.className?.toString().orEmpty().lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
         val isPlayerActivity =
@@ -6480,77 +7063,139 @@ class BlockerAccessibilityService : AccessibilityService() {
             evCls.contains("videoplayer") || rootCls.contains("videoplayer")
         if (isPlayerActivity) return true
 
-        // Dedicated Player Container IDs
-        if (hasAnyNodeId(root, FB_VIDEO_REELS_PLAYER_IDS)) return true
+        // 2. Dedicated Reels or Video Tab selected
+        if (isFacebookReelsOrVideoTabSelected(root)) return true
 
-        // Litho Right Rail (Signature C2)
-        if (isFacebookLithoReelsRail(root)) return true
-
-        // Player Controls / Transport (Signature C3)
-        if (isFacebookPlayerControls(root)) return true
-
-        // 2. STATE A & B: Main Navigation Bar Inspector
+        // 3. Full-screen surface fills >= 80% screen height with Reels overlay elements
         val dm = resources.displayMetrics
-        val screenW = dm.widthPixels.coerceAtLeast(1)
         val screenH = dm.heightPixels.coerceAtLeast(1)
         val rect = Rect()
 
-        var navTabsCount = 0
-        var isHomeTabSelected = false
-        var isReelsOrVideoTabSelected = false
+        var hasFullScreenPlayerSurface = false
+        val fullScreenPlayerIds = listOf(
+            "com.facebook.katana:id/fb_shorts_viewer_container",
+            "com.facebook.katana:id/fb_shorts_viewer_view_pager",
+            "com.facebook.katana:id/fb_shorts_unified_viewer",
+            "com.facebook.katana:id/fb_shorts_viewer_fragment",
+            "com.facebook.katana:id/reels_viewer_root",
+            "com.facebook.katana:id/watch_and_go_reels_container",
+            "com.facebook.katana:id/warion_root_container",
+            "com.facebook.katana:id/warion_container",
+            "com.facebook.katana:id/warion_video_view",
+            "com.facebook.katana:id/fullscreen_video",
+            "com.facebook.katana:id/fullscreen_video_player",
+            "com.facebook.katana:id/video_fullscreen_player",
+            "com.facebook.katana:id/unified_video_viewer",
+            "com.facebook.lite:id/reels_screen",
+            "com.facebook.lite:id/reels_player",
+            "com.facebook.lite:id/video_player_reels",
+            "com.facebook.lite:id/watch_screen"
+        )
 
-        fun scanNavTabs(node: AccessibilityNodeInfo?, depth: Int, budget: IntArray) {
-            if (node == null || depth > 15 || budget[0]-- <= 0) return
-            node.getBoundsInScreen(rect)
-            val inNavBand = (rect.top < 0.22 * screenH && rect.bottom < 0.26 * screenH) ||
-                            (rect.bottom > 0.88 * screenH && rect.top > 0.78 * screenH)
+        for (id in fullScreenPlayerIds) {
+            val list = root.findAccessibilityNodeInfosByViewId(id)
+            if (!list.isNullOrEmpty()) {
+                for (n in list) {
+                    n.getBoundsInScreen(rect)
+                    if (rect.height() >= screenH * 0.80f) {
+                        hasFullScreenPlayerSurface = true
+                    }
+                    n.safeRecycle()
+                }
+            }
+            if (hasFullScreenPlayerSurface) break
+        }
 
-            if (inNavBand) {
-                val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
-                val text = node.text?.toString()?.lowercase().orEmpty()
-                val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) node.stateDescription?.toString()?.lowercase().orEmpty() else ""
-                val isSelected = node.isSelected || node.isChecked ||
-                    cd.contains("selected") || cd.contains("active") || cd.contains("নির্বাচিত") ||
-                    stateDesc.contains("selected") || stateDesc.contains("active")
+        if (hasFullScreenPlayerSurface) return true
 
-                val isHome = cd.contains("home") || cd.contains("feed") || cd.contains("হোম") ||
-                    text.contains("home") || text.contains("feed") || text.contains("হোম")
-                val isReelsOrVideo = cd.contains("reels") || cd.contains("video") || cd.contains("watch") ||
-                    cd.contains("রিলস") || cd.contains("ভিডিও") || cd.contains("ওয়াচ") ||
-                    text.contains("reels") || text.contains("video") || text.contains("watch")
-                val isOtherTab = cd.contains("friends") || cd.contains("marketplace") ||
-                    cd.contains("notifications") || cd.contains("menu") ||
-                    text.contains("friends") || text.contains("marketplace") ||
-                    text.contains("notifications") || text.contains("menu")
+        // 4. Litho Right Rail on full screen viewer
+        if (isFacebookLithoReelsRail(root)) return true
 
-                if (isHome || isReelsOrVideo || isOtherTab || cd.contains("tab") || text.contains("tab")) {
-                    navTabsCount++
-                    if (isHome && isSelected) isHomeTabSelected = true
-                    if (isReelsOrVideo && isSelected) isReelsOrVideoTabSelected = true
+        return false
+    }
+
+    private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        val dm = resources.displayMetrics
+        val sW = dm.widthPixels.coerceAtLeast(1)
+        val sH = dm.heightPixels.coerceAtLeast(1)
+
+        // Fast story whitelist: NEVER block Facebook Stories
+        if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(root, ev, sW, sH) || isFacebookStory(root, ev)) {
+            return false
+        }
+
+        // Case 2: User explicitly clicked to play/open (TYPE_VIEW_CLICKED)
+        if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (FacebookReelsDetector.isFacebookReelClick(ev, sW, sH) || isFacebookVideoOrReelClick(ev)) {
+                return true
+            }
+        }
+
+        // Priority Override: Active visible Reels player signatures
+        // (Even if opened as an overlay Fragment over the Newsfeed!)
+        if (FacebookReelsDetector.isDedicatedFullScreenReelsOrVideoViewer(root, ev, sW, sH)) {
+            return true
+        }
+
+        if (hasActiveFacebookVideoControls(root, sH)) {
+            return true
+        }
+
+        // Critical Feed Chrome Guard:
+        // If we are on the normal Facebook Newsfeed screen and not an explicit click,
+        // completely ignore unplayed inline videos, "Play video" buttons, SeekBars,
+        // and horizontal Reels carousels. Never fire Back during feed scrolling!
+        if (isNormalFacebookFeedScreen(root)) {
+            return false
+        }
+
+        // Case 1: Dedicated full-screen Reels or Video viewer
+        return isDedicatedFullScreenReelsOrVideoViewer(root, ev)
+    }
+
+    private fun hasActiveFacebookVideoControls(root: AccessibilityNodeInfo, screenH: Int): Boolean {
+        var hasActiveControl = false
+        val rect = Rect()
+
+        fun isStoryReplyOrComposer(text: String, cd: String): Boolean {
+            val l = (text + " " + cd).lowercase()
+            return l.contains("send a message") || l.contains("reply to") ||
+                   l.contains("write a reply") || l.contains("what's on your mind") ||
+                   l.contains("কী ভাবছেন")
+        }
+
+        fun scan(node: AccessibilityNodeInfo?, depth: Int, budget: IntArray) {
+            if (node == null || depth > 20 || budget[0]-- <= 0 || hasActiveControl) return
+            if (!node.isVisibleToUser) return
+
+            val cd = node.contentDescription?.toString()?.lowercase().orEmpty()
+            val text = node.text?.toString()?.lowercase().orEmpty()
+            val id = node.viewIdResourceName?.toString()?.lowercase().orEmpty()
+
+            if (isStoryReplyOrComposer(text, cd)) return
+
+            if (cd == "pause video" || cd == "pause" || text == "pause" ||
+                cd.contains("pause video") || cd.contains("enter fullscreen") ||
+                cd.contains("rewind 10 seconds") || cd.contains("rewind 10") ||
+                cd.contains("fast forward 10") ||
+                (id.contains("seekbar") && !id.contains("story"))) {
+                node.getBoundsInScreen(rect)
+                if (!rect.isEmpty && rect.centerY() > screenH * 0.20f) {
+                    hasActiveControl = true
+                    return
                 }
             }
 
             for (i in 0 until node.childCount) {
+                if (hasActiveControl) break
                 val child = node.getChild(i) ?: continue
-                scanNavTabs(child, depth + 1, budget)
+                scan(child, depth + 1, budget)
+                child.safeRecycle()
             }
         }
 
-        scanNavTabs(root, 0, intArrayOf(120))
-        val mainTabBarVisible = navTabsCount >= 3
-
-        // Dedicated Reels / Video Tab Selected
-        if (mainTabBarVisible && isReelsOrVideoTabSelected && !isHomeTabSelected) {
-            return true
-        }
-
-        // CRITICAL NEWSFEED SAFE-GUARD:
-        // Only if no player is active AND home tab is selected: allow normal newsfeed browsing!
-        if (mainTabBarVisible && isHomeTabSelected && !isReelsOrVideoTabSelected) {
-            return false
-        }
-
-        return false
+        scan(root, 0, intArrayOf(120))
+        return hasActiveControl
     }
 
     // -------------------------------------------------------------------------
@@ -7122,7 +7767,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun collectText(n: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, budget: IntArray) {
-        if (n == null || depth > 20 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
+        if (n == null || depth > 15 || budget[0]-- <= 0 || sb.length >= MAX_SCAN_CHARS) return
+        if (!n.isVisibleToUser) return
         val isPassword = runCatching { n.isPassword }.getOrDefault(false)
         if (!isPassword) {
             n.safeText()?.let { sb.append(it).append(' ') }
@@ -7132,6 +7778,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         for (i in 0 until count) {
             if (budget[0] <= 0 || sb.length >= MAX_SCAN_CHARS) break
             val c = n.safeGetChild(i) ?: continue
+            if (!c.isVisibleToUser) {
+                recycleNode(c)
+                continue
+            }
             collectText(c, sb, depth + 1, budget)
             recycleNode(c)
         }

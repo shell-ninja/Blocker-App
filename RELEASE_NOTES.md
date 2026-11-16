@@ -4,7 +4,45 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.8 (Current Release)
+## v1.0.6.9 (Current Release)
+
+**Release Date:** November 16, 2026  
+**Version:** 1.0.6.9  
+**Build:** 125 (`versionCode`: `1007025` debug / `1107025` release)  
+
+### Major Fixes & Enhancements:
+- **Strict Focus Mode App Blocking & Exact System Whitelist:**
+  - Enforced instantaneous (0ms) app blocking during manual Focus, Daily Schedules, and Prayer Focus sessions: any foreground app not in the user's `allowedUserPackages` is kicked to Home with an instant blackout shield and tracked in daily blocked statistics.
+  - Eliminated all risky `contains("android")` substring matching in favor of an exact system whitelist (`isStrictCoreSystemExempt`): only exact `"com.android.systemui"`, exact `"android"`, Blocker package, default launcher, active IMEs, and dialer/incall UI are exempt. Settings (`com.android.settings`) is blocked during Focus Mode unless explicitly allowed in Essential Apps or during permission setup.
+  - Added dual-engine enforcement: runs on every Accessibility event and backed by a 250ms foreground watchdog (`BlockerForegroundService`) to ensure unallowed apps are immediately ejected.
+- **Dedicated Distraction Shields & Page Hierarchy Separation:**
+  - Cleaned up the **Focus** page to strictly house Focus Session Status/Timer, Daily Schedules, Allowed Essential Apps Whitelist, and Focus Notification Suppressor.
+  - Social media and short-form distraction controls are consolidated on the **Home** Executive Dashboard:
+    - **Separate Instagram Shields:** Independent toggles for **"Block Instagram Reels"** (`block_insta_reels`) and **"Block Instagram Explore"** (`block_insta_search`).
+    - **Complete Facebook Video & Reels Shield:** Blocks both Facebook Reels and all playing Facebook Videos (Watch/Video tabs, dedicated video player classes `VideoPlayer`, `FullScreenVideo`, `WatchFeed`, `VideoHome`, `Tahoe`, etc., active playback controls `"Pause video"`, `"Enter fullscreen"`, `"Rewind 10 seconds"`, and click-to-play thumbnails) while **100% preserving Facebook Stories** (`isFacebookStoryViewerOrStoryClick` evaluated first).
+    - **YouTube Shorts Shield:** Rapid ejection from Shorts player back to subscriptions or timeline.
+- **Focus Mode Notification Bar Turn-off Time:**
+  - Streamlined the notification panel during active Focus sessions: removed CPU-draining chronometer ticking and progress bars in favor of a clean, quiet ongoing notification: `"Focus Mode Active  •  Focus mode will be off at [time]"` which dismisses automatically upon completion.
+- **Onboarding Keep-Alive & Unrestricted Battery Usage Option:**
+  - Added an **"Unrestricted Battery Usage"** row to the initial permission setup with title (`maxLines = 1, softWrap = false`), subtitle, and lifecycle intent tracking.
+  - Enhanced permission lifecycle so the app never accidentally closes or minimizes when navigating to Android Settings during onboarding, requiring core permissions before the final **"Start Protection & Enter Blocker"** button.
+- **3D Tactile Card Architecture & Visual Design:**
+  - Modernized the UI with multi-stop vertical beveled borders and purple ambient/spot colored shadows (`ambientColor = Color.Black, spotColor = Color(0xFF7C3AED)`).
+  - Upgraded the Home screen with an Executive Dashboard, 3-tile bento, and recessed 3D well for the Daily Blocked Activity chart.
+- **Daily App Usage Studio & Usage Limits (`App Blocker` Tab):**
+  - Added a 3-way switcher: **"Block Apps"**, **"Usage Limits"**, and **"Daily Usage"** with interactive screen time bar charts and top app breakdown via `UsageStatsRepository`.
+- **Local Backup & Restore (`Settings` Tab):**
+  - Added local encrypted/checksummed backup and restore for focus schedules, allowed apps, and custom blocking rules.
+- **Background Keep-Alive & Freeze Prevention:**
+  - Replaced `finishAndRemoveTask()` in `MainActivity` with safe task exclusion via `finish()`, closing the Activity and hiding it from Recents without triggering the OEM "task swiped/killed" hook that freezes background services on aggressive ROMs (MIUI/HyperOS, OneUI, HiOS/XOS, ColorOS, Vivo).
+  - Added `onTaskRemoved` lifecycle hooks in `BlockerAccessibilityService` and `BlockerNotificationListenerService` to immediately post keep-alive heartbeats and keep services running.
+  - Promoted `BlockerAccessibilityService` to a foreground service using `ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE`, `stopWithTask="false"`, and a low-importance quiet ongoing notification, preventing Android OOM and Cached App Freezer kills.
+  - Prevented Binder IPC buffer exhaustion and main-thread stalls by pausing watchdogs when screen is off (`PowerManager.isInteractive`), deduplicating redundant watchdog scans (`lastEventProcessedElapsedMs < 300L` / `isScanningAtomic`), and applying 150ms `TYPE_WINDOW_CONTENT_CHANGED` fast-path throttling for non-exempt apps.
+  - Added self-healing rebind recovery: checks service health on device unlock (`ACTION_USER_PRESENT`) and notification events, automatically rebinding `BlockerNotificationListenerService` if disconnected.
+
+---
+
+## v1.0.6.8
 
 **Release Date:** November 12, 2026  
 **Version:** 1.0.6.8  
