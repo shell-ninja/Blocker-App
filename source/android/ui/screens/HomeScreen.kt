@@ -249,9 +249,7 @@ fun HomeScreen(
         // 3. 3D Daily Blocked Activity Chart in Recessed3DWell
         Elevated3DCard(
             shape = RoundedCornerShape(24.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -335,7 +333,7 @@ fun HomeScreen(
                 title = "Block Facebook Reels & Videos",
                 subtitle = "Blocks Reels, Watch feeds, and playing videos",
                 icon = CyberIcons.Movie,
-                checked = distraction.blockFbReels,
+                checked = distraction.blockFacebookReels,
                 pendingUnlockUntil = distraction.pendingUnlocks["block_fb_reels"] ?: 0L,
                 onCancelUnlock = { repo.cancelDistractionUnlock("block_fb_reels") },
                 onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
@@ -346,7 +344,7 @@ fun HomeScreen(
             // Row 2: Instagram Reels
             QuickShieldRow(
                 title = "Block Instagram Reels",
-                subtitle = "Exits Reels back to timeline & chats",
+                subtitle = "Blocks the Reels tab and full-screen Reels feed",
                 icon = CyberIcons.Movie,
                 checked = distraction.blockInstaReels,
                 pendingUnlockUntil = distraction.pendingUnlocks["block_insta_reels"] ?: 0L,
@@ -359,7 +357,7 @@ fun HomeScreen(
             // Row 3: Instagram Explore
             QuickShieldRow(
                 title = "Block Instagram Explore",
-                subtitle = "Blocks explore grid & algorithmic search",
+                subtitle = "Blocks the Explore discovery grid and media feed",
                 icon = CyberIcons.Search,
                 checked = distraction.blockInstaSearch,
                 pendingUnlockUntil = distraction.pendingUnlocks["block_insta_search"] ?: 0L,

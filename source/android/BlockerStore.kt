@@ -393,8 +393,8 @@ object SecureTime {
 
 /** Shared state between the RN module, accessibility service and device admin receiver. */
 object BlockerStore {
-    const val APP_VERSION = "1.0.6.9"
-    const val DISPLAY_VERSION = "1.0.6.9"
+    const val APP_VERSION = "1.0.7"
+    const val DISPLAY_VERSION = "1.0.7"
     const val BUILD_NUMBER = 100
     const val NOTIFICATION_ID_BANKING_MODE = 1005
     const val DAY_MS = 86_400_000L
@@ -509,6 +509,11 @@ object BlockerStore {
         val editor = p.edit()
 
         val all = p.all
+        val a11yPause = p.getLong("accessibility_pause_until", 0L)
+        if (a11yPause > 0L && now >= a11yPause) {
+            editor.remove("accessibility_pause_until")
+            changed = true
+        }
         for ((k, v) in all) {
             if (k == "pending_protection" || k == "pending_setting_focus_apps" || k.startsWith("pending_setting_sched_apps_")) {
                 val target = (v as? Number)?.toLong() ?: continue
@@ -1224,9 +1229,33 @@ object BlockerStore {
         return v
     }
 
-    fun granularToggle(c: Context, key: String): Boolean = prefs(c).getBoolean(key, false)
-    fun setGranularToggle(c: Context, key: String, enabled: Boolean) =
-        prefs(c).edit().putBoolean(key, enabled).apply()
+    fun granularToggle(c: Context, key: String, defaultVal: Boolean = false): Boolean {
+        val effectiveKey = if (key == "block_facebook_reels") "block_fb_reels" else key
+        return prefs(c).getBoolean(effectiveKey, defaultVal)
+    }
+
+    fun setGranularToggle(c: Context, key: String, enabled: Boolean) {
+        val effectiveKey = if (key == "block_facebook_reels") "block_fb_reels" else key
+        prefs(c).edit()
+            .putBoolean(effectiveKey, enabled)
+            .remove("block_facebook_reels")
+            .apply()
+    }
+
+    fun accessibilityPauseUntilEpochMs(c: Context): Long =
+        prefs(c).getLong("accessibility_pause_until", 0L)
+
+    fun setAccessibilityPauseUntilEpochMs(c: Context, untilMs: Long) {
+        if (untilMs <= 0L) {
+            prefs(c).edit().remove("accessibility_pause_until").apply()
+        } else {
+            prefs(c).edit().putLong("accessibility_pause_until", untilMs).apply()
+        }
+        updateIntegrityHmac(c)
+    }
+
+    fun isAccessibilityTemporarilyPaused(c: Context, nowEpochMs: Long = System.currentTimeMillis()): Boolean =
+        accessibilityPauseUntilEpochMs(c) > nowEpochMs
 
     fun blockIncognitoMode(c: Context): Boolean = prefs(c).getBoolean("block_incognito_mode", true)
     fun setBlockIncognitoMode(c: Context, enabled: Boolean) =

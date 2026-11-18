@@ -21,6 +21,7 @@ import android.provider.Settings
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
+import com.blocker.FacebookReelsDetector
 import com.blocker.FocusSchedule
 import com.blocker.MainActivity
 import com.blocker.PrayerSlot
@@ -50,7 +51,8 @@ data class ProtectionState(
     val popupLanguage: String = "en",
     val isBankingMode: Boolean = false,
     val isAutoPauseBanking: Boolean = false,
-    val blockFacebookReels: Boolean = true
+    val blockFacebookReels: Boolean = false,
+    val accessibilityPauseUntilEpochMs: Long = 0L
 )
 
 data class PermissionsState(
@@ -111,9 +113,13 @@ data class AppItem(
 
 data class DistractionShieldState(
     val blockYtShorts: Boolean = false,
+    val blockYoutubeShorts: Boolean = false,
     val blockInstaReels: Boolean = false,
     val blockInstaSearch: Boolean = false,
-    val blockFbReels: Boolean = true,
+    val blockInstagramReels: Boolean = false,
+    val blockInstagramExplore: Boolean = false,
+    val blockFbReels: Boolean = false,
+    val blockFacebookReels: Boolean = false,
     val blockIncognitoMode: Boolean = true,
     val enforceSafeSearchGuard: Boolean = true,
     val pendingUnlocks: Map<String, Long> = emptyMap()
@@ -275,7 +281,8 @@ class BlockerRepository(private val context: Context) {
         val lang = BlockerStore.popupLanguage(appContext)
         val banking = BlockerStore.isBankingMode(appContext)
         val autoPause = BlockerStore.isAutoPauseBanking(appContext)
-        val reels = BlockerStore.granularToggle(appContext, "block_facebook_reels")
+        val reels = BlockerStore.granularToggle(appContext, "block_fb_reels", false)
+        val a11yPause = BlockerStore.accessibilityPauseUntilEpochMs(appContext)
 
         val now = SecureTime.now(appContext)
         val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
@@ -299,7 +306,8 @@ class BlockerRepository(private val context: Context) {
             popupLanguage = lang,
             isBankingMode = banking,
             isAutoPauseBanking = autoPause,
-            blockFacebookReels = reels
+            blockFacebookReels = reels,
+            accessibilityPauseUntilEpochMs = a11yPause
         )
         refreshDistractionShield()
     }
@@ -871,8 +879,13 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun setFacebookReelsBlocked(blocked: Boolean) {
-        BlockerStore.setGranularToggle(appContext, "block_facebook_reels", blocked)
+        BlockerStore.setGranularToggle(appContext, "block_fb_reels", blocked)
+        if (!blocked) {
+            FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+        }
+        RuleSnapshotHolder.syncFromStore(appContext)
         refreshProtection()
+        refreshDistractionShield()
     }
 
     fun toggleAppBlock(pkg: String) {
@@ -1184,11 +1197,19 @@ class BlockerRepository(private val context: Context) {
             val t = p.getLong("pending_setting_$k", 0L)
             if (t > 0L) pendingMap[k] = t
         }
+        val instaReels = BlockerStore.granularToggle(appContext, "block_insta_reels", false)
+        val instaSearch = BlockerStore.granularToggle(appContext, "block_insta_search", false)
+        val fbReels = BlockerStore.granularToggle(appContext, "block_fb_reels", false)
+        val ytShorts = BlockerStore.granularToggle(appContext, "block_yt_shorts", false)
         _distractionShield.value = DistractionShieldState(
-            blockYtShorts = BlockerStore.granularToggle(appContext, "block_yt_shorts"),
-            blockInstaReels = BlockerStore.granularToggle(appContext, "block_insta_reels"),
-            blockInstaSearch = BlockerStore.granularToggle(appContext, "block_insta_search"),
-            blockFbReels = BlockerStore.granularToggle(appContext, "block_fb_reels"),
+            blockYtShorts = ytShorts,
+            blockYoutubeShorts = ytShorts,
+            blockInstaReels = instaReels,
+            blockInstaSearch = instaSearch,
+            blockInstagramReels = instaReels,
+            blockInstagramExplore = instaSearch,
+            blockFbReels = fbReels,
+            blockFacebookReels = fbReels,
             blockIncognitoMode = BlockerStore.blockIncognitoMode(appContext),
             enforceSafeSearchGuard = BlockerStore.enforceSafeSearchGuard(appContext),
             pendingUnlocks = pendingMap
@@ -1197,35 +1218,56 @@ class BlockerRepository(private val context: Context) {
     }
 
     fun toggleDistraction(key: String, enabled: Boolean) {
+        val canonicalKey = if (key == "block_facebook_reels") "block_fb_reels" else key
         val now = System.currentTimeMillis()
         if (enabled) {
-            BlockerStore.cancelSettingUnlockTarget(appContext, key)
-            BlockerStore.prefs(appContext).edit().putBoolean(key, true).apply()
+            BlockerStore.cancelSettingUnlockTarget(appContext, canonicalKey)
+            BlockerStore.prefs(appContext).edit().putBoolean(canonicalKey, true).remove("block_facebook_reels").apply()
             refreshDistractionShield()
         } else {
             val protActive = BlockerStore.active(appContext)
             val fActive = BlockerStore.focusActive(appContext)
             if (protActive || fActive) {
-                val target = BlockerStore.settingUnlockTarget(appContext, key)
+                val target = BlockerStore.settingUnlockTarget(appContext, canonicalKey)
                 if (target > 0L && now >= target) {
-                    BlockerStore.cancelSettingUnlockTarget(appContext, key)
-                    BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
+                    BlockerStore.cancelSettingUnlockTarget(appContext, canonicalKey)
+                    BlockerStore.prefs(appContext).edit().putBoolean(canonicalKey, false).remove("block_facebook_reels").apply()
+                    if (canonicalKey == "block_fb_reels") {
+                        FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                    }
                     refreshDistractionShield()
                 } else if (target == 0L) {
                     val delayMs = BlockerStore.delayMs(appContext)
-                    BlockerStore.setSettingUnlockTarget(appContext, key, now + delayMs)
+                    BlockerStore.setSettingUnlockTarget(appContext, canonicalKey, now + delayMs)
                     refreshDistractionShield()
                 }
             } else {
-                BlockerStore.prefs(appContext).edit().putBoolean(key, false).apply()
+                BlockerStore.prefs(appContext).edit().putBoolean(canonicalKey, false).remove("block_facebook_reels").apply()
+                if (canonicalKey == "block_fb_reels") {
+                    FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                }
                 refreshDistractionShield()
             }
         }
     }
 
     fun cancelDistractionUnlock(key: String) {
-        BlockerStore.cancelSettingUnlockTarget(appContext, key)
+        val canonicalKey = if (key == "block_facebook_reels") "block_fb_reels" else key
+        BlockerStore.cancelSettingUnlockTarget(appContext, canonicalKey)
         refreshDistractionShield()
+    }
+
+    fun pauseAccessibilityTemporarily(minutes: Int) {
+        val until = System.currentTimeMillis() + (minutes * 60_000L)
+        BlockerStore.setAccessibilityPauseUntilEpochMs(appContext, until)
+        RuleSnapshotHolder.syncFromStore(appContext)
+        refreshProtection()
+    }
+
+    fun resumeAccessibilityProtectionNow() {
+        BlockerStore.setAccessibilityPauseUntilEpochMs(appContext, 0L)
+        RuleSnapshotHolder.syncFromStore(appContext)
+        refreshProtection()
     }
 
     fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet(), daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7)) {

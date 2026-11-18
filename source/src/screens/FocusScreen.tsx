@@ -593,78 +593,6 @@ function EssentialApps({ apps }: { apps: InstalledApp[] }) {
   );
 }
 
-function GranularFocusCard() {
-  const p = useProtection();
-  const gf = p.granularFocus || {
-    block_fb_reels: false,
-    block_insta_reels: false,
-    block_insta_search: false,
-    block_yt_shorts: false,
-  };
-
-  const onToggle = async (
-    key: 'block_fb_reels' | 'block_insta_reels' | 'block_insta_search' | 'block_yt_shorts',
-    on: boolean
-  ) => {
-    try {
-      const r = await setGranularFocusToggle(key, on);
-      if (r !== 'applied') {
-        const delayText = p.delayDays === 1 ? '24-hour' : `${p.delayDays}-day`;
-        showAlert(
-          'Change requested',
-          `This shield will be disabled only after the ${delayText} timer completes and you confirm.`
-        );
-      }
-    } catch (e) {
-      showAlert('Blocker', errMsg(e));
-    }
-  };
-
-  return (
-    <GlowCard style={{ padding: 18 }}>
-      <Title icon={Icons.shieldOn}>Distraction Shields</Title>
-      <Sub>Exit short-form video feeds & adult content while keeping parent apps usable.</Sub>
-      <View style={{ marginTop: 12 }}>
-        <AnimatedToggleRow
-          icon={Icons.play}
-          label="Block YouTube Shorts"
-          sub="Exit Shorts back to standard feed"
-          value={gf.block_yt_shorts}
-          onValueChange={v => onToggle('block_yt_shorts', v)}
-        />
-        <AnimatedToggleRow
-          icon={Icons.film}
-          label="Block Instagram Reels"
-          sub="Exit Reels back to main feed"
-          value={gf.block_insta_reels}
-          onValueChange={v => onToggle('block_insta_reels', v)}
-        />
-        <AnimatedToggleRow
-          icon={Icons.search}
-          label="Block Instagram Explore"
-          sub="Exit Explore & search feed"
-          value={gf.block_insta_search}
-          onValueChange={v => onToggle('block_insta_search', v)}
-        />
-        <AnimatedToggleRow
-          icon={Icons.apps}
-          label="Block Facebook Reels & Videos"
-          sub="Exit Reels, Watch & video posts (Stories remain accessible)"
-          value={gf.block_fb_reels}
-          onValueChange={v => onToggle('block_fb_reels', v)}
-        />
-        <AnimatedToggleRow
-          icon={Icons.shield}
-          label="Reddit Mature Content Lockdown"
-          sub="Permanently enforces 'Show mature content' OFF"
-          value={true}
-          badge="Enforced"
-        />
-        <LockBar lockKey="granular_focus" />
-      </View>
-    </GlowCard>
-  );
-}
 
 export default function FocusScreen() {
   const t = useTheme();
@@ -913,7 +841,6 @@ export default function FocusScreen() {
           </GlowCard>
 
           <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
-          <GranularFocusCard />
           <EssentialApps apps={apps} />
         </ScrollView>
       ) : (
@@ -972,7 +899,6 @@ export default function FocusScreen() {
             </GlowCard>
 
             <SchedulesCard apps={apps} onAddNew={addNewSchedule} newestId={newestId} />
-            <GranularFocusCard />
             <EssentialApps apps={apps} />
           </ScrollView>
           <Fab onPress={addNewSchedule} />

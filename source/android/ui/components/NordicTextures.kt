@@ -230,7 +230,7 @@ fun NordicFoliageHeroCard(
 @Composable
 fun Elevated3DCard(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(20.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(24.dp),
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit

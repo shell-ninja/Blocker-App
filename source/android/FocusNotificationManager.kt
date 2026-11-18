@@ -202,6 +202,7 @@ object FocusNotificationManager {
             .setContentTitle("Focus Mode Active")
             .setContentText("Focus mode will be off at $formattedEndTime")
             .setOngoing(true)
+            .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
@@ -252,7 +253,7 @@ object FocusNotificationManager {
 
     private fun formatClockTime(epochMillis: Long): String {
         return runCatching {
-            val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+            val sdf = SimpleDateFormat("hh:mm a", Locale.US)
             sdf.format(Date(epochMillis))
         }.getOrDefault("")
     }

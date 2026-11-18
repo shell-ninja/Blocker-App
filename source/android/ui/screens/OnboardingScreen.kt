@@ -1,5 +1,11 @@
 package com.blocker.ui.screens
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -15,12 +21,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.blocker.MainActivity
+import com.blocker.PermissionFlowTracker
 import com.blocker.R
 import com.blocker.data.BlockerRepository
 import com.blocker.ui.components.CyberIcons
@@ -34,8 +45,29 @@ fun OnboardingScreen(
     val context = LocalContext.current
     val perms by repo.permissionsState.collectAsState()
     val scrollState = rememberScrollState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var isBatteryGranted by remember {
+        mutableStateOf(
+            (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isIgnoringBatteryOptimizations(context.packageName) == true
+        )
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isBatteryGranted = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isIgnoringBatteryOptimizations(context.packageName) == true
+                repo.refreshPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val totalCount = 7
+    val effectiveBatteryGranted = isBatteryGranted || perms.batteryOptimizationsIgnored
     val grantedCount = listOf(
         perms.accessibility,
         perms.deviceAdmin,
@@ -43,7 +75,7 @@ fun OnboardingScreen(
         perms.dndAccess,
         perms.notificationAccess,
         perms.usageAccess,
-        perms.batteryOptimizationsIgnored
+        effectiveBatteryGranted
     ).count { it }
 
     Column(
@@ -166,15 +198,33 @@ fun OnboardingScreen(
         // 7. Unrestricted Battery Usage
         PermissionSetupCard(
             title = "Unrestricted Battery Usage",
-            description = "Prevents Android from pausing Blocker in the background.",
+            description = "Prevents Android from pausing Blocker in the background",
             iconVector = CyberIcons.Battery,
-            isGranted = perms.batteryOptimizationsIgnored,
-            onGrantClick = { repo.openPermissionSettings(context, "battery") }
+            isGranted = effectiveBatteryGranted,
+            onGrantClick = {
+                PermissionFlowTracker.isLaunchingPermissionIntent = true
+                PermissionFlowTracker.lastBatteryPermissionRequestMs = SystemClock.elapsedRealtime()
+                MainActivity.isLaunchingExternal = true
+                val pkgUri = Uri.parse("package:${context.packageName}")
+                runCatching {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkgUri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }.onFailure {
+                    runCatching {
+                        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(fallback)
+                    }
+                }
+            }
         )
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        val coreGranted = perms.accessibility && perms.deviceAdmin && perms.overlay && perms.dndAccess && perms.batteryOptimizationsIgnored
+        val coreGranted = perms.accessibility && perms.deviceAdmin && perms.overlay && perms.dndAccess && effectiveBatteryGranted
 
         if (coreGranted) {
             Button(

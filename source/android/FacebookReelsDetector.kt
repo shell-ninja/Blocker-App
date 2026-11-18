@@ -5,14 +5,17 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.blocker.data.CompiledRuleSnapshot
+import com.blocker.data.RuleSnapshotHolder
 
 /**
- * High-performance, zero-lag detector for Facebook Reels and full-screen video viewers.
+ * High-performance, zero-lag detector for Facebook Reels AND Facebook Videos.
  *
  * Core Guarantees:
  * 1. Facebook Stories (both clicking from tray and viewing in full screen) are 100% ALLOWED.
- * 2. Facebook Reels (both dedicated tab and clicking a Reel card/thumbnail in the Newsfeed) are 100% BLOCKED.
- * 3. Normal Newsfeed scrolling past unplayed posts remains 100% smooth without false reloads.
+ * 2. Facebook Reels AND Facebook Videos (Watch tab, playing in-feed video, full-screen/theatre player,
+ *    and clicking to play) are 100% BLOCKED.
+ * 3. Normal Newsfeed scrolling past unplayed video posts remains 100% allowed without false blocks.
  */
 object FacebookReelsDetector {
 
@@ -30,7 +33,7 @@ object FacebookReelsDetector {
 
     /**
      * Unconditional Facebook Stories Whitelist Check:
-     * Evaluated FIRST before any Reels inspection.
+     * Evaluated FIRST before any Reels or Video inspection.
      * Returns true if user is clicking a Story card or currently viewing a full-screen Story.
      */
     fun isFacebookStoryViewerOrStoryClick(
@@ -129,8 +132,6 @@ object FacebookReelsDetector {
 
     /**
      * Detects whether the current active window is the Facebook Story Viewer.
-     * Returns true if screen matches Story Activity, Story controls, or bottom horizontal reaction bar,
-     * while NOT having a top "Reels" header.
      */
     fun isFacebookStoryViewer(
         root: AccessibilityNodeInfo,
@@ -138,7 +139,6 @@ object FacebookReelsDetector {
         screenWidth: Int,
         screenHeight: Int
     ): Boolean {
-        // Activity/class name fast check
         val lowerCls = className.lowercase()
         val rootCls = root.className?.toString().orEmpty().lowercase()
         val isStoryClass = lowerCls.contains("storyviewer") || rootCls.contains("storyviewer") ||
@@ -147,7 +147,7 @@ object FacebookReelsDetector {
                            lowerCls.contains("inspirationstory") || rootCls.contains("inspirationstory")
 
         val rect = Rect()
-        var hasTopReelsHeader = false
+        var hasTopReelsOrWatchHeader = false
         var hasStoryIdOrMarker = isStoryClass
         var hasStoryControlOrReplyBar = false
         var horizontalReactionCount = 0
@@ -185,25 +185,22 @@ object FacebookReelsDetector {
             val lowerCd = cd.lowercase()
             val lowerId = id.lowercase()
 
-            // Check if top Reels title is present
             if (rect.top < screenHeight * 0.16f) {
-                if (text == "Reels" || cd == "Reels" || text == "রিলস" || cd == "রিলস") {
-                    hasTopReelsHeader = true
+                if (text == "Reels" || cd == "Reels" || text == "রিলস" || cd == "রিলস" ||
+                    text == "Watch" || cd == "Watch" || text == "Video" || cd == "Video") {
+                    hasTopReelsOrWatchHeader = true
                 }
             }
 
-            // 1. Story Activity / View ID
             if (lowerId.contains("story") || lowerId.contains("stories") ||
                 lowerId.contains("story_viewer") || lowerId.contains("story_viewer_fragment")) {
                 hasStoryIdOrMarker = true
             }
 
-            // 2. Story Viewer Controls & Bottom Reply Bar
             if (isStoryControl(lowerText) || isStoryControl(lowerCd)) {
                 hasStoryControlOrReplyBar = true
             }
 
-            // 3. Story Bottom Horizontal Reaction Bar
             if (rect.top > screenHeight * 0.78f) {
                 if (isHorizontalReaction(lowerText) || isHorizontalReaction(lowerCd)) {
                     horizontalReactionCount++
@@ -220,10 +217,7 @@ object FacebookReelsDetector {
 
         scan(root, 0)
 
-        // If top "Reels" header is visibly present, this is definitely Reels, not a Story!
-        if (hasTopReelsHeader) return false
-
-        // Match ANY of the 3 Story Viewer signatures:
+        if (hasTopReelsOrWatchHeader) return false
         if (hasStoryIdOrMarker) return true
         if (hasStoryControlOrReplyBar) return true
         if (horizontalReactionCount >= 2) return true
@@ -232,78 +226,97 @@ object FacebookReelsDetector {
     }
 
     /**
-     * Intercept clicking a Reel card or video play button in the Newsfeed.
-     *
-     * STRICT RULE:
-     * Only trigger if clicked node or immediate container EXPLICITLY contains "reel" or "reels"
-     * (e.g. "Reel", "Reels", "Play reel", "See more reels", "Reels and short videos", "Original audio").
-     * Never trigger on generic Story cards or unadorned "Play" buttons.
+     * Block Clicking Any Video or Reel to Play It (TYPE_VIEW_CLICKED):
+     * Walks up 3 parent levels to check if the user clicked:
+     * - Any "Play", "Play video", "Watch", "Watch more", "Unmute", or "Fullscreen" button on a video post,
+     * - The "Video" or "Watch" tab icon in the Facebook navigation bar, OR
+     * - Any "Reel" / "Reels" card or button.
      */
-    fun isFacebookReelClick(
+    fun isFacebookVideoOrReelClick(
         ev: AccessibilityEvent,
-        screenWidth: Int,
-        screenHeight: Int
+        screenWidth: Int = 1080,
+        screenHeight: Int = 2400,
+        snapshot: CompiledRuleSnapshot = RuleSnapshotHolder.snapshot
     ): Boolean {
+        if (!snapshot.blockFacebookReels) {
+            pendingFacebookReelCheckUntilMs = 0L
+            return false
+        }
         if (ev.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) return false
 
-        // Unconditional story exemption
+        // Story click is 100% exempt
         if (isFacebookStoryClick(ev)) {
             pendingFacebookReelCheckUntilMs = 0L
             return false
         }
 
-        val src = ev.source ?: return false
-        val rect = Rect()
-        src.getBoundsInScreen(rect)
+        fun isVideoOrReelAction(s: String): Boolean {
+            if (s.isEmpty()) return false
+            val l = s.lowercase().trim()
+            if (l.contains("story") || l.contains("stories")) return false
 
-        val h = rect.height()
-        if (h > screenHeight * 0.58f && !rect.isEmpty) {
-            src.safeRecycle()
+            // 1. Play / Watch / Fullscreen video buttons
+            if (l == "play" || l == "play video" || l == "watch" || l == "watch more" ||
+                l == "unmute" || l == "mute" || l == "fullscreen" || l == "enter fullscreen" ||
+                l.startsWith("play video") || l.startsWith("watch video") ||
+                l == "ভিডিও চালান" || l == "চালান") {
+                return true
+            }
+
+            // 2. Video / Watch tab in navigation bar
+            if (l == "video" || l == "watch" || l == "facebook watch" || l == "live videos" ||
+                l == "video, tab" || l == "watch, tab" || l == "video tab" || l == "watch tab" ||
+                l == "ভিডিও" || l == "ওয়াচ") {
+                return true
+            }
+
+            // 3. Any Reel / Reels card or button
+            if (l.contains("reel") || l.contains("reels") || l.contains("play reel") ||
+                l.contains("see more reels") || l.contains("reels and short videos") ||
+                l.contains("reels & short videos") || l.contains("original audio") ||
+                l.contains("watch reel") || l.contains("view reel") || l.contains("রিলস")) {
+                return true
+            }
+
             return false
         }
 
-        fun isExplicitReelKeyword(s: String): Boolean {
-            if (s.isEmpty()) return false
-            val l = s.lowercase()
-            if (l.contains("story") || l.contains("stories")) return false
-            return l.contains("reel") || l.contains("reels") ||
-                   l.contains("play reel") || l.contains("see more reels") ||
-                   l.contains("reels and short videos") || l.contains("reels & short videos") ||
-                   l.contains("original audio") || l.contains("watch reel") ||
-                   l.contains("view reel") || l.contains("রিলস")
-        }
-
-        fun isExplicitReelId(id: String): Boolean {
+        fun isVideoOrReelId(id: String): Boolean {
             if (id.isEmpty()) return false
             val l = id.lowercase()
             if (l.contains("story")) return false
-            return l.contains("reel") || l.contains("fb_shorts") ||
-                   l.contains("reels_tab") || l.contains("reels_viewer")
+            return l.contains("reel") || l.contains("reels") || l.contains("video") ||
+                   l.contains("watch") || l.contains("fb_shorts") || l.contains("videoplayer") ||
+                   l.contains("tahoe")
         }
 
         val evCd = ev.contentDescription?.toString().orEmpty()
         val evText = ev.text.joinToString(" ")
+        if (isVideoOrReelAction(evCd) || isVideoOrReelAction(evText)) {
+            pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2500L
+            return true
+        }
+
+        val src = ev.source ?: return false
         val srcCd = src.contentDescription?.toString().orEmpty()
         val srcText = src.text?.toString().orEmpty()
         val srcId = src.viewIdResourceName?.toString().orEmpty()
 
-        if (isExplicitReelKeyword(evCd) || isExplicitReelKeyword(evText) ||
-            isExplicitReelKeyword(srcCd) || isExplicitReelKeyword(srcText) ||
-            isExplicitReelId(srcId)) {
-            pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2000L
+        if (isVideoOrReelAction(srcCd) || isVideoOrReelAction(srcText) || isVideoOrReelId(srcId)) {
+            pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2500L
             src.safeRecycle()
             return true
         }
 
-        // Walk up to 3 parent levels
+        // Walk up 3 parent levels
         var p = src.parent
         var depth = 0
         while (p != null && depth < 3) {
             val pCd = p.contentDescription?.toString().orEmpty()
             val pText = p.text?.toString().orEmpty()
             val pId = p.viewIdResourceName?.toString().orEmpty()
-            if (isExplicitReelKeyword(pCd) || isExplicitReelKeyword(pText) || isExplicitReelId(pId)) {
-                pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2000L
+            if (isVideoOrReelAction(pCd) || isVideoOrReelAction(pText) || isVideoOrReelId(pId)) {
+                pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2500L
                 p.safeRecycle()
                 src.safeRecycle()
                 return true
@@ -321,10 +334,10 @@ object FacebookReelsDetector {
             val cCd = c.contentDescription?.toString().orEmpty()
             val cText = c.text?.toString().orEmpty()
             val cId = c.viewIdResourceName?.toString().orEmpty()
-            val hit = isExplicitReelKeyword(cCd) || isExplicitReelKeyword(cText) || isExplicitReelId(cId)
+            val hit = isVideoOrReelAction(cCd) || isVideoOrReelAction(cText) || isVideoOrReelId(cId)
             c.safeRecycle()
             if (hit) {
-                pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2000L
+                pendingFacebookReelCheckUntilMs = SystemClock.elapsedRealtime() + 2500L
                 src.safeRecycle()
                 return true
             }
@@ -335,58 +348,99 @@ object FacebookReelsDetector {
     }
 
     /**
-     * Detect full-screen Reels viewer even when opened as an overlay Fragment over the Newsfeed.
-     * Evaluates only visible nodes (node.isVisibleToUser == true) and caps traversal to 120 visible nodes.
-     *
-     * STRICT RULES:
-     * 1. Returns false IMMEDIATELY if it matches Facebook Story viewer.
-     * 2. Only triggers if at least one of Proof 1, Proof 2, or Proof 3 is met.
+     * Backward-compatible alias for click detection.
      */
-    fun isDedicatedFullScreenReelsOrVideoViewer(
-        root: AccessibilityNodeInfo,
-        ev: AccessibilityEvent?,
-        screenWidth: Int,
-        screenHeight: Int
-    ): Boolean {
-        val evCls = ev?.className?.toString().orEmpty()
+    fun isFacebookReelClick(
+        ev: AccessibilityEvent,
+        screenWidth: Int = 1080,
+        screenHeight: Int = 2400,
+        snapshot: CompiledRuleSnapshot = RuleSnapshotHolder.snapshot
+    ): Boolean = isFacebookVideoOrReelClick(ev, screenWidth, screenHeight, snapshot)
 
-        // 1. Unconditional Stories Whitelist (First Guard)
-        if (isFacebookStoryViewer(root, evCls, screenWidth, screenHeight)) {
+    /**
+     * Line-1 gated evaluate method for Facebook Reels & Videos.
+     */
+    fun evaluate(
+        root: AccessibilityNodeInfo?,
+        ev: AccessibilityEvent?,
+        screenWidth: Int = 1080,
+        screenHeight: Int = 2400,
+        snapshot: CompiledRuleSnapshot = RuleSnapshotHolder.snapshot
+    ): Boolean {
+        if (!snapshot.blockFacebookReels) {
+            pendingFacebookReelCheckUntilMs = 0L
+            return false
+        }
+        return isFacebookVideoOrReels(root, ev, screenWidth, screenHeight, snapshot)
+    }
+
+    /**
+     * Comprehensive Facebook Video & Reels Checker:
+     * Returns true if screen or click event represents ANY Facebook video or Reel.
+     * Always allows Stories and unplayed Newsfeed scrolling.
+     */
+    fun isFacebookVideoOrReels(
+        root: AccessibilityNodeInfo?,
+        ev: AccessibilityEvent?,
+        screenWidth: Int = 1080,
+        screenHeight: Int = 2400,
+        snapshot: CompiledRuleSnapshot = RuleSnapshotHolder.snapshot
+    ): Boolean {
+        if (!snapshot.blockFacebookReels) {
             pendingFacebookReelCheckUntilMs = 0L
             return false
         }
 
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val inPostClickWindow = nowElapsed < pendingFacebookReelCheckUntilMs
+        // 1. Stories Whitelist Check FIRST
+        if (isFacebookStoryViewerOrStoryClick(root, ev, screenWidth, screenHeight)) {
+            pendingFacebookReelCheckUntilMs = 0L
+            return false
+        }
 
-        // Proof 1: Dedicated Reels Activity or View ID
+        // 2. Click Intercept (TYPE_VIEW_CLICKED)
+        if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (isFacebookVideoOrReelClick(ev, screenWidth, screenHeight, snapshot)) {
+                return true
+            }
+        }
+
+        if (root == null) return false
+
+        val evCls = ev?.className?.toString().orEmpty()
+        val rootCls = root.className?.toString().orEmpty()
         val lowerEvCls = evCls.lowercase()
-        val rootCls = root.className?.toString().orEmpty().lowercase()
-        if (lowerEvCls.contains("fbreelsviewer") || rootCls.contains("fbreelsviewer") ||
-            lowerEvCls.contains("inspirationreelviewer") || rootCls.contains("inspirationreelviewer") ||
-            lowerEvCls.contains("reelsviewer") || rootCls.contains("reelsviewer")) {
+        val lowerRootCls = rootCls.lowercase()
+
+        // 3. Dedicated Video/Reels Player Activity/Class check
+        if (lowerEvCls.contains("videoplayer") || lowerRootCls.contains("videoplayer") ||
+            lowerEvCls.contains("fullscreenvideo") || lowerRootCls.contains("fullscreenvideo") ||
+            lowerEvCls.contains("watchfeed") || lowerRootCls.contains("watchfeed") ||
+            lowerEvCls.contains("videohome") || lowerRootCls.contains("videohome") ||
+            lowerEvCls.contains("tahoe") || lowerRootCls.contains("tahoe") ||
+            lowerEvCls.contains("fbreelsviewer") || lowerRootCls.contains("fbreelsviewer") ||
+            lowerEvCls.contains("inspirationreelviewer") || lowerRootCls.contains("inspirationreelviewer") ||
+            lowerEvCls.contains("reelviewer") || lowerRootCls.contains("reelviewer")) {
             return true
         }
 
         val rect = Rect()
+        var hasWatchTabSelected = false
+        var hasWatchTopTitle = false
+        var hasSuggestedVideosHeader = false
 
-        var hasExplicitReelsViewerId = false
-        var hasVisibleSeekBarInDarkPlayer = false
+        var hasPlayerClassOrId = false
+        var hasActivePlaybackControls = false
+        var hasVisibleSeekBar = false
 
-        // Proof 2: Vertical action stack on right edge (bounds.left >= screenWidth * 0.72f)
         var likeBounds: Rect? = null
         var commentBounds: Rect? = null
         var shareBounds: Rect? = null
-        var hasStoryReplyText = false
 
-        // Proof 3: Top "Reels" overlay bar
-        var hasTopReelsTitle = false
         var isWhatsOnYourMindVisible = false
-
         var visibleCount = 0
 
         fun scan(node: AccessibilityNodeInfo?, depth: Int) {
-            if (node == null || depth > 20 || visibleCount >= 120) return
+            if (node == null || depth > 22 || visibleCount >= 140) return
             if (!node.isVisibleToUser) return
 
             visibleCount++
@@ -395,41 +449,85 @@ object FacebookReelsDetector {
             val text = node.text?.toString().orEmpty()
             val cd = node.contentDescription?.toString().orEmpty()
             val id = node.viewIdResourceName?.toString().orEmpty()
-            val lowerText = text.lowercase()
-            val lowerCd = cd.lowercase()
+            val cls = node.className?.toString().orEmpty()
+            val lowerText = text.lowercase().trim()
+            val lowerCd = cd.lowercase().trim()
             val lowerId = id.lowercase()
+            val lowerNodeCls = cls.lowercase()
 
-            // Check if Story reply bar is visible (never block if user can send a message/reply to story)
-            if (lowerText.contains("send a message") || lowerCd.contains("send a message") ||
-                lowerText.contains("send message") || lowerCd.contains("send message") ||
-                lowerText.contains("reply to ") || lowerCd.contains("reply to ") ||
-                lowerText.contains("write a reply") || lowerCd.contains("write a reply")) {
-                hasStoryReplyText = true
-            }
-
-            // Check "What's on your mind?" visibility (indicates newsfeed composer is currently visible)
+            // Check composer visibility (Newsfeed indicator)
             if (lowerText.contains("what's on your mind") || lowerCd.contains("what's on your mind") ||
                 lowerText.contains("কী ভাবছেন") || lowerCd.contains("কী ভাবছেন")) {
                 isWhatsOnYourMindVisible = true
             }
 
-            // Proof 1 View IDs: Dedicated Reels player container IDs
-            if (lowerId.contains("fbreelsviewer") || lowerId.contains("inspirationreelviewer") ||
-                lowerId.contains("reelsviewer") || lowerId.contains("reels_viewer")) {
-                if (rect.height() >= screenHeight * 0.50f) {
-                    hasExplicitReelsViewerId = true
+            // Check A: Watch / Video tab is open
+            val isWatchOrVideoLabel = lowerText == "video" || lowerCd == "video" ||
+                                      lowerText == "watch" || lowerCd == "watch" ||
+                                      lowerText == "facebook watch" || lowerCd == "facebook watch" ||
+                                      lowerText == "live videos" || lowerCd == "live videos" ||
+                                      lowerText.contains("watch, tab") || lowerCd.contains("watch, tab") ||
+                                      lowerText.contains("video, tab") || lowerCd.contains("video, tab") ||
+                                      lowerText == "ভিডিও" || lowerCd == "ভিডিও" ||
+                                      lowerText == "ওয়াচ" || lowerCd == "ওয়াচ"
+
+            val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) node.stateDescription?.toString()?.lowercase().orEmpty() else ""
+            val isNodeSelected = node.isSelected || lowerCd.contains("selected") || stateDesc.contains("selected") || lowerCd.contains("active")
+
+            if (isWatchOrVideoLabel && isNodeSelected) {
+                hasWatchTabSelected = true
+            }
+
+            if (rect.top < screenHeight * 0.18f) {
+                if (lowerText == "video" || lowerCd == "video" || lowerText == "watch" || lowerCd == "watch" ||
+                    lowerText == "reels" || lowerCd == "reels" || lowerText == "ভিডিও" || lowerText == "রিলস") {
+                    hasWatchTopTitle = true
                 }
             }
 
-            // Dark full-screen player SeekBar (without newsfeed composer)
-            if (lowerId.contains("seekbar") || lowerCd.contains("seek bar")) {
-                if (rect.centerY() > screenHeight * 0.60f && !isWhatsOnYourMindVisible) {
-                    hasVisibleSeekBarInDarkPlayer = true
+            if (lowerText.contains("suggested videos") || lowerCd.contains("suggested videos") ||
+                lowerText.contains("up next") || lowerCd.contains("up next") ||
+                lowerText.contains("more videos") || lowerCd.contains("more videos") ||
+                lowerText.contains("reels and short videos") || lowerCd.contains("reels and short videos")) {
+                hasSuggestedVideosHeader = true
+            }
+
+            // Check B: Full-screen or Theatre video player IDs/classes
+            if (lowerNodeCls.contains("videoplayer") || lowerNodeCls.contains("fullscreenvideo") ||
+                lowerId.contains("videoplayer") || lowerId.contains("fullscreenvideo") ||
+                lowerId.contains("watchfeed") || lowerId.contains("videohome") ||
+                lowerId.contains("tahoe") || lowerId.contains("fbreelsviewer") ||
+                lowerId.contains("inspirationreelviewer") || lowerId.contains("reels_viewer")) {
+                if (rect.height() >= screenHeight * 0.45f) {
+                    hasPlayerClassOrId = true
                 }
             }
 
-            // Proof 2: Right-edge vertical action stack (bounds.left >= screenWidth * 0.72f)
-            if (rect.left >= screenWidth * 0.72f) {
+            // Check C: Active Video Playback Controls
+            val isPause = lowerText == "pause" || lowerCd == "pause" ||
+                          lowerText == "pause video" || lowerCd == "pause video" ||
+                          lowerText == "ভিডিও থামান" || lowerCd == "ভিডিও থামান"
+
+            val isFullscreenToggle = lowerText.contains("enter fullscreen") || lowerCd.contains("enter fullscreen") ||
+                                     lowerText.contains("exit fullscreen") || lowerCd.contains("exit fullscreen")
+
+            val isPlaybackScrub = lowerText.contains("rewind 10") || lowerCd.contains("rewind 10") ||
+                                  lowerText.contains("forward 10") || lowerCd.contains("forward 10") ||
+                                  lowerText == "video player" || lowerCd == "video player"
+
+            if (isPause || isFullscreenToggle || isPlaybackScrub) {
+                hasActivePlaybackControls = true
+            }
+
+            // Visible SeekBar scrubber bar
+            if (lowerNodeCls.contains("seekbar") || lowerId.contains("seekbar") || lowerCd.contains("seek bar")) {
+                if (!lowerId.contains("story") && rect.centerY() > screenHeight * 0.20f) {
+                    hasVisibleSeekBar = true
+                }
+            }
+
+            // Vertical action stack on right edge
+            if (rect.left >= screenWidth * 0.70f) {
                 val isLike = lowerCd.startsWith("like") || lowerCd.startsWith("react") || lowerText == "like"
                 val isComment = lowerCd.startsWith("comment") || lowerText == "comment"
                 val isShare = lowerCd.startsWith("share") || lowerCd.startsWith("send") || lowerText == "share"
@@ -443,15 +541,8 @@ object FacebookReelsDetector {
                 }
             }
 
-            // Proof 3: Top "Reels" header (bounds.top < screenHeight * 0.16f)
-            if (rect.top < screenHeight * 0.16f) {
-                if (text == "Reels" || cd == "Reels" || text == "রিলস" || cd == "রিলস") {
-                    hasTopReelsTitle = true
-                }
-            }
-
             for (i in 0 until node.childCount) {
-                if (visibleCount >= 120) break
+                if (visibleCount >= 140) break
                 val child = node.getChild(i) ?: continue
                 scan(child, depth + 1)
                 child.safeRecycle()
@@ -460,36 +551,51 @@ object FacebookReelsDetector {
 
         scan(root, 0)
 
-        // Safety gate: If Story reply bar is visible, this is definitely a Story!
-        if (hasStoryReplyText) {
-            return false
-        }
-
-        // Proof 1 Evaluation: Explicit Reels Viewer ID / Class
-        if (hasExplicitReelsViewerId) {
+        // Evaluate conditions:
+        // A. Watch / Video tab is open
+        if (hasWatchTabSelected || hasWatchTopTitle || (hasSuggestedVideosHeader && !isWhatsOnYourMindVisible)) {
             return true
         }
 
-        // Proof 2 Evaluation: Vertical action stack along right edge (likeY < commentY < shareY or 2+ stacked actions)
+        // B. Full-Screen / Theatre Video Player open
+        if (hasPlayerClassOrId) {
+            return true
+        }
+
+        // C. Active video playback controls visible (Playing In-Feed or in player)
+        if (hasActivePlaybackControls) {
+            return true
+        }
+
+        if (hasVisibleSeekBar) {
+            return true
+        }
+
+        // Vertical Reels action stack
         if (likeBounds != null && commentBounds != null) {
-            val isVerticallyStacked = likeBounds!!.centerY() < commentBounds!!.centerY()
-            if (isVerticallyStacked) {
+            if (likeBounds!!.centerY() < commentBounds!!.centerY()) {
                 if (shareBounds == null || commentBounds!!.centerY() < shareBounds!!.centerY()) {
                     return true
                 }
             }
         }
 
-        // Proof 3 Evaluation: Top "Reels" header while composer is NOT visible
-        if (hasTopReelsTitle && !isWhatsOnYourMindVisible) {
-            return true
-        }
-
-        // Seekbar in full-screen dark player
-        if (hasVisibleSeekBarInDarkPlayer && (inPostClickWindow || hasTopReelsTitle)) {
+        // Check if within post-click window
+        if (SystemClock.elapsedRealtime() < pendingFacebookReelCheckUntilMs) {
             return true
         }
 
         return false
     }
+
+    /**
+     * Backward-compatible alias for full-screen viewer detection.
+     */
+    fun isDedicatedFullScreenReelsOrVideoViewer(
+        root: AccessibilityNodeInfo,
+        ev: AccessibilityEvent?,
+        screenWidth: Int = 1080,
+        screenHeight: Int = 2400,
+        snapshot: CompiledRuleSnapshot = RuleSnapshotHolder.snapshot
+    ): Boolean = isFacebookVideoOrReels(root, ev, screenWidth, screenHeight, snapshot)
 }

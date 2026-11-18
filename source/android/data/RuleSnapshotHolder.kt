@@ -19,6 +19,11 @@ data class CompiledRuleSnapshot(
     val blockIncognitoMode: Boolean = true,
     val enforceSafeSearchGuard: Boolean = true,
     val suppressNotificationsInFocus: Boolean = true,
+    val blockInstagramReels: Boolean = false,
+    val blockInstagramExplore: Boolean = false,
+    val blockFacebookReels: Boolean = false,
+    val blockYoutubeShorts: Boolean = false,
+    val accessibilityPauseUntilEpochMs: Long = 0L,
     val focusUntilMs: Long = 0L,
     val isStudyRunning: Boolean = false,
     val manualFocusAllowedPackages: Set<String> = emptySet(),
@@ -27,6 +32,10 @@ data class CompiledRuleSnapshot(
     val prayerAllowedPackages: Set<String> = emptySet(),
     val syncedAtMs: Long = 0L
 ) {
+    fun isAccessibilityTemporarilyPaused(nowEpochMs: Long = System.currentTimeMillis()): Boolean {
+        return accessibilityPauseUntilEpochMs > nowEpochMs
+    }
+
     fun isManualFocusRunningNow(nowMs: Long = System.currentTimeMillis()): Boolean =
         focusUntilMs > nowMs
 
@@ -64,6 +73,11 @@ object RuleSnapshotHolder {
             blockIncognitoMode = BlockerStore.blockIncognitoMode(context),
             enforceSafeSearchGuard = BlockerStore.enforceSafeSearchGuard(context),
             suppressNotificationsInFocus = BlockerStore.suppressNotificationsInFocus(context),
+            blockInstagramReels = BlockerStore.granularToggle(context, "block_insta_reels", false),
+            blockInstagramExplore = BlockerStore.granularToggle(context, "block_insta_search", false),
+            blockFacebookReels = BlockerStore.granularToggle(context, "block_fb_reels", false),
+            blockYoutubeShorts = BlockerStore.granularToggle(context, "block_yt_shorts", false),
+            accessibilityPauseUntilEpochMs = BlockerStore.accessibilityPauseUntilEpochMs(context),
             focusUntilMs = BlockerStore.focusUntil(context),
             isStudyRunning = BlockerStore.prefs(context).getBoolean("study_active", false),
             manualFocusAllowedPackages = allowed,

@@ -27,6 +27,8 @@ object PermissionFlowTracker {
     @Volatile
     var lastBatteryPermissionRequestMs: Long = 0L
     @Volatile
+    var lastAccessibilityPermissionRequestMs: Long = 0L
+    @Volatile
     var isOnPermissionSetupScreen: Boolean = true
 }
 

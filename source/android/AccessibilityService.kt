@@ -1916,6 +1916,11 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isBlockerAccessibilityDetailsScreen(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
+        val nowMs = System.currentTimeMillis()
+        if (com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
+            BlockerStore.isAccessibilityTemporarilyPaused(this, nowMs)) {
+            return false
+        }
         if (!selfProtectionActive()) return false
         val pkg = ev?.packageName?.toString() ?: root?.packageName?.toString().orEmpty()
         if (pkg == packageName) return false
@@ -2034,10 +2039,25 @@ class BlockerAccessibilityService : AccessibilityService() {
             "apps" -> apps = BlockerStore.set(this, "apps")
             "scan_exempt" -> exempt = BlockerStore.set(this, "scan_exempt")
             "focus_apps" -> focusAllowed = BlockerStore.focusApps(this) + neverBlock + FOCUS_SYSTEM_PKGS + imePackages() + packageName
-            "block_fb_reels" -> blockFbReels = BlockerStore.granularToggle(this, "block_fb_reels")
-            "block_insta_reels" -> blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
-            "block_insta_search" -> blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
-            "block_yt_shorts" -> blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+            "block_fb_reels" -> {
+                blockFbReels = BlockerStore.granularToggle(this, "block_fb_reels")
+                if (!blockFbReels) {
+                    FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                }
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
+            "block_insta_reels" -> {
+                blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
+            "block_insta_search" -> {
+                blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
+            "block_yt_shorts" -> {
+                blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+            }
             "block_incognito_mode" -> {
                 blockIncognitoMode = BlockerStore.blockIncognitoMode(this)
                 com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
@@ -2201,11 +2221,19 @@ class BlockerAccessibilityService : AccessibilityService() {
             lastNativeEvalTime = now
         }
 
+        val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
+        if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+            if (!snapshot.blockFacebookReels) {
+                FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                return false
+            }
+        }
+
         val isOnboardingArmed = isShieldActive
-        val blockFbReels = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
-        val blockInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
-        val blockInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
-        val blockYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
+        val blockFbReels = snapshot.blockFacebookReels
+        val blockInstaReels = snapshot.blockInstagramReels
+        val blockInstaSearch = snapshot.blockInstagramExplore
+        val blockYtShorts = snapshot.blockYoutubeShorts
 
         var configFlags = 0
         if (isShieldActive) configFlags = configFlags or 1
@@ -2221,6 +2249,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (configFlags == 0) return false
 
         if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+            if (!snapshot.blockFacebookReels) {
+                FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                return false
+            }
             if (eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
                 val r = runCatching { rootInActiveWindow }.getOrNull() ?: ev?.source
                 if (r != null) {
@@ -2231,16 +2263,16 @@ class BlockerAccessibilityService : AccessibilityService() {
                         runCatching { r.safeRecycle() }
                         return false
                     }
-                    val isReels = FacebookReelsDetector.isDedicatedFullScreenReelsOrVideoViewer(r, ev, sW, sH)
+                    val isReels = FacebookReelsDetector.evaluate(r, ev, sW, sH, snapshot)
                     if (isReels) {
                         runCatching { r.safeRecycle() }
                         escapeClickedFacebookPlayer()
                         main.postDelayed({ verifyAndEscapeFacebookReels(pkg) }, 100L)
                         OverlayHudManager.show(
                             this,
-                            if (isBangla()) "ফেসবুক রিলস ব্লক করা হয়েছে" else "Facebook Reels blocked",
+                            if (isBangla()) "ফেসবুক ভিডিও এবং রিলস ব্লক করা হয়েছে" else "Blocked: Facebook Video & Reels",
                             6,
-                            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Reels")
+                            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Video & Reels")
                         )
                         return true
                     }
@@ -2526,6 +2558,21 @@ class BlockerAccessibilityService : AccessibilityService() {
                 lastBlockerExitElapsed = SystemClock.elapsedRealtime()
             }
             previousEventPkg = pkg
+
+            val nowA11y = System.currentTimeMillis()
+            val isA11yPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowA11y) ||
+                BlockerStore.isAccessibilityTemporarilyPaused(this, nowA11y)
+            if (isA11yPaused) {
+                // Keep uninstall protection (Device Admin, App Info, PackageInstaller) 100% active:
+                if (checkScopedTamperGuard(ev, pkg)) return
+                // Pause all other Accessibility interventions:
+                return
+            }
+
+            // --- CRITICAL ZERO-LAG FOCUS MODE ENFORCEMENT ON EVERY EVENT ---
+            if (FocusEnforcer.evaluateAndEnforce(this, ev)) {
+                return
+            }
 
             // 2. Zero lag when typing: drop IME keyboards instantly
             if (isImePkg(pkg)) return
@@ -3163,32 +3210,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         return p
     }
 
-    fun isStrictCoreSystemExempt(pkg: String): Boolean {
-        if (pkg.isEmpty() || pkg == packageName) return true
-        if (pkg == "com.android.systemui" || pkg == "android") return true
-        if (isLauncherPkg(pkg)) return true
-        if (isImePkg(pkg) || pkg in imePackages()) return true
-        if (pkg in EMERGENCY_CALL_PKGS ||
-            pkg == "com.android.server.telecom" ||
-            pkg == "com.android.incallui" ||
-            pkg == "com.samsung.android.incallui" ||
-            pkg == "com.android.dialer" ||
-            pkg == "com.google.android.dialer" ||
-            pkg == "com.samsung.android.dialer" ||
-            pkg == "com.android.phone"
-        ) {
-            return true
-        }
-        if (com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent) {
-            if (pkg == "com.android.permissioncontroller" ||
-                pkg == "com.google.android.permissioncontroller" ||
-                isSettingsPkg(pkg)
-            ) {
-                return true
-            }
-        }
-        return false
-    }
+    fun isStrictCoreSystemExempt(pkg: String): Boolean = FocusEnforcer.isStrictCoreSystemExempt(this, pkg)
 
     fun getAllowedFocusPackages(): Set<String> {
         val now = SecureTime.now(this)
@@ -3216,81 +3238,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
     private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
-        // 1. Permanent core system & navigation whitelist: NEVER block
-        if (isStrictCoreSystemExempt(pkg)) {
-            return false
-        }
-
-        val isAnyFocusActive = BlockerStore.focusActive(this)
-        if (!isAnyFocusActive) {
-            return false
-        }
-
-        val allowed = getAllowedFocusPackages()
-
-        // 2. Direct check on current event package
-        if (pkg in allowed) {
-            lastActiveAppPackage = pkg
-            return false
-        }
-
-        // 3. Transient system event (e.g. System UI, gesture pill, volume bar, shade):
-        // If last active application package is allowed, return ALLOW immediately
-        val lastApp = lastActiveAppPackage
-        if (lastApp != null && lastApp in allowed) {
-            val appPkg = getActiveApplicationPackage()
-            if (appPkg == null || appPkg in allowed || isStrictCoreSystemExempt(appPkg)) {
-                return false
-            }
-        }
-
-        // 4. Resolve the underlying TYPE_APPLICATION window
-        val foregroundApp = getActiveApplicationPackage() ?: pkg
-        if (isStrictCoreSystemExempt(foregroundApp)) {
-            return false
-        }
-        if (foregroundApp in allowed) {
-            lastActiveAppPackage = foregroundApp
-            return false
-        }
-
-        // 0ms kick to home and shield
-        kickToHome()
-        TamperShieldManager.showInstantShield(this)
-        BlockerStore.incr(this, "blocked_apps")
-        BlockerStore.incr(this, "app_block")
-
-        val isManualFocusActive = BlockerStore.focusUntil(this) > SecureTime.now(this)
-        val activeSchedules = BlockerStore.schedules(this).filter { BlockerStore.scheduleIsActiveNow(it, this) }
-        val activePrayer = BlockerStore.activePrayerSlot(this)
-        val isPrayerFocusActive = activePrayer != null
-
-        val isPrayerOnly = isPrayerFocusActive && !isManualFocusActive && activeSchedules.isEmpty()
-        val dialogTitle = when {
-            isPrayerOnly && isBangla() -> "নামাজের সময় সক্রিয় (${activePrayer!!.nameBn})"
-            isPrayerOnly -> "Prayer Focus (${activePrayer!!.nameEn})"
-            isBangla() -> "ফোকাস মোড সক্রিয়"
-            else -> "Focus Mode Active"
-        }
-        val dialogVerse = when {
-            isPrayerOnly && isBangla() -> "${activePrayer!!.nameBn} নামাজের ওয়াক্তে মনোযোগ ধরে রাখুন"
-            isPrayerOnly -> "Focus on your ${activePrayer!!.nameEn} prayer (${leftText()} left)"
-            else -> formatFocusModeBody(leftText())
-        }
-        val dialogTag = when {
-            isPrayerOnly -> "${activePrayer!!.nameEn} (${leftText()})"
-            else -> labelOf(foregroundApp)
-        }
-        hit(
-            "focus",
-            dialogTitle,
-            dialogVerse,
-            if (isBangla()) "কল্যাণকর কাজে সময় ব্যয় করুন" else "Guard your time for what benefits you",
-            foregroundApp,
-            getUnderstoodButton(),
-            BlockReason(BlockCategory.STUDY_LOCKDOWN, dialogTag)
-        )
-        return true
+        return FocusEnforcer.evaluateAndEnforce(this, ev)
     }
 
     private fun leftText(): String {
@@ -6278,10 +6226,10 @@ class BlockerAccessibilityService : AccessibilityService() {
             val evCls = ev.className?.toString().orEmpty().lowercase()
             val rootCls = root.className?.toString().orEmpty().lowercase()
 
+            val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
             when (pkg) {
                 "com.google.android.youtube" -> {
-                    val isYtShorts = BlockerStore.granularToggle(this, "block_yt_shorts")
-                    if (!isYtShorts) return false
+                    if (!snapshot.blockYoutubeShorts) return false
                     val isShortsTab = isTabSelectedById(root, "com.google.android.youtube:id/pivot_shorts") ||
                         scanSelectedTab(root, listOf("shorts"))
                     val isShortsPlayer = hasAnyNodeId(root, YT_SHORTS_PLAYER_IDS) ||
@@ -6291,33 +6239,22 @@ class BlockerAccessibilityService : AccessibilityService() {
                         return true
                     }
                 }
-                "com.instagram.android" -> {
-                    val isInstaReels = BlockerStore.granularToggle(this, "block_insta_reels")
-                    val isInstaSearch = BlockerStore.granularToggle(this, "block_insta_search")
-                    if (!isInstaReels && !isInstaSearch) return false
-
-                    if (isInstaReels) {
-                        if (isInstagramDedicatedReelsViewer(root, evCls, rootCls)) {
-                            exitSubFeature(pkg, "Instagram Reels")
-                            return true
-                        }
-                    }
-                    if (isInstaSearch) {
-                        val isSearchTab = isTabSelectedById(root, "com.instagram.android:id/search_tab") ||
-                            scanSelectedTab(root, listOf("search and explore", "search & explore", "explore tab"))
-                        val isSearchInput = isSearchInputFocused(root, INSTA_SEARCH_INPUT_IDS)
-                        if (isSearchTab || isSearchInput) {
-                            exitSubFeature(pkg, "Instagram Search")
-                            return true
-                        }
+                "com.instagram.android", "com.instagram.lite" -> {
+                    if (ShortFormDetector.checkInstagram(this, root, ev, pkg, snapshot)) {
+                        return true
                     }
                 }
                 "com.facebook.katana", "com.facebook.lite" -> {
-                    val isFbReels = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
-                    if (!isFbReels) return false
+                    if (!snapshot.blockFacebookReels) {
+                        FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                        return false
+                    }
 
-                    if (isFacebookVideoOrReels(root, ev)) {
-                        exitSubFeature(pkg, "Facebook Reels")
+                    val dm = resources.displayMetrics
+                    val sW = dm.widthPixels.coerceAtLeast(1)
+                    val sH = dm.heightPixels.coerceAtLeast(1)
+                    if (FacebookReelsDetector.evaluate(root, ev, sW, sH, snapshot)) {
+                        exitSubFeature(pkg, "Blocked: Facebook Video & Reels")
                         return true
                     }
                 }
@@ -6450,18 +6387,16 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val r = runCatching { rootInActiveWindow }.getOrNull()
                 if (r != null) {
                     try {
+                        val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
                         val stillInSubFeature = when (pkg) {
                             "com.facebook.katana", "com.facebook.lite" -> {
-                                val blockFb = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
-                                blockFb && isDedicatedFullScreenReelsOrVideoViewer(r, null)
+                                snapshot.blockFacebookReels && isDedicatedFullScreenReelsOrVideoViewer(r, null)
                             }
                             "com.google.android.youtube" -> {
-                                val blockYt = BlockerStore.granularToggle(this, "block_yt_shorts")
-                                blockYt && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
+                                snapshot.blockYoutubeShorts && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
                             }
                             "com.instagram.android" -> {
-                                val blockInsta = BlockerStore.granularToggle(this, "block_insta_reels")
-                                blockInsta && isInstagramDedicatedReelsViewer(r, "", "")
+                                snapshot.blockInstagramReels && isInstagramDedicatedReelsViewer(r, "", "")
                             }
                             else -> false
                         }
@@ -6481,18 +6416,16 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val r = runCatching { rootInActiveWindow }.getOrNull()
                 if (r != null) {
                     try {
+                        val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
                         val stillInSubFeature = when (pkg) {
                             "com.facebook.katana", "com.facebook.lite" -> {
-                                val blockFb = BlockerStore.granularToggle(this, "block_fb_reels") || BlockerStore.granularToggle(this, "block_facebook_reels")
-                                blockFb && isDedicatedFullScreenReelsOrVideoViewer(r, null)
+                                snapshot.blockFacebookReels && isDedicatedFullScreenReelsOrVideoViewer(r, null)
                             }
                             "com.google.android.youtube" -> {
-                                val blockYt = BlockerStore.granularToggle(this, "block_yt_shorts")
-                                blockYt && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
+                                snapshot.blockYoutubeShorts && (hasAnyNodeId(r, YT_SHORTS_PLAYER_IDS) || isTabSelectedById(r, "com.google.android.youtube:id/pivot_shorts"))
                             }
                             "com.instagram.android" -> {
-                                val blockInsta = BlockerStore.granularToggle(this, "block_insta_reels")
-                                blockInsta && isInstagramDedicatedReelsViewer(r, "", "")
+                                snapshot.blockInstagramReels && isInstagramDedicatedReelsViewer(r, "", "")
                             }
                             else -> false
                         }
@@ -6743,6 +6676,10 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
+        if (!com.blocker.data.RuleSnapshotHolder.snapshot.blockFacebookReels) {
+            FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+            return false
+        }
         // Only inspect actual click events, NEVER passive scrolling or focus changes
         if (ev.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
             return false
@@ -7115,42 +7052,15 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookVideoOrReels(root: AccessibilityNodeInfo, ev: AccessibilityEvent?): Boolean {
+        val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
+        if (!snapshot.blockFacebookReels) {
+            FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+            return false
+        }
         val dm = resources.displayMetrics
         val sW = dm.widthPixels.coerceAtLeast(1)
         val sH = dm.heightPixels.coerceAtLeast(1)
-
-        // Fast story whitelist: NEVER block Facebook Stories
-        if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(root, ev, sW, sH) || isFacebookStory(root, ev)) {
-            return false
-        }
-
-        // Case 2: User explicitly clicked to play/open (TYPE_VIEW_CLICKED)
-        if (ev != null && ev.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            if (FacebookReelsDetector.isFacebookReelClick(ev, sW, sH) || isFacebookVideoOrReelClick(ev)) {
-                return true
-            }
-        }
-
-        // Priority Override: Active visible Reels player signatures
-        // (Even if opened as an overlay Fragment over the Newsfeed!)
-        if (FacebookReelsDetector.isDedicatedFullScreenReelsOrVideoViewer(root, ev, sW, sH)) {
-            return true
-        }
-
-        if (hasActiveFacebookVideoControls(root, sH)) {
-            return true
-        }
-
-        // Critical Feed Chrome Guard:
-        // If we are on the normal Facebook Newsfeed screen and not an explicit click,
-        // completely ignore unplayed inline videos, "Play video" buttons, SeekBars,
-        // and horizontal Reels carousels. Never fire Back during feed scrolling!
-        if (isNormalFacebookFeedScreen(root)) {
-            return false
-        }
-
-        // Case 1: Dedicated full-screen Reels or Video viewer
-        return isDedicatedFullScreenReelsOrVideoViewer(root, ev)
+        return FacebookReelsDetector.evaluate(root, ev, sW, sH, snapshot)
     }
 
     private fun hasActiveFacebookVideoControls(root: AccessibilityNodeInfo, screenH: Int): Boolean {

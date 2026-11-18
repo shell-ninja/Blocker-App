@@ -17,6 +17,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -150,6 +152,7 @@ class BlockerForegroundService : Service {
 
     @Volatile private var lastPrayerDndSyncElapsed = 0L
     @Volatile private var wasSessionActiveForNotif = false
+    @Volatile private var wasAccessibilityTemporarilyPaused = false
 
     private fun startWatchdog() {
         stopWatchdog()
@@ -183,24 +186,30 @@ class BlockerForegroundService : Service {
 
     private fun inspectForegroundState() {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
+        val now = System.currentTimeMillis()
+        val pauseUntil = BlockerStore.accessibilityPauseUntilEpochMs(this)
+        if (pauseUntil > 0L) {
+            if (now >= pauseUntil) {
+                BlockerStore.setAccessibilityPauseUntilEpochMs(this, 0L)
+                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
+                wasAccessibilityTemporarilyPaused = false
+                checkAndNotifyIfAccessibilityDisabled()
+            } else {
+                wasAccessibilityTemporarilyPaused = true
+                return
+            }
+        } else if (wasAccessibilityTemporarilyPaused) {
+            wasAccessibilityTemporarilyPaused = false
+            checkAndNotifyIfAccessibilityDisabled()
+        }
+
         val topPkg = getTopPackage() ?: return
         if (topPkg == packageName) return
         val isBn = BlockerStore.popupLanguage(this) == "bn"
 
         // 1. Focus Mode Watchdog Enforcement (Immediate fallback even if accessibility is interrupted)
-        if (BlockerStore.focusActive(this) && !isStrictCoreSystemExempt(topPkg)) {
-            val allowed = getAllowedFocusPackages()
-            if (topPkg !in allowed) {
-                kickToHome()
-                BlockerStore.incr(this, "blocked_apps")
-                BlockerStore.incr(this, "app_block")
-                showTamperAlert(
-                    title = if (isBn) "ফোকাস মোড সক্রিয়" else "Focus Mode Active",
-                    message = if (isBn) "ফোকাস মোড চলাকালীন এই অ্যাপটি বন্ধ রাখা হয়েছে।"
-                              else "This app is not allowed during your active Focus session."
-                )
-                return
-            }
+        if (FocusEnforcer.inspectWatchdogForeground(this, topPkg)) {
+            return
         }
 
         val active = BlockerStore.active(this)
@@ -228,42 +237,7 @@ class BlockerForegroundService : Service {
         resolveInfo?.activityInfo?.packageName
     }.getOrNull()
 
-    private fun isStrictCoreSystemExempt(pkg: String): Boolean {
-        if (pkg.isEmpty() || pkg == packageName) return true
-        if (pkg == "com.android.systemui" || pkg == "android") return true
-        val defaultLauncher = getDefaultLauncherPackage()
-        if (pkg == defaultLauncher) return true
-        val lower = pkg.lowercase()
-        if (lower.contains("launcher") || lower.contains("home") ||
-            lower == "com.sec.android.app.launcher" || lower == "com.miui.home" ||
-            lower == "com.oppo.launcher" || lower == "com.transsion.hilauncher" ||
-            lower == "com.google.android.apps.nexuslauncher") {
-            return true
-        }
-        val imeManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-        val imes = imeManager?.enabledInputMethodList?.map { it.packageName } ?: emptyList()
-        if (pkg in imes) return true
-
-        if (pkg == "com.android.server.telecom" ||
-            pkg == "com.android.incallui" ||
-            pkg == "com.samsung.android.incallui" ||
-            pkg == "com.android.dialer" ||
-            pkg == "com.google.android.dialer" ||
-            pkg == "com.samsung.android.dialer" ||
-            pkg == "com.android.phone"
-        ) {
-            return true
-        }
-        if (com.blocker.PermissionFlowTracker.isLaunchingPermissionIntent) {
-            if (pkg == "com.android.permissioncontroller" ||
-                pkg == "com.google.android.permissioncontroller" ||
-                pkg == "com.android.settings"
-            ) {
-                return true
-            }
-        }
-        return false
-    }
+    private fun isStrictCoreSystemExempt(pkg: String): Boolean = FocusEnforcer.isStrictCoreSystemExempt(this, pkg)
 
     private fun getAllowedFocusPackages(): Set<String> {
         val now = SecureTime.now(this)
@@ -313,7 +287,7 @@ class BlockerForegroundService : Service {
         runCatching { startActivity(homeIntent) }
     }
 
-    private fun showTamperAlert(title: String, message: String) {
+    internal fun showTamperAlert(title: String, message: String) {
         val now = System.currentTimeMillis()
         if (now - lastTamperAlertTs < 2000L) return
         lastTamperAlertTs = now
@@ -337,6 +311,46 @@ class BlockerForegroundService : Service {
                 .setAutoCancel(true)
             if (pendingIntent != null) builder.setContentIntent(pendingIntent)
             nm.notify(TAMPER_NOTIFICATION_ID, builder.build())
+        }
+    }
+
+    private fun checkAndNotifyIfAccessibilityDisabled() {
+        runCatching {
+            val cr = contentResolver
+            val enabledServices = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+            val isA11yEnabled = enabledServices.contains(packageName)
+            if (!isA11yEnabled) {
+                showAccessibilityReEnableNotification()
+            }
+        }
+    }
+
+    private fun showAccessibilityReEnableNotification() {
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            PermissionFlowTracker.isLaunchingPermissionIntent = true
+            PermissionFlowTracker.lastAccessibilityPermissionRequestMs = SystemClock.elapsedRealtime()
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pi = PendingIntent.getActivity(this, 9001, intent, flags)
+            val isBn = BlockerStore.popupLanguage(this) == "bn"
+            val title = if (isBn) "সাময়িক বিরতি সমাপ্ত" else "Temporary Pause Ended"
+            val message = if (isBn) "ব্লকার অ্যাক্সেসিবিলিটি পুনরায় চালু করতে ট্যাপ করুন" else "Tap to re-enable Blocker Accessibility"
+            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+            nm.notify(9001, builder.build())
         }
     }
 
