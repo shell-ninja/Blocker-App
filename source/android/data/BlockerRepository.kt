@@ -18,7 +18,6 @@ import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
-import com.blocker.AccessibilityPauseManager
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
@@ -52,10 +51,7 @@ data class ProtectionState(
     val popupLanguage: String = "en",
     val isBankingMode: Boolean = false,
     val isAutoPauseBanking: Boolean = false,
-    val blockFacebookReels: Boolean = false,
-    val isAccessibilityDisabledForBanking: Boolean = false,
-    val disableAccessibilityWaitTargetMs: Long = 0L,
-    val accessibilityPauseUntilEpochMs: Long = 0L
+    val blockFacebookReels: Boolean = false
 )
 
 data class PermissionsState(
@@ -285,9 +281,6 @@ class BlockerRepository(private val context: Context) {
         val banking = BlockerStore.isBankingMode(appContext)
         val autoPause = BlockerStore.isAutoPauseBanking(appContext)
         val reels = BlockerStore.granularToggle(appContext, "block_fb_reels", false)
-        val a11yPause = BlockerStore.accessibilityPauseUntilEpochMs(appContext)
-        val isA11yDisabled = BlockerStore.isAccessibilityDisabledForBanking(appContext)
-        val a11yWaitTarget = BlockerStore.disableAccessibilityWaitTargetMs(appContext)
 
         val now = SecureTime.now(appContext)
         val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
@@ -311,10 +304,7 @@ class BlockerRepository(private val context: Context) {
             popupLanguage = lang,
             isBankingMode = banking,
             isAutoPauseBanking = autoPause,
-            blockFacebookReels = reels,
-            isAccessibilityDisabledForBanking = isA11yDisabled,
-            disableAccessibilityWaitTargetMs = a11yWaitTarget,
-            accessibilityPauseUntilEpochMs = a11yPause
+            blockFacebookReels = reels
         )
         refreshDistractionShield()
     }
@@ -1265,44 +1255,6 @@ class BlockerRepository(private val context: Context) {
         val canonicalKey = if (key == "block_facebook_reels") "block_fb_reels" else key
         BlockerStore.cancelSettingUnlockTarget(appContext, canonicalKey)
         refreshDistractionShield()
-    }
-
-    fun startDisableAccessibility5mWait(): Boolean {
-        val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-        val adminComp = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
-        if (dpm?.isAdminActive(adminComp) != true) {
-            return false
-        }
-        AccessibilityPauseManager.startWaitPeriod(appContext)
-        refreshProtection()
-        return true
-    }
-
-    fun abortDisableAccessibilityWait() {
-        AccessibilityPauseManager.abortWaitPeriod(appContext)
-        refreshProtection()
-    }
-
-    fun completeDisableAccessibilityWait() {
-        AccessibilityPauseManager.onWaitPeriodCompleted(appContext)
-        refreshProtection()
-    }
-
-    fun reEnableAccessibilityNow() {
-        AccessibilityPauseManager.reEnableAccessibility(appContext)
-        refreshProtection()
-    }
-
-    fun pauseAccessibilityTemporarily(minutes: Int) {
-        startDisableAccessibility5mWait()
-    }
-
-    fun disableAccessibilityNow() {
-        completeDisableAccessibilityWait()
-    }
-
-    fun resumeAccessibilityProtectionNow() {
-        reEnableAccessibilityNow()
     }
 
     fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet(), daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7)) {

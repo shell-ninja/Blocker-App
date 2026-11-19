@@ -206,6 +206,18 @@ fun CyberBottomNav(
                         .then(
                             if (isSelected) {
                                 Modifier
+                                    .graphicsLayer {
+                                        shadowElevation = 4.dp.toPx()
+                                        spotShadowColor = Color(0xFF8B5CF6).copy(alpha = 0.22f)
+                                    }
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(
+                                                Color(0xFF8B5CF6).copy(alpha = 0.22f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    )
                                     .background(activePillBrush)
                                     .border(1.2.dp, activePillBorder, RoundedCornerShape(15.dp))
                             } else {

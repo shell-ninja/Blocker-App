@@ -152,7 +152,6 @@ class BlockerForegroundService : Service {
 
     @Volatile private var lastPrayerDndSyncElapsed = 0L
     @Volatile private var wasSessionActiveForNotif = false
-    @Volatile private var wasAccessibilityTemporarilyPaused = false
 
     private fun startWatchdog() {
         stopWatchdog()
@@ -186,17 +185,6 @@ class BlockerForegroundService : Service {
 
     private fun inspectForegroundState() {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
-        val now = System.currentTimeMillis()
-        val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(now) ||
-            BlockerStore.isAccessibilityTemporarilyPaused(this, now)
-        if (isTempPaused) {
-            wasAccessibilityTemporarilyPaused = true
-            return
-        } else if (wasAccessibilityTemporarilyPaused) {
-            wasAccessibilityTemporarilyPaused = false
-            AccessibilityPauseManager.onPauseExpired(this)
-            return
-        }
 
         val topPkg = getTopPackage() ?: return
         if (topPkg == packageName) return
@@ -315,6 +303,16 @@ class BlockerForegroundService : Service {
             val enabledServices = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
             val isA11yEnabled = enabledServices.contains(packageName)
             if (!isA11yEnabled) {
+                // Auto-restore Accessibility Service if WRITE_SECURE_SETTINGS is granted
+                if (BlockerStore.active(this) && BlockerStore.shield(this)) {
+                    val serviceComponent = "$packageName/${BlockerAccessibilityService::class.java.name}"
+                    val newServices = if (enabledServices.isEmpty()) serviceComponent else "$enabledServices:$serviceComponent"
+                    val success = runCatching {
+                        Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newServices)
+                        Settings.Secure.putString(cr, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                    }.getOrDefault(false)
+                    if (success) return
+                }
                 showAccessibilityReEnableNotification()
             }
         }

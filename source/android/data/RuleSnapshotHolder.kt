@@ -23,9 +23,6 @@ data class CompiledRuleSnapshot(
     val blockInstagramExplore: Boolean = false,
     val blockFacebookReels: Boolean = false,
     val blockYoutubeShorts: Boolean = false,
-    val isAccessibilityDisabledForBanking: Boolean = false,
-    val disableAccessibilityWaitTargetMs: Long = 0L,
-    val accessibilityPauseUntilEpochMs: Long = 0L,
     val focusUntilMs: Long = 0L,
     val isStudyRunning: Boolean = false,
     val manualFocusAllowedPackages: Set<String> = emptySet(),
@@ -34,10 +31,6 @@ data class CompiledRuleSnapshot(
     val prayerAllowedPackages: Set<String> = emptySet(),
     val syncedAtMs: Long = 0L
 ) {
-    fun isAccessibilityTemporarilyPaused(nowEpochMs: Long = System.currentTimeMillis()): Boolean {
-        return isAccessibilityDisabledForBanking || accessibilityPauseUntilEpochMs > nowEpochMs
-    }
-
     fun isManualFocusRunningNow(nowMs: Long = System.currentTimeMillis()): Boolean =
         focusUntilMs > nowMs
 
@@ -79,9 +72,6 @@ object RuleSnapshotHolder {
             blockInstagramExplore = BlockerStore.granularToggle(context, "block_insta_search", false),
             blockFacebookReels = BlockerStore.granularToggle(context, "block_fb_reels", false),
             blockYoutubeShorts = BlockerStore.granularToggle(context, "block_yt_shorts", false),
-            isAccessibilityDisabledForBanking = BlockerStore.isAccessibilityDisabledForBanking(context),
-            disableAccessibilityWaitTargetMs = BlockerStore.disableAccessibilityWaitTargetMs(context),
-            accessibilityPauseUntilEpochMs = BlockerStore.accessibilityPauseUntilEpochMs(context),
             focusUntilMs = BlockerStore.focusUntil(context),
             isStudyRunning = BlockerStore.prefs(context).getBoolean("study_active", false),
             manualFocusAllowedPackages = allowed,

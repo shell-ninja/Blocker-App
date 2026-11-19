@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -115,6 +116,7 @@ private fun PrayerHeroActiveCard(
                         color = NordicColors.TextPrimary,
                         fontSize = 25.sp,
                         fontWeight = FontWeight.Black,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                         letterSpacing = 1.sp
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -129,7 +131,8 @@ private fun PrayerHeroActiveCard(
                         text = "Runs until ${prayerClock12Total(activeSlot.endTotalMinutes())}",
                         color = NordicColors.AccentPrimary,
                         fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                     )
                 }
             }
@@ -396,6 +399,7 @@ fun PrayerFocusTab(
                                 color = NordicColors.TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
+                                style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis
@@ -583,7 +587,8 @@ private fun PrayerSlotConfigDialog(
                             text = "${prayerClock12(hour24, minute)}  (Ends ${prayerClock12Total((hour24 * 60 + minute + durationMin) % 1440)})",
                             color = NordicColors.TextPrimary,
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                         )
                     }
                 }

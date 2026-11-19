@@ -158,7 +158,7 @@ fun BlocklistScreen(
                 onCheckedChange = { repo.toggleDistraction("block_incognito_mode", it) }
             )
 
-            Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.5f), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 10.dp))
+            SoftGradientHairlineDivider(modifier = Modifier.padding(vertical = 10.dp))
 
             // Row B: SafeSearch & Query Guard
             WebShieldRow(

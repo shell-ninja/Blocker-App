@@ -173,9 +173,9 @@ fun DailyAppUsageView(
                     Text(
                         text = "TODAY'S SCREEN TIME",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF9E94C4),
-                        letterSpacing = 1.sp
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFA78BFA),
+                        letterSpacing = 1.1.sp
                     )
 
                     val totalMs = summary?.totalScreenTimeMs ?: 0L
@@ -188,6 +188,7 @@ fun DailyAppUsageView(
                         fontSize = 32.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFFF5F3FF),
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                         fontFamily = FontFamily.Default
                     )
 
@@ -235,6 +236,7 @@ fun DailyAppUsageView(
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color(0xFFC4B5FD),
+                                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                                         maxLines = 1,
                                         softWrap = false
                                     )
@@ -408,6 +410,7 @@ fun DailyAppUsageView(
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = Color(0xFFA78BFA),
+                                    style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                                     maxLines = 1,
                                     softWrap = false
                                 )

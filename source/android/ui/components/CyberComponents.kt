@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -105,6 +106,20 @@ fun PulsingHaloShield(
     )
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        // Subtle radial amethyst glow behind active shield
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            Color(0xFF8B5CF6).copy(alpha = 0.22f),
+                            Color.Transparent
+                        )
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                )
+        )
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -133,7 +148,8 @@ fun RollingCounterText(
     style: TextStyle = TextStyle(
         color = NordicColors.TextPrimary,
         fontSize = 14.sp,
-        fontWeight = FontWeight.Bold
+        fontWeight = FontWeight.Bold,
+        fontFeatureSettings = "tnum"
     )
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
@@ -254,9 +270,18 @@ fun StatusPillBadge(
     val padV = if (small) 3.dp else 5.dp
     val fontSz = if (small) 10.5.sp else 12.sp
 
+    val hasGlow = breathing || tone == BadgeTone.OK || tone == BadgeTone.ACCENT
     Row(
         modifier = modifier
             .alpha(alphaAnim)
+            .then(
+                if (hasGlow) {
+                    Modifier.graphicsLayer {
+                        shadowElevation = 2.dp.toPx()
+                        spotShadowColor = Color(0xFF8B5CF6).copy(alpha = 0.22f)
+                    }
+                } else Modifier
+            )
             .clip(shape)
             .background(bg)
             .border(1.dp, border, shape)
@@ -286,6 +311,7 @@ fun StatusPillBadge(
             color = textClr,
             fontSize = fontSz,
             fontWeight = FontWeight.Bold,
+            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
             letterSpacing = 0.3.sp,
             maxLines = 1,
             softWrap = false,
@@ -671,9 +697,20 @@ fun SectionHeader(
     title: String,
     icon: ImageVector? = null,
     subtitle: String? = null,
+    kicker: String? = null,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
+        if (!kicker.isNullOrEmpty()) {
+            Text(
+                text = kicker.uppercase(),
+                color = Color(0xFFA78BFA),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.1.sp
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
                 Icon(
@@ -686,7 +723,7 @@ fun SectionHeader(
             }
             Text(
                 text = title,
-                color = NordicColors.TextPrimary,
+                color = Color(0xFFF5F3FF),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = (-0.2).sp
@@ -696,9 +733,9 @@ fun SectionHeader(
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = subtitle,
-                color = NordicColors.TextSecondary,
-                fontSize = 12.sp,
-                lineHeight = 16.sp
+                color = Color(0xFF9E94C4),
+                fontSize = 12.5.sp,
+                lineHeight = 16.5.sp
             )
         }
     }

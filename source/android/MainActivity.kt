@@ -74,9 +74,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (BlockerStore.isAccessibilityDisabledForBanking(this)) {
-            AccessibilityOffUninstallGuardService.start(this)
-        }
         BlockerStore.autoClampStuckTimers(this)
         PermissionFlowTracker.isLaunchingPermissionIntent = false
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager

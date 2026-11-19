@@ -1354,6 +1354,7 @@ fun FocusScreen(
                                         color = NordicColors.TextPrimary,
                                         fontSize = 28.sp,
                                         fontWeight = FontWeight.Black,
+                                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                                         letterSpacing = 1.sp
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
@@ -1368,7 +1369,8 @@ fun FocusScreen(
                                         text = "Ends at $finishClock",
                                         color = NordicColors.AccentPrimary,
                                         fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                                     )
                                 }
                             }
@@ -2329,6 +2331,7 @@ private fun FocusStatusHeroCard(
                         color = NordicColors.TextPrimary,
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Black,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                         letterSpacing = 1.sp
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -2343,7 +2346,8 @@ private fun FocusStatusHeroCard(
                         text = "Runs until $finishClock",
                         color = NordicColors.AccentPrimary,
                         fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                     )
                 }
             }

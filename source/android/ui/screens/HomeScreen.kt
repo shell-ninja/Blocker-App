@@ -166,6 +166,7 @@ fun HomeScreen(
                     color = NordicColors.TextPrimary,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
+                    style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                     maxLines = 1,
                     softWrap = false
                 )
@@ -230,6 +231,7 @@ fun HomeScreen(
                     color = NordicColors.TextPrimary,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
+                    style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                     maxLines = 1,
                     softWrap = false
                 )
@@ -339,7 +341,7 @@ fun HomeScreen(
                 onCheckedChange = { repo.toggleDistraction("block_fb_reels", it) }
             )
 
-            Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.5f), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 10.dp))
+            SoftGradientHairlineDivider(modifier = Modifier.padding(vertical = 10.dp))
 
             // Row 2: Instagram Reels
             QuickShieldRow(
@@ -352,7 +354,7 @@ fun HomeScreen(
                 onCheckedChange = { repo.toggleDistraction("block_insta_reels", it) }
             )
 
-            Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.5f), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 10.dp))
+            SoftGradientHairlineDivider(modifier = Modifier.padding(vertical = 10.dp))
 
             // Row 3: Instagram Explore
             QuickShieldRow(
@@ -365,7 +367,7 @@ fun HomeScreen(
                 onCheckedChange = { repo.toggleDistraction("block_insta_search", it) }
             )
 
-            Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.5f), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 10.dp))
+            SoftGradientHairlineDivider(modifier = Modifier.padding(vertical = 10.dp))
 
             // Row 4: YouTube Shorts
             QuickShieldRow(
@@ -445,7 +447,7 @@ fun HomeScreen(
                     )
                 }
                 if (idx < healthItems.size - 1) {
-                    Divider(color = NordicColors.HairlineBorder.copy(alpha = 0.6f), thickness = 0.8.dp)
+                    SoftGradientHairlineDivider(modifier = Modifier.padding(vertical = 2.dp))
                 }
             }
         }

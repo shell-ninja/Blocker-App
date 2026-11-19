@@ -45,7 +45,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.blocker.BlockerAccessibilityService
 import com.blocker.BlockerStore
 import com.blocker.R
 import com.blocker.data.BlockerRepository
@@ -58,13 +57,6 @@ private fun formatCountdown(ms: Long): String {
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
     return String.format("%02d:%02d:%02d", h, m, s)
-}
-
-private fun formatMmSs(ms: Long): String {
-    val totalSec = (ms / 1000).coerceAtLeast(0)
-    val m = totalSec / 60
-    val s = totalSec % 60
-    return String.format("%02d:%02d", m, s)
 }
 
 @Composable
@@ -205,171 +197,6 @@ fun SettingsScreen(
                 fontSize = 12.sp,
                 lineHeight = 17.sp
             )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 1B. Disable Accessibility Card (For Banking Apps — 5m Fixed Wait & Locked Uninstall)
-        val isA11yDisabled = protection.isAccessibilityDisabledForBanking
-        val waitTargetMs = protection.disableAccessibilityWaitTargetMs
-        val isWaiting = waitTargetMs > currentEpochMs
-
-        NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f).padding(end = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(NordicColors.CardSurfaceHero)
-                                .border(1.dp, NordicColors.HairlineBorder, RoundedCornerShape(11.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = CyberIcons.Shield,
-                                contentDescription = null,
-                                tint = if (isA11yDisabled || isWaiting) Color(0xFFF59E0B) else NordicColors.AccentPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Disable Accessibility (For Banking Apps)",
-                                color = NordicColors.TextPrimary,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Requires a 5-minute waiting period. App uninstallation remains strictly locked while Accessibility is off.",
-                                color = NordicColors.TextSecondary,
-                                fontSize = 11.5.sp,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-                    StatusPillBadge(
-                        label = when {
-                            isA11yDisabled -> "Disabled"
-                            isWaiting -> "Waiting (5m)"
-                            else -> "Active"
-                        },
-                        tone = if (isA11yDisabled || isWaiting) BadgeTone.WARN else BadgeTone.OK,
-                        small = true
-                    )
-                }
-
-                if (isA11yDisabled) {
-                    // State 3: Waiting Period Completed — Accessibility Disabled
-                    StatusPillBadge(
-                        label = "Accessibility Disabled — Uninstall Protection Active",
-                        tone = BadgeTone.WARN,
-                        small = false,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Tactile3DButton(
-                        onClick = { repo.reEnableAccessibilityNow() },
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
-                    ) {
-                        Text(
-                            text = "Re-enable Accessibility Now",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                } else if (isWaiting) {
-                    // State 2: 5-Minute Waiting Period Ticking
-                    val remWaitMs = (waitTargetMs - currentEpochMs).coerceAtLeast(0L)
-                    val mmSs = formatMmSs(remWaitMs)
-
-                    if (remWaitMs <= 0L) {
-                        LaunchedEffect(waitTargetMs) {
-                            repo.completeDisableAccessibilityWait()
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF1B1536),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Color(0xFF4C3B87))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            StatusPillBadge(
-                                label = "Accessibility turns off in $mmSs",
-                                tone = BadgeTone.WARN,
-                                small = true
-                            )
-                            Button(
-                                onClick = { repo.abortDisableAccessibilityWait() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Text(
-                                    text = "Abort",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // State 1: Accessibility Active — Default
-                    Tactile3DButton(
-                        onClick = {
-                            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-                            val adminComp = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
-                            val isAdmin = dpm?.isAdminActive(adminComp) == true
-                            if (!isAdmin) {
-                                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComp)
-                                    putExtra(
-                                        DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                                        "Device Admin must be active to ensure Blocker remains protected while Accessibility is disabled."
-                                    )
-                                }
-                                runCatching { context.startActivity(intent) }
-                            } else {
-                                repo.startDisableAccessibility5mWait()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
-                    ) {
-                        Text(
-                            text = "Disable Accessibility (5m Wait)",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-            }
         }
 
         Spacer(modifier = Modifier.height(14.dp))

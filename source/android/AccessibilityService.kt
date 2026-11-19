@@ -508,19 +508,6 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun autoCancelDialog(root: android.view.accessibility.AccessibilityNodeInfo?) {
-        val nowMs = System.currentTimeMillis()
-        val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
-            BlockerStore.isAccessibilityTemporarilyPaused(this, nowMs)
-        if (isTempPaused) {
-            val sb = StringBuilder()
-            if (root != null) collectText(root, sb, 0, intArrayOf(100))
-            val dt = sb.toString().lowercase()
-            val isProtected = "device admin" in dt || "deactivate this device admin" in dt ||
-                "uninstall" in dt || "clear data" in dt || "clear storage" in dt
-            if (!isProtected) {
-                return
-            }
-        }
         val targets = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
         if (root != null) targets.add(root)
         runCatching {
@@ -610,28 +597,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 outsideSettingsCount = 0
                 return
             }
-
-            val nowMs = System.currentTimeMillis()
-            val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
-                BlockerStore.isAccessibilityTemporarilyPaused(this@BlockerAccessibilityService, nowMs)
-            if (isTempPaused) {
-                val rootNode = runCatching { rootInActiveWindow }.getOrNull()
-                if (rootNode != null) {
-                    val sb = StringBuilder()
-                    collectText(rootNode, sb, 0, intArrayOf(150))
-                    val screenText = sb.toString().lowercase()
-                    val hasProtected = "device admin" in screenText ||
-                        "deactivate this device admin" in screenText ||
-                        "uninstall" in screenText ||
-                        "clear data" in screenText ||
-                        "clear storage" in screenText
-                    if (!hasProtected && ("accessibility" in screenText || "stop" in screenText || "turn off" in screenText || "ok" in screenText || "use blocker" in screenText)) {
-                        main.postDelayed(this, 300)
-                        return
-                    }
-                }
-            }
-
 
             // React to static pendingAdminKick signal from DeviceAdminReceiver
             if (pendingAdminKick) {
@@ -767,39 +732,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (rootPkg == packageName) return
         if (rootPkg.isNotEmpty() && !isSettingsPkg(rootPkg) && !isInstallerPkg(rootPkg) && rootPkg != "android") return
         if (!shieldEngaged() && !shouldBlockDateTime() && !shouldBlockScheduledPower()) return
-
-        val nowMs = System.currentTimeMillis()
-        val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
-            BlockerStore.isAccessibilityTemporarilyPaused(this, nowMs)
-        if (isTempPaused) {
-            val sb = StringBuilder()
-            collectText(root, sb, 0, intArrayOf(150))
-            val screenText = sb.toString().lowercase()
-            val hasProtectedKeyword = "device admin" in screenText ||
-                "deactivate this device admin" in screenText ||
-                "device administrator" in screenText ||
-                "admin app" in screenText ||
-                "uninstall" in screenText ||
-                "আনইনস্টল" in screenText ||
-                "clear data" in screenText ||
-                "clear storage" in screenText
-            if (!hasProtectedKeyword) {
-                val hasA11yOrConfirmText = "accessibility" in screenText ||
-                    "use blocker" in screenText ||
-                    "stop blocker" in screenText ||
-                    "turn off blocker" in screenText ||
-                    "stop" in screenText ||
-                    "turn off" in screenText ||
-                    "ok" in screenText ||
-                    "use service" in screenText ||
-                    "ঠিক আছে" in screenText ||
-                    "বন্ধ" in screenText ||
-                    "ব্যবহার" in screenText
-                if (hasA11yOrConfirmText) {
-                    return
-                }
-            }
-        }
 
         // Allow Android's legitimate Do Not Disturb access grant flow (Rule A & Rule B)
         val (isDndFlow, dndAllowed) = evaluateDndFlowAccess(rootPkg, null, root)
@@ -1184,7 +1116,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         try {
             super.onServiceConnected()
             instance = this
-            AccessibilityPauseManager.dismissReEnableNotification(this)
             runCatching {
                 val notif = buildQuietOngoingNotification()
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -1984,11 +1915,6 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isBlockerAccessibilityDetailsScreen(root: AccessibilityNodeInfo?, ev: AccessibilityEvent?, text: String = ""): Boolean {
-        val nowMs = System.currentTimeMillis()
-        if (com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
-            BlockerStore.isAccessibilityTemporarilyPaused(this, nowMs)) {
-            return false
-        }
         if (!selfProtectionActive()) return false
         val pkg = ev?.packageName?.toString() ?: root?.packageName?.toString().orEmpty()
         if (pkg == packageName) return false
@@ -2663,16 +2589,6 @@ class BlockerAccessibilityService : AccessibilityService() {
                 lastBlockerExitElapsed = SystemClock.elapsedRealtime()
             }
             previousEventPkg = pkg
-
-            val nowA11y = System.currentTimeMillis()
-            val isA11yPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowA11y) ||
-                BlockerStore.isAccessibilityTemporarilyPaused(this, nowA11y)
-            if (isA11yPaused) {
-                // Keep uninstall protection (Device Admin, App Info, PackageInstaller) 100% active:
-                if (checkScopedTamperGuard(ev, pkg)) return
-                // Pause all other Accessibility interventions:
-                return
-            }
 
             // --- CRITICAL ZERO-LAG FOCUS MODE ENFORCEMENT ON EVERY EVENT ---
             if (FocusEnforcer.evaluateAndEnforce(this, ev)) {
@@ -4625,53 +4541,6 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun checkScopedTamperGuard(ev: AccessibilityEvent, pkg: String): Boolean {
-        val nowMs = System.currentTimeMillis()
-        val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(nowMs) ||
-            BlockerStore.isAccessibilityTemporarilyPaused(this, nowMs)
-
-        if (isTempPaused) {
-            val root = runCatching { rootInActiveWindow ?: ev.source }.getOrNull()
-            val evText = (ev.text.joinToString(" ") + " " + (ev.contentDescription ?: "")).trim().lowercase()
-            val sb = StringBuilder(evText)
-            if (root != null) {
-                collectText(root, sb, 0, intArrayOf(150))
-            }
-            val screenText = sb.toString().lowercase()
-
-            val hasProtectedKeyword = "device admin" in screenText ||
-                "deactivate this device admin" in screenText ||
-                "device administrator" in screenText ||
-                "admin app" in screenText ||
-                "uninstall" in screenText ||
-                "আনইনস্টল" in screenText ||
-                "clear data" in screenText ||
-                "clear storage" in screenText
-
-            if (!hasProtectedKeyword) {
-                val isA11yContext = isSettingsPkg(pkg) || isActualSettingsPkg(pkg) ||
-                    pkg == "android" || pkg == "com.android.systemui" ||
-                    isAccessibilityMainListScreen(root, ev) ||
-                    isBlockerAccessibilityDetailsScreen(root, ev, screenText)
-
-                val hasA11yOrConfirmText = "accessibility" in screenText ||
-                    "use blocker" in screenText ||
-                    "stop blocker" in screenText ||
-                    "turn off blocker" in screenText ||
-                    "stop" in screenText ||
-                    "turn off" in screenText ||
-                    "ok" in screenText ||
-                    "use service" in screenText ||
-                    "ঠিক আছে" in screenText ||
-                    "বন্ধ" in screenText ||
-                    "ব্যবহার" in screenText
-
-                if (isA11yContext && hasA11yOrConfirmText) {
-                    // UNCONDITIONALLY ALLOW Accessibility Settings screens and confirmation dialogs
-                    return false
-                }
-            }
-        }
-
         val isSettings = isSettingsPkg(pkg) || isActualSettingsPkg(pkg)
         val isInstaller = isInstallerPkg(pkg)
         val isLauncher = isLauncherPkg(pkg)

@@ -2,13 +2,19 @@ package com.blocker.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -377,6 +383,14 @@ fun Tactile3DButton(
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.975f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "tactile_scale"
+    )
+
     val buttonGrad = remember {
         Brush.verticalGradient(
             listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
@@ -394,14 +408,21 @@ fun Tactile3DButton(
     Row(
         modifier = modifier
             .graphicsLayer {
-                this.shadowElevation = 8.dp.toPx()
+                this.scaleX = scale
+                this.scaleY = scale
+                this.shadowElevation = if (isPressed) 4.dp.toPx() else 8.dp.toPx()
                 this.shape = shape
                 this.spotShadowColor = Color(0xFF7C3AED)
             }
             .clip(shape)
             .background(buttonGrad)
             .border(1.2.dp, topHighlight, shape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick
+            )
             .padding(horizontal = 16.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -411,13 +432,13 @@ fun Tactile3DButton(
 
 /**
  * Raised Squircle Icon Pedestal:
- * 44dp tactile squircle for displaying icons with a bevel finish.
+ * 42dp tactile squircle for displaying icons with a bevel finish.
  */
 @Composable
 fun RaisedSquirclePedestal(
     modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 44.dp,
-    shape: RoundedCornerShape = RoundedCornerShape(13.dp),
+    size: androidx.compose.ui.unit.Dp = 42.dp,
+    shape: RoundedCornerShape = RoundedCornerShape(12.dp),
     content: @Composable BoxScope.() -> Unit
 ) {
     val pedestalGrad = remember {
@@ -441,9 +462,33 @@ fun RaisedSquirclePedestal(
             }
             .clip(shape)
             .background(pedestalGrad)
-            .border(1.2.dp, pedestalBorder, shape),
+            .border(1.dp, pedestalBorder, shape),
         contentAlignment = Alignment.Center,
         content = content
+    )
+}
+
+/**
+ * Soft gradient hairline divider inside multi-row cards.
+ */
+@Composable
+fun SoftGradientHairlineDivider(
+    modifier: Modifier = Modifier
+) {
+    val dividerBrush = remember {
+        Brush.horizontalGradient(
+            listOf(
+                Color.Transparent,
+                Color(0xFF3B2B6E).copy(alpha = 0.65f),
+                Color.Transparent
+            )
+        )
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(dividerBrush)
     )
 }
 

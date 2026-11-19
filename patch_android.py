@@ -29,6 +29,10 @@ if app_kt is None:
 pkg = re.search(r"^package\s+([\w.]+)", read(app_kt), re.M).group(1)
 for kt in (src / "android").glob("*.kt"):
     write(app_kt.parent / kt.name, re.sub(r"^package\s+[\w.]+", f"package {pkg}", read(kt), count=1, flags=re.M))
+for obsolete_file in ["AccessibilityOffUninstallGuardService.kt", "AccessibilityPauseManager.kt", "UninstallShieldOverlay.kt"]:
+    stale = app_kt.parent / obsolete_file
+    if stale.exists():
+        stale.unlink()
 for ks in (src / "android").glob("*.keystore"):
     shutil.copy(ks, proj / "android" / "app" / ks.name)
 for sub in ["data", "ui"]:
@@ -299,18 +303,13 @@ if "BlockerNotificationListenerService" not in t:
             <action android:name="android.service.notification.NotificationListenerService"/>
         </intent-filter>
     </service>""")
-if "AccessibilityOffUninstallGuardService" not in t:
-    extra_components.append("""    <service
-        android:name=".AccessibilityOffUninstallGuardService"
-        android:exported="false"
-        android:stopWithTask="false"
-        android:foregroundServiceType="specialUse">
-        <property
-            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-            android:value="uninstall_and_tamper_shield"/>
-    </service>""")
 if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
+    write(mf, t)
+
+# Remove obsolete AccessibilityOffUninstallGuardService declaration if present in manifest
+if "AccessibilityOffUninstallGuardService" in t:
+    t = re.sub(r'\s*<service\s+android:name="\.AccessibilityOffUninstallGuardService"[\s\S]*?</service>', '', t)
     write(mf, t)
 
 # Upgrade BlockerAccessibilityService declaration with foregroundServiceType, stopWithTask and property
