@@ -17,6 +17,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,6 +27,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * Dedicated Foreground Guard Service running while Accessibility is temporarily disabled
+ * (e.g. for Banking apps).
+ *
+ * Enforces uninstallation and settings protection by statefully tracking the foreground package
+ * every 100ms and immediately blocking Settings, PackageInstaller, Security Centers, and Play Store.
+ */
 class AccessibilityOffUninstallGuardService : Service() {
 
     companion object {
@@ -36,11 +44,7 @@ class AccessibilityOffUninstallGuardService : Service() {
         fun start(context: Context) {
             val intent = Intent(context, AccessibilityOffUninstallGuardService::class.java)
             runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+                ContextCompat.startForegroundService(context, intent)
             }.onFailure {
                 Log.e(TAG, "Failed starting AccessibilityOffUninstallGuardService", it)
             }
@@ -56,6 +60,9 @@ class AccessibilityOffUninstallGuardService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var loopJob: Job? = null
     private var powerManager: PowerManager? = null
+    private var currentForegroundPkg: String? = null
+    private var lastQueryTimeMs: Long = 0L
+    private var lastHomeKickTimeMs: Long = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -94,50 +101,113 @@ class AccessibilityOffUninstallGuardService : Service() {
                     if (isInteractive) {
                         val isA11yDisabled = BlockerStore.isAccessibilityDisabledForBanking(this@AccessibilityOffUninstallGuardService)
                         if (!isA11yDisabled) {
+                            UninstallShieldOverlay.hide()
                             stopSelf()
                             break
                         }
 
-                        val topPkg = getTopPackage()
-                        if (topPkg != null && topPkg != packageName && isSettingsOrInstaller(topPkg)) {
+                        val now = System.currentTimeMillis()
+                        updateForegroundPackage(now)
+
+                        val pkg = currentForegroundPkg
+                        if (pkg != null && isBlockedTarget(pkg)) {
+                            // 1. Show and keep visible full-screen touch-blocking overlay
                             UninstallShieldOverlay.show(this@AccessibilityOffUninstallGuardService)
+
+                            // 2. Continuously fire Home Intent on every 250ms tick until foreground is non-blocked
+                            if (now - lastHomeKickTimeMs >= 250L) {
+                                lastHomeKickTimeMs = now
+                                sendHome()
+                            }
+                        } else {
+                            // If current app is verified non-blocked (e.g. Banking app or Home launcher)
+                            // and user requested return to home or overlay is dismissed
+                            if (UninstallShieldOverlay.isShowing && UninstallShieldOverlay.hasRequestedHomeReturn) {
+                                UninstallShieldOverlay.hide()
+                            }
                         }
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Error in guard loop", t)
                 }
-                delay(300L)
+                delay(100L) // 100ms Watchdog poll
             }
         }
     }
 
-    private fun isSettingsOrInstaller(pkg: String): Boolean {
-        val p = pkg.lowercase()
-        if (p == packageName) return false
-        return p.contains("packageinstaller") ||
-            p.contains("packagemanager") ||
-            p == "com.miui.securitycenter" ||
-            p == "com.android.settings" ||
+    private fun updateForegroundPackage(now: Long) {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return
+        if (lastQueryTimeMs == 0L) {
+            lastQueryTimeMs = now - 2000L
+        }
+        val events = runCatching {
+            usm.queryEvents(lastQueryTimeMs - 1000L, now)
+        }.getOrNull()
+        lastQueryTimeMs = now
+
+        if (events != null) {
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    event.eventType == 1 /* MOVE_TO_FOREGROUND */) {
+                    currentForegroundPkg = event.packageName
+                }
+            }
+        }
+
+        if (currentForegroundPkg == null) {
+            val stats = runCatching {
+                usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 120_000L, now)
+            }.getOrNull()
+            currentForegroundPkg = stats?.maxByOrNull { it.lastTimeUsed }?.packageName
+        }
+    }
+
+    private fun isBlockedTarget(pkg: String): Boolean {
+        val p = pkg.lowercase().trim()
+        if (p.isEmpty() || p == packageName) return false
+
+        // 1. Android Settings
+        if (p == "com.android.settings" || (p.contains("settings") && !p.contains("quicksettings"))) {
+            return true
+        }
+
+        // 2. Package Installers
+        if (p == "com.android.packageinstaller" ||
             p == "com.google.android.packageinstaller" ||
             p == "com.samsung.android.packageinstaller" ||
             p == "com.miui.packageinstaller" ||
-            (p.contains("settings") && !p.contains("quicksettings"))
+            p.contains("packageinstaller") ||
+            p.contains("packagemanager")) {
+            return true
+        }
+
+        // 3. Google Play Store (where users can tap "Uninstall")
+        if (p == "com.android.vending") {
+            return true
+        }
+
+        // 4. OEM Security Centers
+        if (p == "com.miui.securitycenter" ||
+            p == "com.samsung.android.lool" ||
+            p == "com.coloros.safecenter" ||
+            p == "com.iqoo.secure" ||
+            p == "com.transsion.phonemaster") {
+            return true
+        }
+
+        return false
     }
 
-    private fun getTopPackage(): String? {
-        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
-        val now = System.currentTimeMillis()
-        val events = usm.queryEvents(now - 3000L, now) ?: return null
-        var lastPkg: String? = null
-        val event = UsageEvents.Event()
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                event.eventType == 1 /* MOVE_TO_FOREGROUND */) {
-                lastPkg = event.packageName
+    private fun sendHome() {
+        runCatching {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
+            startActivity(homeIntent)
         }
-        return lastPkg
     }
 
     private fun createNotificationChannel() {

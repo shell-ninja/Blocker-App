@@ -1265,7 +1265,7 @@ object BlockerStore {
         prefs(c).getBoolean("is_a11y_disabled_for_banking", false)
 
     fun setAccessibilityDisabledForBanking(c: Context, disabled: Boolean) {
-        prefs(c).edit().putBoolean("is_a11y_disabled_for_banking", disabled).apply()
+        prefs(c).edit().putBoolean("is_a11y_disabled_for_banking", disabled).commit()
         updateIntegrityHmac(c)
     }
 
@@ -1274,9 +1274,9 @@ object BlockerStore {
 
     fun setDisableAccessibilityWaitTargetMs(c: Context, targetMs: Long) {
         if (targetMs <= 0L) {
-            prefs(c).edit().remove("disable_a11y_wait_target_ms").apply()
+            prefs(c).edit().remove("disable_a11y_wait_target_ms").commit()
         } else {
-            prefs(c).edit().putLong("disable_a11y_wait_target_ms", targetMs).apply()
+            prefs(c).edit().putLong("disable_a11y_wait_target_ms", targetMs).commit()
         }
         updateIntegrityHmac(c)
     }

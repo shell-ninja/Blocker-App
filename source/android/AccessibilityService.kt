@@ -2111,6 +2111,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 blockFbReels = BlockerStore.granularToggle(this, "block_fb_reels")
                 if (!blockFbReels) {
                     FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                    FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                 }
                 com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
             }
@@ -2293,6 +2294,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
             if (!snapshot.blockFacebookReels) {
                 FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                 return false
             }
         }
@@ -2319,36 +2321,28 @@ class BlockerAccessibilityService : AccessibilityService() {
         if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
             if (!snapshot.blockFacebookReels) {
                 FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                 return false
             }
-            if (eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                val r = runCatching { rootInActiveWindow }.getOrNull() ?: ev?.source
-                if (r != null) {
-                    val dm = resources.displayMetrics
-                    val sW = dm.widthPixels.coerceAtLeast(1)
-                    val sH = dm.heightPixels.coerceAtLeast(1)
-                    if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, ev, sW, sH) || isFacebookStory(r, ev)) {
-                        runCatching { r.safeRecycle() }
-                        return false
-                    }
-                    val isReels = FacebookReelsDetector.evaluate(r, ev, sW, sH, snapshot)
-                    if (isReels) {
-                        runCatching { r.safeRecycle() }
-                        escapeClickedFacebookPlayer()
-                        main.postDelayed({ verifyAndEscapeFacebookReels(pkg) }, 100L)
-                        OverlayHudManager.show(
-                            this,
-                            if (isBangla()) "ফেসবুক ভিডিও এবং রিলস ব্লক করা হয়েছে" else "Blocked: Facebook Video & Reels",
-                            6,
-                            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Video & Reels")
-                        )
-                        return true
-                    }
-                    val isFeed = isNormalFacebookFeedScreen(r)
+            val r = runCatching { rootInActiveWindow }.getOrNull() ?: ev?.source
+            if (r != null) {
+                val dm = resources.displayMetrics
+                val sW = dm.widthPixels.coerceAtLeast(1)
+                val sH = dm.heightPixels.coerceAtLeast(1)
+                if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, ev, sW, sH) || isFacebookStory(r, ev)) {
                     runCatching { r.safeRecycle() }
-                    if (isFeed) {
-                        return false // Allow normal newsfeed scrolling without running C++ video/transport detection
-                    }
+                    return false
+                }
+                val isReelsOrVideo = FacebookReelsDetector.evaluate(r, ev, sW, sH, snapshot)
+                if (isReelsOrVideo) {
+                    runCatching { r.safeRecycle() }
+                    handleFacebookVideoOrReelBlock(pkg)
+                    return true
+                }
+                val isFeed = isNormalFacebookFeedScreen(r)
+                runCatching { r.safeRecycle() }
+                if (isFeed && eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                    return false // Allow normal newsfeed scrolling without running C++ video/transport detection
                 }
             }
         }
@@ -2547,6 +2541,49 @@ class BlockerAccessibilityService : AccessibilityService() {
                 else -> "Blocker settings are protected"
             }
         }
+    }
+
+    private fun handleFacebookVideoOrReelBlock(pkg: String) {
+        // 1. Show BlackoutShieldOverlay (0ms) + BilingualReminderOverlay ("Blocked: Facebook Video & Reels")
+        TamperShieldManager.showInstantShield(this)
+        val isBn = isBangla()
+        val msg = if (isBn) "ফেসবুক ভিডিও এবং রিলস ব্লক করা হয়েছে" else "Blocked: Facebook Video & Reels"
+        OverlayHudManager.show(
+            this,
+            msg,
+            6,
+            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Video & Reels")
+        )
+        BlockerStore.incr(this, "blocked_apps")
+
+        // 2. Fire performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        performGlobalAction(GLOBAL_ACTION_BACK)
+
+        // 3. Schedule a 280ms post-check: if Facebook is STILL showing the full-screen video player or Reels viewer,
+        // immediately fire performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        main.postDelayed({
+            val r = runCatching { rootInActiveWindow }.getOrNull()
+            if (r != null) {
+                try {
+                    val dm = resources.displayMetrics
+                    val sW = dm.widthPixels.coerceAtLeast(1)
+                    val sH = dm.heightPixels.coerceAtLeast(1)
+                    val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
+                    if (!FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, null, sW, sH) &&
+                        FacebookReelsDetector.evaluate(r, null, sW, sH, snapshot)) {
+                        performGlobalAction(GLOBAL_ACTION_HOME)
+                    } else {
+                        val homeTab = findHomeTabNode(r)
+                        if (homeTab != null) {
+                            clickNodeOrParent(homeTab)
+                            homeTab.safeRecycle()
+                        }
+                    }
+                } finally {
+                    runCatching { r.safeRecycle() }
+                }
+            }
+        }, 280L)
     }
 
     private fun escapeClickedFacebookPlayer() {
@@ -6362,6 +6399,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 "com.facebook.katana", "com.facebook.lite" -> {
                     if (!snapshot.blockFacebookReels) {
                         FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                        FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                         return false
                     }
 
@@ -6369,7 +6407,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val sW = dm.widthPixels.coerceAtLeast(1)
                     val sH = dm.heightPixels.coerceAtLeast(1)
                     if (FacebookReelsDetector.evaluate(root, ev, sW, sH, snapshot)) {
-                        exitSubFeature(pkg, "Blocked: Facebook Video & Reels")
+                        handleFacebookVideoOrReelBlock(pkg)
                         return true
                     }
                 }
@@ -6431,25 +6469,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     private fun exitSubFeature(pkg: String, featureName: String) {
         if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
-            escapeClickedFacebookPlayer()
-            main.postDelayed({
-                val r = runCatching { rootInActiveWindow }.getOrNull() ?: return@postDelayed
-                try {
-                    val homeTab = findHomeTabNode(r)
-                    if (homeTab != null) {
-                        clickNodeOrParent(homeTab)
-                        homeTab.safeRecycle()
-                    }
-                } finally {
-                    runCatching { r.safeRecycle() }
-                }
-            }, 60L)
-            OverlayHudManager.show(
-                this,
-                if (isBangla()) "ফেসবুক রিলস/ভিডিও ব্লক করা হয়েছে" else "Facebook Video/Reels blocked",
-                6,
-                BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Reels")
-            )
+            handleFacebookVideoOrReelBlock(pkg)
             return
         }
 
@@ -6791,11 +6811,12 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isFacebookVideoOrReelClick(ev: AccessibilityEvent): Boolean {
-        if (!com.blocker.data.RuleSnapshotHolder.snapshot.blockFacebookReels) {
+        val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
+        if (!snapshot.blockFacebookReels) {
             FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+            FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
             return false
         }
-        // Only inspect actual click events, NEVER passive scrolling or focus changes
         if (ev.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
             return false
         }
@@ -6803,99 +6824,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val dm = resources.displayMetrics
         val sW = dm.widthPixels.coerceAtLeast(1)
         val sH = dm.heightPixels.coerceAtLeast(1)
-
-        val src = ev.source
-        // Whitelist stories: Clicking on a Story must never be blocked
-        if (FacebookReelsDetector.isFacebookStoryClick(ev) || isFacebookStoryClick(ev, src)) {
-            runCatching { src?.safeRecycle() }
-            return false
-        }
-
-        if (FacebookReelsDetector.isFacebookReelClick(ev, sW, sH)) {
-            runCatching { src?.safeRecycle() }
-            return true
-        }
-
-        val screenH = sH
-        val rect = Rect()
-        src?.getBoundsInScreen(rect)
-        // User clicked small node / container (< 25% screen height)
-        val isCompactTarget = rect.isEmpty || rect.height() <= 0.25f * screenH
-
-        val evCd = ev.contentDescription?.toString().orEmpty().lowercase().trim()
-        val evText = ev.text.joinToString(" ").lowercase().trim()
-        val srcCd = src?.contentDescription?.toString().orEmpty().lowercase().trim()
-        val srcText = src?.text?.toString().orEmpty().lowercase().trim()
-        val srcId = src?.viewIdResourceName?.toString().orEmpty().lowercase()
-
-        fun isReelOrVideoAction(s: String): Boolean {
-            if (s.isEmpty()) return false
-            val lower = s.trim().lowercase()
-            if (lower.contains("story") || lower.contains("stories")) return false
-            return lower.contains("play video") || lower.contains("view reel") ||
-                   lower.contains("watch reel") || lower.contains("reels") ||
-                   lower.contains("watch more") || lower.contains("watch") ||
-                   lower.contains("shorts") || lower.contains("play") ||
-                   lower.contains("unmute") || lower.contains("fullscreen") ||
-                   lower.contains("pause video") || lower.contains("pause") ||
-                   lower.contains("rewind") || lower.contains("রিল") || lower.contains("ভিডিও") ||
-                   (lower.contains("video") && (lower.contains("play") || lower.contains("watch") || lower.contains("tab")))
-        }
-
-        fun isReelOrVideoId(id: String): Boolean {
-            if (id.isEmpty()) return false
-            val lower = id.lowercase()
-            if (lower.contains("story")) return false
-            return lower.contains("reel") || lower.contains("shorts") ||
-                   lower.contains("video_player") || lower.contains("watch_tab") ||
-                   lower.contains("reels_tab") || lower.contains("fb_shorts") ||
-                   lower.contains("video") || lower.contains("player")
-        }
-
-        // 1. Direct event text / contentDescription / id
-        if (isCompactTarget && (isReelOrVideoAction(evCd) || isReelOrVideoAction(evText) ||
-            isReelOrVideoAction(srcCd) || isReelOrVideoAction(srcText) ||
-            isReelOrVideoId(srcId))) {
-            runCatching { src?.safeRecycle() }
-            return true
-        }
-
-        // 2. Check parent chain (e.g. clicked card inside Reels carousel)
-        if (src != null) {
-            var parent = src.parent
-            var depth = 0
-            while (parent != null && depth < 3) {
-                val pId = parent.viewIdResourceName?.toString().orEmpty().lowercase()
-                val pCd = parent.contentDescription?.toString().orEmpty().lowercase().trim()
-                if (isReelOrVideoId(pId) || isReelOrVideoAction(pCd)) {
-                    runCatching { parent.safeRecycle() }
-                    runCatching { src.safeRecycle() }
-                    return true
-                }
-                val nextP = parent.parent
-                parent.safeRecycle()
-                parent = nextP
-                depth++
-            }
-            parent?.safeRecycle()
-
-            // 3. Check direct children
-            for (i in 0 until src.childCount) {
-                val c = src.getChild(i) ?: continue
-                val ct = c.text?.toString().orEmpty().lowercase().trim()
-                val ccd = c.contentDescription?.toString().orEmpty().lowercase().trim()
-                val cid = c.viewIdResourceName?.toString().orEmpty().lowercase()
-                val isHit = isReelOrVideoAction(ct) || isReelOrVideoAction(ccd) || isReelOrVideoId(cid)
-                c.safeRecycle()
-                if (isHit) {
-                    runCatching { src.safeRecycle() }
-                    return true
-                }
-            }
-        }
-
-        runCatching { src?.safeRecycle() }
-        return false
+        return FacebookReelsDetector.isFacebookVideoOrReelClick(ev, sW, sH, snapshot)
     }
 
     private fun isFacebookHomeTabSelected(root: AccessibilityNodeInfo): Boolean {
@@ -7170,6 +7099,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
         if (!snapshot.blockFacebookReels) {
             FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+            FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
             return false
         }
         val dm = resources.displayMetrics

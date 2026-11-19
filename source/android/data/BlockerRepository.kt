@@ -889,6 +889,7 @@ class BlockerRepository(private val context: Context) {
         BlockerStore.setGranularToggle(appContext, "block_fb_reels", blocked)
         if (!blocked) {
             FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+            FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
         }
         RuleSnapshotHolder.syncFromStore(appContext)
         refreshProtection()
@@ -1241,6 +1242,7 @@ class BlockerRepository(private val context: Context) {
                     BlockerStore.prefs(appContext).edit().putBoolean(canonicalKey, false).remove("block_facebook_reels").apply()
                     if (canonicalKey == "block_fb_reels") {
                         FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                        FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                     }
                     refreshDistractionShield()
                 } else if (target == 0L) {
@@ -1252,6 +1254,7 @@ class BlockerRepository(private val context: Context) {
                 BlockerStore.prefs(appContext).edit().putBoolean(canonicalKey, false).remove("block_facebook_reels").apply()
                 if (canonicalKey == "block_fb_reels") {
                     FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
+                    FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                 }
                 refreshDistractionShield()
             }

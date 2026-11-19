@@ -3,6 +3,7 @@ package com.blocker
 import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -27,6 +28,13 @@ object AccessibilityPauseManager {
      * Starts the fixed 5-minute waiting countdown before disabling Accessibility.
      */
     fun startWaitPeriod(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val adminComp = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+        if (dpm?.isAdminActive(adminComp) != true) {
+            Log.w(TAG, "Cannot start 5-minute wait without active Device Admin")
+            return
+        }
+
         val targetMs = System.currentTimeMillis() + FIXED_WAIT_MS
         BlockerStore.setDisableAccessibilityWaitTargetMs(context, targetMs)
         RuleSnapshotHolder.syncFromStore(context)
@@ -46,20 +54,30 @@ object AccessibilityPauseManager {
      * Called when the 5-minute waiting timer finishes (alarm triggered, ticker, or user completion).
      */
     fun onWaitPeriodCompleted(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val adminComp = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+        if (dpm?.isAdminActive(adminComp) != true) {
+            Log.w(TAG, "Device Admin not active when wait completed. Aborting.")
+            abortWaitPeriod(context)
+            return
+        }
+
         cancelWaitAlarm(context)
         BlockerStore.setDisableAccessibilityWaitTargetMs(context, 0L)
+
+        // a) Persist isAccessibilityDisabledForBanking = true synchronously
         BlockerStore.setAccessibilityDisabledForBanking(context, true)
         RuleSnapshotHolder.syncFromStore(context)
 
-        // Suspend WRITE_SECURE_SETTINGS auto-restore and disable Accessibility via disableSelf()
+        // b) Start AccessibilityOffUninstallGuardService using ContextCompat.startForegroundService(context, intent) with START_STICKY so Android cannot kill it when disableSelf() runs
+        AccessibilityOffUninstallGuardService.start(context)
+
+        // c) Suspend WRITE_SECURE_SETTINGS auto-restore and disable Accessibility via disableSelf()
         runCatching {
             BlockerAccessibilityService.instance?.disableSelf()
         }.onFailure {
             Log.e(TAG, "Failed calling disableSelf()", it)
         }
-
-        // Start Layer 2 Foreground Guard Service (UsageStats + Overlay Watchdog)
-        AccessibilityOffUninstallGuardService.start(context)
 
         // Post ongoing notification
         showReEnableNotification(context)

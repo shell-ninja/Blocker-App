@@ -161,10 +161,11 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
         val isA11yOffBanking = BlockerStore.isAccessibilityDisabledForBanking(context)
         if (isA11yOffBanking) {
+            AccessibilityOffUninstallGuardService.start(context)
             UninstallShieldOverlay.show(context)
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             runCatching { context.startActivity(homeIntent) }
             return "Blocker Uninstall Protection is locked. Re-enable Accessibility first."
@@ -203,6 +204,16 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onDisabled(context: Context, intent: Intent) {
         val p = BlockerStore.prefs(context)
         p.edit().putBoolean("admin_lost", true).apply()
+        val isA11yOffBanking = BlockerStore.isAccessibilityDisabledForBanking(context)
+        if (isA11yOffBanking) {
+            AccessibilityOffUninstallGuardService.start(context)
+            UninstallShieldOverlay.show(context)
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            runCatching { context.startActivity(homeIntent) }
+        }
         if (!guardEngaged(context)) return   // let the OS's own uninstall flow continue unimpeded
         // Kick to home immediately with instant protective shield
         BlockerAccessibilityService.instance?.let { service ->
