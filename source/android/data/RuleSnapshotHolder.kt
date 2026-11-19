@@ -23,6 +23,8 @@ data class CompiledRuleSnapshot(
     val blockInstagramExplore: Boolean = false,
     val blockFacebookReels: Boolean = false,
     val blockYoutubeShorts: Boolean = false,
+    val isAccessibilityDisabledForBanking: Boolean = false,
+    val disableAccessibilityWaitTargetMs: Long = 0L,
     val accessibilityPauseUntilEpochMs: Long = 0L,
     val focusUntilMs: Long = 0L,
     val isStudyRunning: Boolean = false,
@@ -33,7 +35,7 @@ data class CompiledRuleSnapshot(
     val syncedAtMs: Long = 0L
 ) {
     fun isAccessibilityTemporarilyPaused(nowEpochMs: Long = System.currentTimeMillis()): Boolean {
-        return accessibilityPauseUntilEpochMs > nowEpochMs
+        return isAccessibilityDisabledForBanking || accessibilityPauseUntilEpochMs > nowEpochMs
     }
 
     fun isManualFocusRunningNow(nowMs: Long = System.currentTimeMillis()): Boolean =
@@ -77,6 +79,8 @@ object RuleSnapshotHolder {
             blockInstagramExplore = BlockerStore.granularToggle(context, "block_insta_search", false),
             blockFacebookReels = BlockerStore.granularToggle(context, "block_fb_reels", false),
             blockYoutubeShorts = BlockerStore.granularToggle(context, "block_yt_shorts", false),
+            isAccessibilityDisabledForBanking = BlockerStore.isAccessibilityDisabledForBanking(context),
+            disableAccessibilityWaitTargetMs = BlockerStore.disableAccessibilityWaitTargetMs(context),
             accessibilityPauseUntilEpochMs = BlockerStore.accessibilityPauseUntilEpochMs(context),
             focusUntilMs = BlockerStore.focusUntil(context),
             isStudyRunning = BlockerStore.prefs(context).getBoolean("study_active", false),

@@ -187,20 +187,15 @@ class BlockerForegroundService : Service {
     private fun inspectForegroundState() {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
         val now = System.currentTimeMillis()
-        val pauseUntil = BlockerStore.accessibilityPauseUntilEpochMs(this)
-        if (pauseUntil > 0L) {
-            if (now >= pauseUntil) {
-                BlockerStore.setAccessibilityPauseUntilEpochMs(this, 0L)
-                com.blocker.data.RuleSnapshotHolder.syncFromStore(this)
-                wasAccessibilityTemporarilyPaused = false
-                checkAndNotifyIfAccessibilityDisabled()
-            } else {
-                wasAccessibilityTemporarilyPaused = true
-                return
-            }
+        val isTempPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(now) ||
+            BlockerStore.isAccessibilityTemporarilyPaused(this, now)
+        if (isTempPaused) {
+            wasAccessibilityTemporarilyPaused = true
+            return
         } else if (wasAccessibilityTemporarilyPaused) {
             wasAccessibilityTemporarilyPaused = false
-            checkAndNotifyIfAccessibilityDisabled()
+            AccessibilityPauseManager.onPauseExpired(this)
+            return
         }
 
         val topPkg = getTopPackage() ?: return

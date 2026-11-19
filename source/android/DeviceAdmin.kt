@@ -159,6 +159,17 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
 
     // Shown in the system's deactivation confirmation dialog. Android does not allow vetoing here.
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+        val isA11yOffBanking = BlockerStore.isAccessibilityDisabledForBanking(context)
+        if (isA11yOffBanking) {
+            UninstallShieldOverlay.show(context)
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+            }
+            runCatching { context.startActivity(homeIntent) }
+            return "Blocker Uninstall Protection is locked. Re-enable Accessibility first."
+        }
+
         if (!guardEngaged(context)) return "Deactivate this device admin app?"
         BlockerStore.incr(context, "tamper")
         // Signal the AccessibilityService via static flag (zero latency, same process)

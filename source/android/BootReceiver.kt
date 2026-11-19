@@ -18,13 +18,49 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         const val NOTIFICATION_ID_A11Y_RESTORE = 1003
+        const val REQUEST_CODE_A11Y_PAUSE_EXPIRED = 8888
+        const val ACTION_ACCESSIBILITY_PAUSE_EXPIRED = "com.blocker.ACTION_ACCESSIBILITY_PAUSE_EXPIRED"
+        const val ACTION_A11Y_WAIT_EXPIRED = "com.blocker.ACTION_A11Y_WAIT_EXPIRED"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+
+        if (action == ACTION_A11Y_WAIT_EXPIRED || action == ACTION_ACCESSIBILITY_PAUSE_EXPIRED) {
+            AccessibilityPauseManager.onWaitPeriodCompleted(context)
+            return
+        }
+
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             BlockerForegroundService.start(context)
             DeviceOwnerHelper.enforceDisallowSafeBoot(context)
+
+            val now = System.currentTimeMillis()
+            val isA11yDisabledForBanking = BlockerStore.isAccessibilityDisabledForBanking(context)
+            if (isA11yDisabledForBanking) {
+                // Ensure Layer 2 Foreground Guard Service is running to protect against uninstall/settings
+                AccessibilityOffUninstallGuardService.start(context)
+                AccessibilityPauseManager.showReEnableNotification(context)
+                return
+            }
+
+            val waitTarget = BlockerStore.disableAccessibilityWaitTargetMs(context)
+            if (waitTarget > 0L) {
+                if (waitTarget > now) {
+                    AccessibilityPauseManager.scheduleWaitAlarm(context, waitTarget)
+                } else {
+                    AccessibilityPauseManager.onWaitPeriodCompleted(context)
+                }
+                return
+            }
+
+            val isPaused = com.blocker.data.RuleSnapshotHolder.snapshot.isAccessibilityTemporarilyPaused(now) ||
+                BlockerStore.isAccessibilityTemporarilyPaused(context, now)
+
+            if (isPaused) {
+                // Do NOT re-enable Accessibility while paused!
+                return
+            }
 
             // Auto-restore Accessibility Service if WRITE_SECURE_SETTINGS is granted
             if (BlockerStore.active(context) && BlockerStore.shield(context)) {

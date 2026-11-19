@@ -299,6 +299,16 @@ if "BlockerNotificationListenerService" not in t:
             <action android:name="android.service.notification.NotificationListenerService"/>
         </intent-filter>
     </service>""")
+if "AccessibilityOffUninstallGuardService" not in t:
+    extra_components.append("""    <service
+        android:name=".AccessibilityOffUninstallGuardService"
+        android:exported="false"
+        android:stopWithTask="false"
+        android:foregroundServiceType="specialUse">
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="uninstall_and_tamper_shield"/>
+    </service>""")
 if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)

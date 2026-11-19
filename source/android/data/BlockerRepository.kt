@@ -18,6 +18,7 @@ import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
+import com.blocker.AccessibilityPauseManager
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.BlockerStore
 import com.blocker.DeviceOwnerHelper
@@ -52,6 +53,8 @@ data class ProtectionState(
     val isBankingMode: Boolean = false,
     val isAutoPauseBanking: Boolean = false,
     val blockFacebookReels: Boolean = false,
+    val isAccessibilityDisabledForBanking: Boolean = false,
+    val disableAccessibilityWaitTargetMs: Long = 0L,
     val accessibilityPauseUntilEpochMs: Long = 0L
 )
 
@@ -283,6 +286,8 @@ class BlockerRepository(private val context: Context) {
         val autoPause = BlockerStore.isAutoPauseBanking(appContext)
         val reels = BlockerStore.granularToggle(appContext, "block_fb_reels", false)
         val a11yPause = BlockerStore.accessibilityPauseUntilEpochMs(appContext)
+        val isA11yDisabled = BlockerStore.isAccessibilityDisabledForBanking(appContext)
+        val a11yWaitTarget = BlockerStore.disableAccessibilityWaitTargetMs(appContext)
 
         val now = SecureTime.now(appContext)
         val pCooldownUntil = BlockerStore.powerOffCooldownUntil(appContext)
@@ -307,6 +312,8 @@ class BlockerRepository(private val context: Context) {
             isBankingMode = banking,
             isAutoPauseBanking = autoPause,
             blockFacebookReels = reels,
+            isAccessibilityDisabledForBanking = isA11yDisabled,
+            disableAccessibilityWaitTargetMs = a11yWaitTarget,
             accessibilityPauseUntilEpochMs = a11yPause
         )
         refreshDistractionShield()
@@ -1257,17 +1264,42 @@ class BlockerRepository(private val context: Context) {
         refreshDistractionShield()
     }
 
-    fun pauseAccessibilityTemporarily(minutes: Int) {
-        val until = System.currentTimeMillis() + (minutes * 60_000L)
-        BlockerStore.setAccessibilityPauseUntilEpochMs(appContext, until)
-        RuleSnapshotHolder.syncFromStore(appContext)
+    fun startDisableAccessibility5mWait(): Boolean {
+        val dpm = appContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val adminComp = ComponentName(appContext, BlockerDeviceAdminReceiver::class.java)
+        if (dpm?.isAdminActive(adminComp) != true) {
+            return false
+        }
+        AccessibilityPauseManager.startWaitPeriod(appContext)
+        refreshProtection()
+        return true
+    }
+
+    fun abortDisableAccessibilityWait() {
+        AccessibilityPauseManager.abortWaitPeriod(appContext)
         refreshProtection()
     }
 
-    fun resumeAccessibilityProtectionNow() {
-        BlockerStore.setAccessibilityPauseUntilEpochMs(appContext, 0L)
-        RuleSnapshotHolder.syncFromStore(appContext)
+    fun completeDisableAccessibilityWait() {
+        AccessibilityPauseManager.onWaitPeriodCompleted(appContext)
         refreshProtection()
+    }
+
+    fun reEnableAccessibilityNow() {
+        AccessibilityPauseManager.reEnableAccessibility(appContext)
+        refreshProtection()
+    }
+
+    fun pauseAccessibilityTemporarily(minutes: Int) {
+        startDisableAccessibility5mWait()
+    }
+
+    fun disableAccessibilityNow() {
+        completeDisableAccessibilityWait()
+    }
+
+    fun resumeAccessibilityProtectionNow() {
+        reEnableAccessibilityNow()
     }
 
     fun addSchedule(label: String, startMin: Int, endMin: Int, allowedApps: Set<String> = emptySet(), daysOfWeek: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7)) {

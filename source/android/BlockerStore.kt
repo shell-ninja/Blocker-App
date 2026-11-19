@@ -513,6 +513,13 @@ object BlockerStore {
         if (a11yPause > 0L && now >= a11yPause) {
             editor.remove("accessibility_pause_until")
             changed = true
+            AccessibilityPauseManager.onPauseExpired(c)
+        }
+        val a11yWait = p.getLong("disable_a11y_wait_target_ms", 0L)
+        if (a11yWait > 0L && now >= a11yWait) {
+            editor.remove("disable_a11y_wait_target_ms")
+            changed = true
+            AccessibilityPauseManager.onWaitPeriodCompleted(c)
         }
         for ((k, v) in all) {
             if (k == "pending_protection" || k == "pending_setting_focus_apps" || k.startsWith("pending_setting_sched_apps_")) {
@@ -1254,8 +1261,28 @@ object BlockerStore {
         updateIntegrityHmac(c)
     }
 
+    fun isAccessibilityDisabledForBanking(c: Context): Boolean =
+        prefs(c).getBoolean("is_a11y_disabled_for_banking", false)
+
+    fun setAccessibilityDisabledForBanking(c: Context, disabled: Boolean) {
+        prefs(c).edit().putBoolean("is_a11y_disabled_for_banking", disabled).apply()
+        updateIntegrityHmac(c)
+    }
+
+    fun disableAccessibilityWaitTargetMs(c: Context): Long =
+        prefs(c).getLong("disable_a11y_wait_target_ms", 0L)
+
+    fun setDisableAccessibilityWaitTargetMs(c: Context, targetMs: Long) {
+        if (targetMs <= 0L) {
+            prefs(c).edit().remove("disable_a11y_wait_target_ms").apply()
+        } else {
+            prefs(c).edit().putLong("disable_a11y_wait_target_ms", targetMs).apply()
+        }
+        updateIntegrityHmac(c)
+    }
+
     fun isAccessibilityTemporarilyPaused(c: Context, nowEpochMs: Long = System.currentTimeMillis()): Boolean =
-        accessibilityPauseUntilEpochMs(c) > nowEpochMs
+        isAccessibilityDisabledForBanking(c) || accessibilityPauseUntilEpochMs(c) > nowEpochMs
 
     fun blockIncognitoMode(c: Context): Boolean = prefs(c).getBoolean("block_incognito_mode", true)
     fun setBlockIncognitoMode(c: Context, enabled: Boolean) =

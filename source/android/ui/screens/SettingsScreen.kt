@@ -1,9 +1,13 @@
 package com.blocker.ui.screens
 
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
+import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.MainActivity
 import com.blocker.PermissionFlowTracker
 import com.blocker.data.BlockerBackupManager
@@ -41,6 +45,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.blocker.BlockerAccessibilityService
 import com.blocker.BlockerStore
 import com.blocker.R
 import com.blocker.data.BlockerRepository
@@ -84,8 +89,6 @@ fun SettingsScreen(
     val study by repo.studyState.collectAsState()
     var backupStatusMessage by remember { mutableStateOf("") }
     var restoreUnlockTarget by remember { mutableStateOf(0L) }
-    var selectedPauseMinutes by remember { mutableStateOf(10) }
-    var a11yPauseUnlockTarget by remember { mutableStateOf(0L) }
     var currentEpochMs by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
@@ -206,8 +209,11 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // 1B. Temporary Accessibility Pause Card (Keep Uninstall Protection)
-        val isA11yPaused = protection.accessibilityPauseUntilEpochMs > currentEpochMs
+        // 1B. Disable Accessibility Card (For Banking Apps — 5m Fixed Wait & Locked Uninstall)
+        val isA11yDisabled = protection.isAccessibilityDisabledForBanking
+        val waitTargetMs = protection.disableAccessibilityWaitTargetMs
+        val isWaiting = waitTargetMs > currentEpochMs
+
         NordicMicroGridCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -230,21 +236,21 @@ fun SettingsScreen(
                             Icon(
                                 imageVector = CyberIcons.Shield,
                                 contentDescription = null,
-                                tint = if (isA11yPaused) Color(0xFFF59E0B) else NordicColors.AccentPrimary,
+                                tint = if (isA11yDisabled || isWaiting) Color(0xFFF59E0B) else NordicColors.AccentPrimary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Temporary Accessibility Pause",
+                                text = "Disable Accessibility (For Banking Apps)",
                                 color = NordicColors.TextPrimary,
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Allow turning off or pausing Accessibility for a short time while keeping Uninstall Protection locked",
+                                text = "Requires a 5-minute waiting period. App uninstallation remains strictly locked while Accessibility is off.",
                                 color = NordicColors.TextSecondary,
                                 fontSize = 11.5.sp,
                                 lineHeight = 15.sp
@@ -252,179 +258,115 @@ fun SettingsScreen(
                         }
                     }
                     StatusPillBadge(
-                        label = if (isA11yPaused) "Paused" else "Protected",
-                        tone = if (isA11yPaused) BadgeTone.WARN else BadgeTone.OK,
+                        label = when {
+                            isA11yDisabled -> "Disabled"
+                            isWaiting -> "Waiting (5m)"
+                            else -> "Active"
+                        },
+                        tone = if (isA11yDisabled || isWaiting) BadgeTone.WARN else BadgeTone.OK,
                         small = true
                     )
                 }
 
-                if (isA11yPaused) {
-                    val remMs = (protection.accessibilityPauseUntilEpochMs - currentEpochMs).coerceAtLeast(0L)
-                    val mmSs = formatMmSs(remMs)
+                if (isA11yDisabled) {
+                    // State 3: Waiting Period Completed — Accessibility Disabled
                     StatusPillBadge(
-                        label = "Accessibility Unlocked for $mmSs — Uninstall Shield Locked",
+                        label = "Accessibility Disabled — Uninstall Protection Active",
                         tone = BadgeTone.WARN,
                         small = false,
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Tactile3DButton(
+                        onClick = { repo.reEnableAccessibilityNow() },
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                PermissionFlowTracker.isLaunchingPermissionIntent = true
-                                PermissionFlowTracker.lastAccessibilityPermissionRequestMs = SystemClock.elapsedRealtime()
-                                MainActivity.isLaunchingExternal = true
-                                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                runCatching { context.startActivity(intent) }
-                            },
-                            modifier = Modifier.weight(1f).height(38.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D28D9)),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Open Accessibility",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
+                        Text(
+                            text = "Re-enable Accessibility Now",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                } else if (isWaiting) {
+                    // State 2: 5-Minute Waiting Period Ticking
+                    val remWaitMs = (waitTargetMs - currentEpochMs).coerceAtLeast(0L)
+                    val mmSs = formatMmSs(remWaitMs)
 
-                        Button(
-                            onClick = { repo.resumeAccessibilityProtectionNow() },
-                            modifier = Modifier.weight(1f).height(38.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                    if (remWaitMs <= 0L) {
+                        LaunchedEffect(waitTargetMs) {
+                            repo.completeDisableAccessibilityWait()
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Color(0xFF1B1536),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF4C3B87))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "Resume Protection Now",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                softWrap = false
+                            StatusPillBadge(
+                                label = "Accessibility turns off in $mmSs",
+                                tone = BadgeTone.WARN,
+                                small = true
                             )
+                            Button(
+                                onClick = { repo.abortDisableAccessibilityWait() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text(
+                                    text = "Abort",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 } else {
-                    // Duration Selector Chips (Single-Line inside a Recessed3DWell)
-                    Recessed3DWell(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(5, 10, 15, 30).forEach { mins ->
-                                val isSelected = selectedPauseMinutes == mins
-                                Surface(
-                                    color = if (isSelected) Color(0xFF7C3AED) else Color(0xFF15102A),
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) Color(0xFFA78BFA) else Color(0xFF2D2254)
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(horizontal = 3.dp)
-                                        .clickable { selectedPauseMinutes = mins }
-                                ) {
-                                    Box(
-                                        modifier = Modifier.padding(vertical = 7.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "${mins}m",
-                                            color = if (isSelected) Color.White else NordicColors.TextSecondary,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (a11yPauseUnlockTarget > 0L) {
-                        val remUnlockSec = ((a11yPauseUnlockTarget - currentEpochMs) / 1000L).coerceAtLeast(0L)
-                        if (remUnlockSec > 0L) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = Color(0xFF1B1536),
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, Color(0xFF4C3B87))
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    StatusPillBadge(
-                                        label = "Unlocking in ${formatCountdown(remUnlockSec * 1000L)}",
-                                        tone = BadgeTone.WARN,
-                                        small = true
+                    // State 1: Accessibility Active — Default
+                    Tactile3DButton(
+                        onClick = {
+                            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+                            val adminComp = ComponentName(context, BlockerDeviceAdminReceiver::class.java)
+                            val isAdmin = dpm?.isAdminActive(adminComp) == true
+                            if (!isAdmin) {
+                                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComp)
+                                    putExtra(
+                                        DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                        "Device Admin must be active to ensure Blocker remains protected while Accessibility is disabled."
                                     )
-                                    Button(
-                                        onClick = { a11yPauseUnlockTarget = 0L },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(30.dp)
-                                    ) {
-                                        Text(
-                                            text = "Abort",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
                                 }
+                                runCatching { context.startActivity(intent) }
+                            } else {
+                                repo.startDisableAccessibility5mWait()
                             }
-                        } else {
-                            LaunchedEffect(a11yPauseUnlockTarget) {
-                                a11yPauseUnlockTarget = 0L
-                                repo.pauseAccessibilityTemporarily(selectedPauseMinutes)
-                            }
-                        }
-                    } else {
-                        Tactile3DButton(
-                            onClick = {
-                                val isMasterOn = (protection.isActive && protection.isShieldActive) ||
-                                    focus.active || (focus.focusUntil > System.currentTimeMillis())
-                                if (isMasterOn) {
-                                    val delayMs = BlockerStore.delayMs(context)
-                                    a11yPauseUnlockTarget = System.currentTimeMillis() + delayMs
-                                } else {
-                                    repo.pauseAccessibilityTemporarily(selectedPauseMinutes)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(42.dp)
-                        ) {
-                            Text(
-                                text = "Pause Accessibility (${selectedPauseMinutes}m)",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Text(
+                            text = "Disable Accessibility (5m Wait)",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
