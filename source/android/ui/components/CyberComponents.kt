@@ -268,7 +268,7 @@ fun StatusPillBadge(
     val shape = RoundedCornerShape(12.dp)
     val padH = if (small) 8.dp else 12.dp
     val padV = if (small) 3.dp else 5.dp
-    val fontSz = if (small) 10.5.sp else 12.sp
+    val fontSz = if (small) 10.5.sp else 11.5.sp
 
     val hasGlow = breathing || tone == BadgeTone.OK || tone == BadgeTone.ACCENT
     Row(
@@ -296,7 +296,7 @@ fun StatusPillBadge(
                 modifier = Modifier.size(if (small) 11.dp else 13.dp)
             )
             Spacer(modifier = Modifier.width(5.dp))
-        } else if (tone != BadgeTone.OK && tone != BadgeTone.ACCENT) {
+        } else {
             Box(
                 modifier = Modifier
                     .size(if (small) 5.dp else 6.dp)
@@ -310,9 +310,9 @@ fun StatusPillBadge(
             text = label,
             color = textClr,
             fontSize = fontSz,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
-            letterSpacing = 0.3.sp,
+            letterSpacing = 0.2.sp,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis

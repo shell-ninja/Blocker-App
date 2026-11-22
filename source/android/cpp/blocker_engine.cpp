@@ -807,7 +807,10 @@ uint64_t engine_evaluate_screen(const uint8_t* buffer, size_t buffer_len) {
     // -------------------------------------------------------------------------
     // 2. Facebook Reels Page & Full-Screen Player Blocker (Litho-Aware)
     // -------------------------------------------------------------------------
-    if (block_fb_reels && (pkg == "com.facebook.katana" || pkg == "com.facebook.lite")) {
+    if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
+        return pack_verdict(ACTION_ALLOW, REASON_NONE, 0xFFFF, 0, 0);
+    }
+    if (false && block_fb_reels && (pkg == "com.facebook.katana" || pkg == "com.facebook.lite")) {
         // Fast Story Check: Never block Facebook Stories!
         bool is_story = false;
         for (size_t i = 0; i < node_count; ++i) {

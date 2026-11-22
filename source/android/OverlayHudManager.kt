@@ -152,7 +152,8 @@ object OverlayHudManager {
         service: AccessibilityService,
         message: CharSequence,
         reasonId: Int = 0,
-        blockReason: BlockReason? = null
+        blockReason: BlockReason? = null,
+        autoDismissMs: Long = 1300L
     ) {
         if (reasonId > 0 && !NativeBlockerBridge.checkHudRateLimit(reasonId)) {
             return
@@ -206,7 +207,7 @@ object OverlayHudManager {
                 .setInterpolator(DecelerateInterpolator(1.8f))
                 .start()
 
-            mainHandler.postDelayed(hideRunnable, 2000L)
+            mainHandler.postDelayed(hideRunnable, autoDismissMs)
         }
 
         if (Looper.myLooper() == Looper.getMainLooper()) {

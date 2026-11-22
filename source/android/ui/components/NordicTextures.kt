@@ -236,7 +236,7 @@ fun NordicFoliageHeroCard(
 @Composable
 fun Elevated3DCard(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(24.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(22.dp),
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit
@@ -245,9 +245,9 @@ fun Elevated3DCard(
     val beveledRim = remember {
         Brush.verticalGradient(
             listOf(
-                Color(0xFFA78BFA).copy(alpha = 0.65f),
-                Color(0xFF3B2B6E).copy(alpha = 0.35f),
-                Color(0xFF05030A).copy(alpha = 0.90f)
+                Color(0xFFA78BFA).copy(alpha = 0.50f),
+                Color(0xFF3B2B6E).copy(alpha = 0.30f),
+                Color(0xFF1A1233)
             )
         )
     }
@@ -263,16 +263,16 @@ fun Elevated3DCard(
 
     Column(
         modifier = modifier
-            .shadow(
-                elevation = 18.dp,
-                shape = shape,
-                clip = false,
-                ambientColor = Color.Black,
-                spotColor = Color(0xFF7C3AED)
-            )
+            .graphicsLayer {
+                this.shadowElevation = 14.dp.toPx()
+                this.shape = shape
+                this.clip = false
+                this.spotShadowColor = Color(0xFF7C3AED).copy(alpha = 0.45f)
+                this.ambientShadowColor = Color.Black.copy(alpha = 0.35f)
+            }
             .clip(shape)
             .background(surfaceGradient)
-            .border(1.2.dp, beveledRim, shape)
+            .border(1.dp, beveledRim, shape)
             .then(clickModifier)
             .padding(contentPadding),
         content = content
@@ -287,9 +287,9 @@ fun Elevated3DCard(
 @Composable
 fun Hero3DCard(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(24.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(22.dp),
     onClick: (() -> Unit)? = null,
-    contentPadding: PaddingValues = PaddingValues(20.dp),
+    contentPadding: PaddingValues = PaddingValues(18.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
@@ -315,11 +315,11 @@ fun Hero3DCard(
     Column(
         modifier = modifier
             .graphicsLayer {
-                this.shadowElevation = 20.dp.toPx()
+                this.shadowElevation = 18.dp.toPx()
                 this.shape = shape
                 this.clip = false
-                this.spotShadowColor = Color(0xFF8B5CF6)
-                this.ambientShadowColor = Color(0xFF7C3AED)
+                this.spotShadowColor = Color(0xFF8B5CF6).copy(alpha = 0.50f)
+                this.ambientShadowColor = Color(0xFF7C3AED).copy(alpha = 0.35f)
             }
             .clip(shape)
             .background(surfaceGradient)
@@ -333,7 +333,7 @@ fun Hero3DCard(
                     drawRect(highlightBrush)
                 }
             }
-            .border(1.2.dp, beveledRim, shape)
+            .border(1.dp, beveledRim, shape)
             .then(clickModifier)
             .padding(contentPadding),
         content = content
@@ -348,7 +348,7 @@ fun Hero3DCard(
 @Composable
 fun Recessed3DWell(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(16.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     contentPadding: PaddingValues = PaddingValues(12.dp),
     content: @Composable BoxScope.() -> Unit
 ) {

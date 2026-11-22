@@ -108,6 +108,7 @@ class BlockerForegroundService : Service {
 
     override fun onCreate() {
         super.onCreate()
+        SystemExemptions.init(this)
         createNotificationChannel()
         handler.postDelayed(updateCheckRunnable, 30_000L) // initial check 30s after service launch
         registerScreenReceiver()
@@ -186,8 +187,14 @@ class BlockerForegroundService : Service {
     private fun inspectForegroundState() {
         BlockerStore.checkAndApplyExpiredDelayTimers(this)
 
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        if (nowElapsed - SystemExemptions.lastFocusHomeKickElapsedMs < 1200L) {
+            return
+        }
+
         val topPkg = getTopPackage() ?: return
         if (topPkg == packageName) return
+        if (SystemExemptions.isNeverBlockPackage(this, topPkg)) return
         val isBn = BlockerStore.popupLanguage(this) == "bn"
 
         // 1. Focus Mode Watchdog Enforcement (Immediate fallback even if accessibility is interrupted)
@@ -205,6 +212,8 @@ class BlockerForegroundService : Service {
         // Blocked app enforcement fallback (even if accessibility is off/interrupted)
         val blockedApps = BlockerStore.set(this, "apps")
         if (topPkg in blockedApps) {
+            if (SystemExemptions.isNeverBlockPackage(this, topPkg)) return
+            SystemExemptions.lastFocusHomeKickElapsedMs = android.os.SystemClock.elapsedRealtime()
             kickToHome()
             showTamperAlert(
                 title = if (isBn) "অ্যাপটি বন্ধ রাখা হয়েছে" else "App Blocked",

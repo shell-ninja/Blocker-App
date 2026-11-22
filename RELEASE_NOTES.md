@@ -4,7 +4,47 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ---
 
-## v1.0.6.9 (Current Release)
+## v1.0.7 (Current Release)
+
+**Release Date:** November 22, 2026  
+**Version:** 1.0.7  
+**Build:** 138 (`versionCode`: `1007138` debug / `1107138` release)  
+
+### Major Fixes & Enhancements:
+- **Bulletproof OEM & Custom Home Launcher Protection (`SystemExemptions.kt` & `FocusEnforcer.kt`):**
+  - Resolved an issue where Focus Mode app blocking incorrectly blocked OEM home launchers (including Infinix/Transsion's `com.transsion.XOSLauncher`, HiOS, HyperOS, OneUI, Pixel launcher, and 3rd-party launchers like Lawnchair and Nova).
+  - Built a centralized single-source-of-truth system exemptions engine (`SystemExemptions.isNeverBlockPackage`):
+    - Added API-33-safe `PackageManager.queryIntentActivities` & `resolveActivity` using `ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong())`.
+    - Added runtime cached per-package `CATEGORY_HOME` probing (`ConcurrentHashMap<String, Boolean>`) to automatically identify any launcher installed on the device.
+    - Normalized all package evaluations to lowercase (`Locale.ROOT`) to eliminate case-sensitive comparison bugs on OEM packages (`com.transsion.XOSLauncher`).
+    - Added built-in recognition for Transsion companion system services (`smartpanel`, `magiclauncher`, `desktop`, `zerohome`, `minusone`, `hiassistant`, `aivoiceassistant`, etc.).
+    - Hardened the final execution sink gate with `SystemExemptions.isNeverBlockPackage(context, pkg)` to make accidental launcher blocking architecturally impossible.
+  - Eliminated stale `UsageStatsManager` fallback false blocks following `GLOBAL_ACTION_HOME`:
+    - Checks visible `TYPE_APPLICATION` windows in `AccessibilityService.windows` for active launchers before falling back to usage stats.
+    - Enforces a 1,200ms grace period (`lastFocusHomeKickElapsedMs`) after kicking out an unallowed app so Focus Mode does not re-trigger during the Home transition animation.
+    - Dynamic package-change `BroadcastReceiver` automatically clears probe caches and refreshes launcher definitions on package installs, updates, or removals.
+- **Litho-Aware Facebook Video & Reels Guard (Zero Newsfeed Refresh Loops):**
+  - Overhauled Facebook distraction detection in `FacebookReelsDetector.kt` using reverse-order Litho accessibility tree traversal (`childCount - 1 downTo 0`, cap 350 nodes) to detect full-screen Reels and playing videos without traversing deep horizontal feed posts.
+  - Prioritized detection pipeline:
+    - **Facebook Stories 100% Whitelisted:** Story trays and viewers (`"story"`, `"stories"`, `"'s story"`, `"add to story"`, `"your story"`, `StoryViewer`) are verified first and guaranteed uninterrupted.
+    - **Dedicated Full-Screen Reels:** Verified by right-edge vertical action button stacks (`abs(dx) <= 52dp`, `abs(dy) >= 36dp`), top overlay controls, and bottom comment bars.
+    - **Watch / Video Tabs:** Verified by top-bar tab navigation in the top 24% of the screen.
+  - Non-looping inline pause: Pauses playing videos within the main Newsfeed without firing `GLOBAL_ACTION_BACK`, completely stopping feed reload loops, screen freezes, and duplicate overlays.
+  - Single-back and delayed escalation for dedicated full-screen video players with 1,500ms debounce and 1,300ms auto-dismissing HUD banner.
+  - Zero fallback to native C++ engine on Facebook packages, preventing false-positive triggers from feed timestamps and seekbars.
+- **High-Craft UI Polish & Interaction Design:**
+  - Standardized 3D card geometry across the app: `Elevated3DCard` and `Hero3DCard` updated with `RoundedCornerShape(22.dp)`, 1px beveled specular rim gradient, and balanced ambient/spot drop shadows (`0xFF7C3AED` 45% / `Color.Black` 35%). Standardized `Recessed3DWell` with `RoundedCornerShape(14.dp)`.
+  - Floating Cyber Bottom Dock upgraded with `Modifier.navigationBarsPadding()` for edge-to-edge system navigation bars, animated tab pill width (`40.dp` to `48.dp`), and animated icon/label tint transitions (`tween(180)`).
+  - Smooth Compose tab crossfades: Wrapped root navigation switcher in `Crossfade(animationSpec = tween(180))` for seamless screen transitions.
+  - Standardized `StatusPillBadge` typography with `11.5.sp`, `FontWeight.SemiBold`, subtle glowing status dot, and tabular numbers (`tnum`).
+  - Refined `QuickShieldRow` on the Home screen with `42.dp` squircle pedestals, `20.dp` icons, `12.dp` spacing, and balanced subtitle line heights.
+- **Clean Monotonic Upgrade Pipeline:**
+  - Standardized APK deliverables: `Blocker-debug-1.0.7.apk` and `Blocker-release-1.0.7.apk` (clean naming without `-v` prefix).
+  - Monotonic `versionCode` progression (`1007138` debug / `1107138` release, `versionName = "1.0.7"`) ensuring smooth in-place upgrades.
+
+---
+
+## v1.0.6.9
 
 **Release Date:** November 16, 2026  
 **Version:** 1.0.6.9  

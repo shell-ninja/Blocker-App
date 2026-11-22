@@ -16,95 +16,23 @@ import java.time.LocalDateTime
 object FocusEnforcer {
 
     @Volatile
-    private var cachedDefaultLauncherPackage: String? = null
-    @Volatile
-    private var lastLauncherResolveMs = 0L
-
-    @Volatile
-    private var cachedImePackages: Set<String> = emptySet()
-    @Volatile
-    private var lastImeResolveMs = 0L
-
-    @Volatile
     private var lastEnforcedPackage: String? = null
     @Volatile
     private var lastEnforcedElapsedMs = 0L
 
-    private val DIALER_PACKAGES = setOf(
-        "com.android.incallui",
-        "com.samsung.android.incallui",
-        "com.android.server.telecom",
-        "com.android.dialer",
-        "com.google.android.dialer",
-        "com.samsung.android.dialer",
-        "com.android.phone"
-    )
-
-    private val PERMISSION_CONTROLLER_PACKAGES = setOf(
-        "com.android.permissioncontroller",
-        "com.google.android.permissioncontroller"
-    )
-
     fun getDefaultLauncher(context: Context): String? {
-        val now = SystemClock.elapsedRealtime()
-        val cached = cachedDefaultLauncherPackage
-        if (cached != null && now - lastLauncherResolveMs < 10_000L) {
-            return cached
-        }
-        val resolved = runCatching {
-            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
-        }.getOrNull()
-        if (resolved != null) {
-            cachedDefaultLauncherPackage = resolved
-            lastLauncherResolveMs = now
-        }
-        return resolved ?: cached
+        return SystemExemptions.getHomePackages(context).firstOrNull()
     }
 
     fun getImePackages(context: Context): Set<String> {
-        val now = SystemClock.elapsedRealtime()
-        if (cachedImePackages.isNotEmpty() && now - lastImeResolveMs < 15_000L) {
-            return cachedImePackages
-        }
-        val imes = runCatching {
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.enabledInputMethodList?.map { it.packageName }?.toSet() ?: emptySet()
-        }.getOrDefault(emptySet())
-        cachedImePackages = imes
-        lastImeResolveMs = now
-        return imes
+        return SystemExemptions.getImePackages(context)
     }
 
     /**
-     * Exact system whitelist: NEVER use contains("android")!
-     * Built-in system exemptions during active Focus Mode ONLY:
-     * - Blocker's own package (pkg == context.packageName)
-     * - Exact System UI & OS framework: pkg == "com.android.systemui" or pkg == "android"
-     * - Default Home Screen Launcher package
-     * - Enabled Keyboard / IME packages
-     * - Active Phone Call / Dialer UI
-     * - System Permission Controller ONLY when PermissionFlowTracker.isLaunchingPermissionIntent == true
+     * Exact system whitelist: delegates to the bulletproof single source of truth in SystemExemptions.
      */
     fun isStrictCoreSystemExempt(context: Context, pkg: String): Boolean {
-        if (pkg.isEmpty()) return true
-        if (pkg == context.packageName) return true
-        if (pkg == "com.android.systemui" || pkg == "android") return true
-
-        val launcher = getDefaultLauncher(context)
-        if (launcher != null && pkg == launcher) return true
-
-        val imes = getImePackages(context)
-        if (pkg in imes) return true
-
-        if (pkg in DIALER_PACKAGES) return true
-
-        if (PermissionFlowTracker.isLaunchingPermissionIntent) {
-            if (pkg in PERMISSION_CONTROLLER_PACKAGES) return true
-            if (pkg == "com.android.settings") return true
-        }
-
-        return false
+        return SystemExemptions.isNeverBlockPackage(context, pkg)
     }
 
     fun getAppLabel(context: Context, pkg: String): String = runCatching {
@@ -120,16 +48,15 @@ object FocusEnforcer {
         event: AccessibilityEvent?
     ): String? {
         val evPkg = event?.packageName?.toString()
-        val imes = getImePackages(service)
 
-        // If event package is valid application, and not system ui or keyboard, check it first
-        if (!evPkg.isNullOrEmpty() && evPkg != "com.android.systemui" && evPkg !in imes) {
+        // If event package is valid application, and not system ui or exempt, check it first
+        if (!evPkg.isNullOrEmpty() && evPkg != "com.android.systemui" && !SystemExemptions.isNeverBlockPackage(service, evPkg)) {
             return evPkg
         }
 
         // Check rootInActiveWindow
         val rootPkg = runCatching { service.rootInActiveWindow?.packageName?.toString() }.getOrNull()
-        if (!rootPkg.isNullOrEmpty() && rootPkg != "com.android.systemui" && rootPkg !in imes) {
+        if (!rootPkg.isNullOrEmpty() && rootPkg != "com.android.systemui" && !SystemExemptions.isNeverBlockPackage(service, rootPkg)) {
             return rootPkg
         }
 
@@ -143,7 +70,7 @@ object FocusEnforcer {
                     runCatching {
                         if (Build.VERSION.SDK_INT < 33) root?.recycle()
                     }
-                    if (!p.isNullOrEmpty() && p != "com.android.systemui" && p !in imes) {
+                    if (!p.isNullOrEmpty() && p != "com.android.systemui" && !SystemExemptions.isNeverBlockPackage(service, p)) {
                         return p
                     }
                 }
@@ -161,6 +88,12 @@ object FocusEnforcer {
         service: AccessibilityService,
         event: AccessibilityEvent?
     ): Boolean {
+        // Line 1 Guard: Never block exempt packages
+        val evPkg = event?.packageName?.toString()
+        if (SystemExemptions.isNeverBlockPackage(service, evPkg)) {
+            return false
+        }
+
         // Evaluate on state changed, content changed, clicked, scrolled
         if (event != null) {
             val type = event.eventType
@@ -170,6 +103,39 @@ object FocusEnforcer {
                 type != AccessibilityEvent.TYPE_VIEW_SCROLLED) {
                 return false
             }
+        }
+
+        // Grace period check (1,200ms after last HOME kick)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - SystemExemptions.lastFocusHomeKickElapsedMs < 1200L) {
+            return false
+        }
+
+        // Check visible windows: if ANY window is exempt launcher/system, return ALLOW immediately
+        val wins = runCatching { service.windows }.getOrNull()
+        if (!wins.isNullOrEmpty()) {
+            for (w in wins) {
+                if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    val root = runCatching { w.root }.getOrNull()
+                    val p = root?.packageName?.toString()
+                    runCatching {
+                        if (Build.VERSION.SDK_INT < 33) root?.recycle()
+                    }
+                    if (SystemExemptions.isNeverBlockPackage(service, p)) {
+                        return false // Launcher is active or visible
+                    }
+                }
+            }
+        }
+
+        val rootPkg = runCatching { service.rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        if (SystemExemptions.isNeverBlockPackage(service, rootPkg)) {
+            return false
+        }
+
+        val foregroundPkg = resolveForegroundPackage(service, event) ?: return false
+        if (SystemExemptions.isNeverBlockPackage(service, foregroundPkg)) {
+            return false
         }
 
         val nowEpochMs = System.currentTimeMillis()
@@ -185,22 +151,25 @@ object FocusEnforcer {
         if (!isAnyFocusActive) return false
 
         val allowedUserPackages: Set<String> = buildSet {
-            if (isManualFocus) addAll(snapshot.manualFocusAllowedPackages)
+            if (isManualFocus) addAll(snapshot.manualFocusAllowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
             if (activeSchedule != null) {
-                addAll(activeSchedule.allowedApps)
-                addAll(activeSchedule.allowedPackages)
+                addAll(activeSchedule.allowedApps.map { it.trim().lowercase(java.util.Locale.ROOT) })
+                addAll(activeSchedule.allowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
             }
-            if (activePrayer != null) addAll(snapshot.prayerAllowedPackages)
+            if (activePrayer != null) addAll(snapshot.prayerAllowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
         }
 
-        val foregroundPkg = resolveForegroundPackage(service, event) ?: return false
-
-        if (isStrictCoreSystemExempt(service, foregroundPkg)) {
+        if (foregroundPkg.trim().lowercase(java.util.Locale.ROOT) in allowedUserPackages) {
             return false
         }
 
-        if (foregroundPkg in allowedUserPackages) {
-            return false
+        // CRITICAL FINAL SINK GATE: Inside the actual function that shows the Focus block overlay
+        val isExempt = SystemExemptions.isNeverBlockPackage(service, foregroundPkg)
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("FOCUS_GUARD", "Checking pkg=$foregroundPkg exempt=$isExempt")
+        }
+        if (isExempt) {
+            return false // Architecturally impossible to block any Home launcher
         }
 
         // Unauthorized app detected during active Focus Mode!
@@ -221,6 +190,9 @@ object FocusEnforcer {
             BlockReason(BlockCategory.STUDY_LOCKDOWN, reason)
         )
 
+        // Set grace period before calling GLOBAL_ACTION_HOME
+        SystemExemptions.lastFocusHomeKickElapsedMs = SystemClock.elapsedRealtime()
+
         // 2. Immediately call GLOBAL_ACTION_HOME (0ms exit)
         service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
 
@@ -238,7 +210,12 @@ object FocusEnforcer {
      */
     fun inspectWatchdogForeground(context: Context, topPkg: String?): Boolean {
         if (topPkg.isNullOrEmpty()) return false
-        if (topPkg == context.packageName) return false
+        if (SystemExemptions.isNeverBlockPackage(context, topPkg)) return false
+
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - SystemExemptions.lastFocusHomeKickElapsedMs < 1200L) {
+            return false
+        }
 
         val nowEpochMs = System.currentTimeMillis()
         val nowDateTime = LocalDateTime.now()
@@ -253,21 +230,28 @@ object FocusEnforcer {
         if (!isAnyFocusActive) return false
 
         val allowedUserPackages: Set<String> = buildSet {
-            if (isManualFocus) addAll(snapshot.manualFocusAllowedPackages)
+            if (isManualFocus) addAll(snapshot.manualFocusAllowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
             if (activeSchedule != null) {
-                addAll(activeSchedule.allowedApps)
-                addAll(activeSchedule.allowedPackages)
+                addAll(activeSchedule.allowedApps.map { it.trim().lowercase(java.util.Locale.ROOT) })
+                addAll(activeSchedule.allowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
             }
-            if (activePrayer != null) addAll(snapshot.prayerAllowedPackages)
+            if (activePrayer != null) addAll(snapshot.prayerAllowedPackages.map { it.trim().lowercase(java.util.Locale.ROOT) })
         }
 
-        if (isStrictCoreSystemExempt(context, topPkg)) {
+        if (topPkg.trim().lowercase(java.util.Locale.ROOT) in allowedUserPackages) {
             return false
         }
 
-        if (topPkg in allowedUserPackages) {
+        // CRITICAL FINAL SINK GATE
+        val isExempt = SystemExemptions.isNeverBlockPackage(context, topPkg)
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("FOCUS_GUARD", "Checking pkg=$topPkg exempt=$isExempt")
+        }
+        if (isExempt) {
             return false
         }
+
+        SystemExemptions.lastFocusHomeKickElapsedMs = SystemClock.elapsedRealtime()
 
         // Kick straight to home
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {

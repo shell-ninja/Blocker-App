@@ -2,17 +2,17 @@
   <img src="assets/app-icon-source.png" alt="Blocker icon" width="120" />
 </p>
 
-# Blocker `v1.0.6.9`
+# Blocker `v1.0.7`
 
-> **Current Version:** `v1.0.6.9` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
+> **Current Version:** `v1.0.7` | **Platform:** Android 8.0+ (API 26+) | **License:** Open Source
 
 A privacy-focused, zero-telemetry Android distraction and content blocker built with Pure Kotlin, Jetpack Compose, a native C++ matching engine, and Android Accessibility Services.
 
 > [!IMPORTANT]
 > **Recommendation: Install the Debug Version First!**  
-> We strongly recommend installing and testing the **Debug version** (`Blocker-debug-1.0.6.9.apk`) before installing the Release build.  
+> We strongly recommend installing and testing the **Debug version** (`Blocker-debug-1.0.7.apk`) before installing the Release build.  
 > - **Test with 3-Second Timers:** The Debug build uses short **3-second** unlock delay timers, allowing you to freely explore, configure your custom blocklists, test focus schedules, and adjust settings without risk of accidentally locking yourself out.  
-> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-1.0.6.9.apk`), which enforces real **1 to 30 day** / 24-hour covenant delayed-unlock timers with strict anti-tamper security and no backdoors.
+> - **Upgrade When Ready:** Once you have thoroughly tested the app and confirmed everything suits your exact needs, proceed to install the **Release version** (`Blocker-release-1.0.7.apk`), which enforces real **1 to 30 day** / 24-hour covenant delayed-unlock timers with strict anti-tamper security and no backdoors.
 
 > [!WARNING]
 > **Play Protect Warning During Installation**  
@@ -30,32 +30,38 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 
 ---
 
-## What's New in v1.0.6.9
+## What's New in v1.0.7
 
-- **Strict Focus Mode App Blocking & Exact System Whitelist:**
-  - Enforced instantaneous (0ms) app blocking during manual Focus, Daily Schedules, and Prayer Focus sessions: any non-allowed application is kicked to Home with an instant blackout shield and counted in daily blocked statistics.
-  - Eliminated all risky `contains("android")` substring matching in favor of an exact system whitelist (`isStrictCoreSystemExempt`): only exact `"com.android.systemui"`, exact `"android"`, Blocker package, default launcher, active IMEs, and dialers are exempt. Settings (`com.android.settings`) is blocked during Focus Mode unless explicitly whitelisted or launching permission intents.
-  - Added dual-engine enforcement: runs on every Accessibility event and backed by a 250ms foreground watchdog (`BlockerForegroundService`) to ensure non-allowed apps cannot stay in the foreground.
-- **Dedicated Distraction Shields & Clean Page Hierarchy:**
-  - Cleaned up the **Focus** page to strictly house Focus Session Status/Timer, Daily Schedules, Allowed Essential Apps Whitelist, and Focus Notification Suppressor.
-  - Social media and short-form distraction controls are unified on the **Home** Executive Dashboard:
-    - **Separate Instagram Shields:** Independent toggles for **"Block Instagram Reels"** (`block_insta_reels`) and **"Block Instagram Explore"** (`block_insta_search`).
-    - **Complete Facebook Video & Reels Shield:** Blocks both Facebook Reels and all playing Facebook Videos (Watch/Video tabs, dedicated video player classes `VideoPlayer`, `FullScreenVideo`, `WatchFeed`, `VideoHome`, `Tahoe`, etc., active playback controls `"Pause video"`, `"Enter fullscreen"`, `"Rewind 10 seconds"`, and click-to-play thumbnails) while **100% preserving Facebook Stories** (`isFacebookStoryViewerOrStoryClick` evaluated first).
-    - **YouTube Shorts Shield:** Rapid ejection from Shorts player back to subscriptions or timeline.
-- **Focus Mode Notification Bar Turn-off Time:**
-  - Streamlined the notification panel during active Focus sessions: removed CPU-draining chronometer ticking and progress bars in favor of a clean, quiet ongoing notification: `"Focus Mode Active  •  Focus mode will be off at [time]"` which dismisses automatically upon completion.
-- **Onboarding Keep-Alive & Unrestricted Battery Usage Option:**
-  - Added an **"Unrestricted Battery Usage"** row to the initial permission setup with title (`maxLines = 1`), subtitle, and lifecycle intent tracking.
-  - Enhanced permission lifecycle so the app never accidentally closes or minimizes when navigating to Android Settings during onboarding, requiring core permissions before the final **"Start Protection & Enter Blocker"** button.
-- **3D Tactile Card Architecture & Visual Design:**
-  - Modernized the UI with multi-stop vertical beveled borders and purple ambient/spot colored shadows (`ambientColor = Color.Black, spotColor = Color(0xFF7C3AED)`).
-  - Upgraded the Home screen with an Executive Dashboard, 3-tile bento, and recessed 3D well for the Daily Blocked Activity chart.
-- **Daily App Usage Studio & Usage Limits (`App Blocker` Tab):**
-  - Added a 3-way switcher: **"Block Apps"**, **"Usage Limits"**, and **"Daily Usage"** with interactive screen time bar charts and top app breakdown.
-- **Local Backup & Restore (`Settings` Tab):**
-  - Added local encrypted/checksummed backup and restore for focus schedules, allowed apps, and custom blocking rules.
-- **Incognito & SafeSearch Guard (`Web` Tab):**
-  - Real-time Stage-0 browser inspection preventing private tabs and enforcing SafeSearch parameters across all major Android browsers.
+- **Bulletproof OEM & Custom Home Launcher Protection (`SystemExemptions.kt` & `FocusEnforcer.kt`):**
+  - Resolved an issue where Focus Mode app blocking incorrectly blocked OEM home launchers (including Infinix/Transsion's `com.transsion.XOSLauncher`, HiOS, HyperOS, OneUI, Pixel launcher, and 3rd-party launchers like Lawnchair and Nova).
+  - Built a centralized single-source-of-truth system exemptions engine (`SystemExemptions.isNeverBlockPackage`):
+    - Added API-33-safe `PackageManager.queryIntentActivities` & `resolveActivity` using `ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong())`.
+    - Added runtime cached per-package `CATEGORY_HOME` probing (`ConcurrentHashMap<String, Boolean>`) to automatically identify any launcher installed on the device.
+    - Normalized all package evaluations to lowercase (`Locale.ROOT`) to eliminate case-sensitive comparison bugs on OEM packages (`com.transsion.XOSLauncher`).
+    - Added built-in recognition for Transsion companion system services (`smartpanel`, `magiclauncher`, `desktop`, `zerohome`, `minusone`, `hiassistant`, `aivoiceassistant`, etc.).
+    - Hardened the final execution sink gate with `SystemExemptions.isNeverBlockPackage(context, pkg)` to make accidental launcher blocking architecturally impossible.
+  - Eliminated stale `UsageStatsManager` fallback false blocks following `GLOBAL_ACTION_HOME`:
+    - Checks visible `TYPE_APPLICATION` windows in `AccessibilityService.windows` for active launchers before falling back to usage stats.
+    - Enforces a 1,200ms grace period (`lastFocusHomeKickElapsedMs`) after kicking out an unallowed app so Focus Mode does not re-trigger during the Home transition animation.
+    - Dynamic package-change `BroadcastReceiver` automatically clears probe caches and refreshes launcher definitions on package installs, updates, or removals.
+- **Litho-Aware Facebook Video & Reels Guard (Zero Newsfeed Refresh Loops):**
+  - Overhauled Facebook distraction detection in `FacebookReelsDetector.kt` using reverse-order Litho accessibility tree traversal (`childCount - 1 downTo 0`, cap 350 nodes) to detect full-screen Reels and playing videos without traversing deep horizontal feed posts.
+  - Prioritized detection pipeline:
+    - **Facebook Stories 100% Whitelisted:** Story trays and viewers (`"story"`, `"stories"`, `"'s story"`, `"add to story"`, `"your story"`, `StoryViewer`) are verified first and guaranteed uninterrupted.
+    - **Dedicated Full-Screen Reels:** Verified by right-edge vertical action button stacks (`abs(dx) <= 52dp`, `abs(dy) >= 36dp`), top overlay controls, and bottom comment bars.
+    - **Watch / Video Tabs:** Verified by top-bar tab navigation in the top 24% of the screen.
+  - Non-looping inline pause: Pauses playing videos within the main Newsfeed without firing `GLOBAL_ACTION_BACK`, completely stopping feed reload loops, screen freezes, and duplicate overlays.
+  - Single-back and delayed escalation for dedicated full-screen video players with 1,500ms debounce and 1,300ms auto-dismissing HUD banner.
+  - Zero fallback to native C++ engine on Facebook packages, preventing false-positive triggers from feed timestamps and seekbars.
+- **High-Craft UI Polish & Interaction Design:**
+  - Standardized 3D card geometry across the app: `Elevated3DCard` and `Hero3DCard` updated with `RoundedCornerShape(22.dp)`, 1px beveled specular rim gradient, and balanced ambient/spot drop shadows (`0xFF7C3AED` 45% / `Color.Black` 35%). Standardized `Recessed3DWell` with `RoundedCornerShape(14.dp)`.
+  - Floating Cyber Bottom Dock upgraded with `Modifier.navigationBarsPadding()` for edge-to-edge system navigation bars, animated tab pill width (`40.dp` to `48.dp`), and animated icon/label tint transitions (`tween(180)`).
+  - Smooth Compose tab crossfades: Wrapped root navigation switcher in `Crossfade(animationSpec = tween(180))` for seamless screen transitions.
+  - Standardized `StatusPillBadge` typography with `11.5.sp`, `FontWeight.SemiBold`, subtle glowing status dot, and tabular numbers (`tnum`).
+  - Refined `QuickShieldRow` on the Home screen with `42.dp` squircle pedestals, `20.dp` icons, `12.dp` spacing, and balanced subtitle line heights.
+- **Clean Monotonic Upgrade Pipeline:**
+  - Standardized APK deliverables: `Blocker-debug-1.0.7.apk` and `Blocker-release-1.0.7.apk` (clean naming without `-v` prefix).
+  - Monotonic `versionCode` progression (`1007138` debug / `1107138` release, `versionName = "1.0.7"`) ensuring smooth in-place upgrades.
 
 ---
 
@@ -243,7 +249,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```
 * Uses **3-second** delay timers for protection unlocks so you do not get locked out while testing.
 * Automatically imports blocklists, increments the build number, patches Android project files, and compiles.
-* Outputs the binary to: `apk/Blocker-debug-1.0.6.9.apk`.
+* Outputs the binary to: `apk/Blocker-debug-1.0.7.apk`.
 
 #### Release Build (When Ready for Real Protection):
 ```bash
@@ -251,7 +257,7 @@ If you do not have the Android SDK command-line tools yet, place `commandlinetoo
 ```
 * Enforces real **24-hour / 1 to 30 day** delayed-unlock timers.
 * Strict anti-tamper security: settings changes cannot be bypassed without waiting the full duration.
-* Outputs the binaries to: `apk/Blocker-release-1.0.6.9.apk` and `apk/Blocker-debug-1.0.6.9.apk`.
+* Outputs the binaries to: `apk/Blocker-release-1.0.7.apk` and `apk/Blocker-debug-1.0.7.apk`.
 
 ### 3. Install on Device
 

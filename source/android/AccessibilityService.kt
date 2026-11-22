@@ -431,6 +431,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     @Volatile private var lastBlockerExitTime = 0L
     @Volatile private var lastBlockerExitElapsed = 0L
     @Volatile private var lastFbPlayerEscapeElapsed = 0L
+    private val lastFacebookBackMs = java.util.concurrent.atomic.AtomicLong(0L)
     @Volatile private var blockIncognitoMode = true
     @Volatile private var enforceSafeSearchGuard = true
     @Volatile private var lastIncognitoKickElapsed = 0L
@@ -578,6 +579,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun kickToHome() {
+        SystemExemptions.lastFocusHomeKickElapsedMs = SystemClock.elapsedRealtime()
         performGlobalAction(GLOBAL_ACTION_HOME)
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
@@ -953,7 +955,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         override fun run() {
             try {
                 val pkg = currentFgPkg
-                if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg)) {
+                if (pkg != null && pkg != packageName && pkg !in neverBlock && !isSettingsPkg(pkg) && !isInstallerPkg(pkg) && !SystemExemptions.isNeverBlockPackage(this@BlockerAccessibilityService, pkg)) {
                     checkAppUsageLimit(pkg)
                 }
             } catch (t: Throwable) {
@@ -979,7 +981,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val root = runCatching { rootInActiveWindow }.getOrNull()
                     val rootPkg = root?.packageName?.toString()
                     val activePkg = if (!rootPkg.isNullOrEmpty()) rootPkg else getActiveApplicationPackage() ?: currentFgPkg
-                    if (activePkg != null && activePkg in apps && !isEssentialSystemOrNavigationPackage(activePkg, labelOf(activePkg))) {
+                    if (activePkg != null && activePkg in apps && !isEssentialSystemOrNavigationPackage(activePkg, labelOf(activePkg)) && !SystemExemptions.isNeverBlockPackage(this@BlockerAccessibilityService, activePkg)) {
                         hit(
                             "apps",
                             getFearAllahHeading(),
@@ -1116,6 +1118,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         try {
             super.onServiceConnected()
             instance = this
+            SystemExemptions.init(this)
             runCatching {
                 val notif = buildQuietOngoingNotification()
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -1233,44 +1236,11 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    @Volatile private var cachedLauncherPackages: Set<String> = emptySet()
+    private fun refreshLauncherPackages(): Set<String> = SystemExemptions.refreshHomePackages(this)
 
-    private fun refreshLauncherPackages(): Set<String> {
-        val pkgs = runCatching {
-            packageManager
-                .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
-                .mapNotNull { it.activityInfo?.packageName }
-                .toSet()
-        }.getOrDefault(emptySet())
-        cachedLauncherPackages = pkgs
-        return pkgs
-    }
+    private fun launcherPackages(): Set<String> = SystemExemptions.getHomePackages(this)
 
-    private fun launcherPackages(): Set<String> {
-        val cached = cachedLauncherPackages
-        return if (cached.isNotEmpty()) cached else refreshLauncherPackages()
-    }
-
-    private fun isLauncherPkg(pkg: String): Boolean {
-        if (pkg.isEmpty()) return false
-        if (pkg in launcherPackages()) return true
-        val lower = pkg.lowercase()
-        return lower.contains("launcher") || lower.contains("home") ||
-            lower == "com.sec.android.app.launcher" ||
-            lower == "com.miui.home" || lower == "com.mi.android.globallauncher" ||
-            lower == "com.oppo.launcher" || lower == "com.oplus.launcher" ||
-            lower == "com.oneplus.launcher" || lower == "net.oneplus.launcher" ||
-            lower == "com.bbk.launcher2" || lower == "com.bbk.launcher" ||
-            lower == "com.vivo.launcher" || lower == "com.vivo.upslide" ||
-            lower == "com.transsion.hilauncher" || lower == "com.transsion.xoslauncher" ||
-            lower == "com.transsion.desktop" ||
-            lower == "com.huawei.android.launcher" || lower == "com.hihonor.android.launcher" ||
-            lower == "com.google.android.apps.nexuslauncher" ||
-            lower == "com.motorola.launcher3" || lower == "com.nothing.launcher" ||
-            lower == "com.teslacoilsw.launcher" || lower == "ch.deletescape.lawnchair" ||
-            lower == "app.lawnchair" || lower == "com.microsoft.launcher" ||
-            lower == "bitpit.launcher" || lower.startsWith("ginlemon.flower")
-    }
+    private fun isLauncherPkg(pkg: String): Boolean = SystemExemptions.isLauncherPackage(this, pkg)
 
     private fun cameraPackages(): Set<String> = runCatching {
         val pm = packageManager
@@ -2246,6 +2216,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         if (pkg == "com.facebook.katana" || pkg == "com.facebook.lite") {
             if (!snapshot.blockFacebookReels) {
+                FacebookReelsDetector.pendingFacebookPlayerCheckUntilMs = 0L
                 FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
                 FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                 return false
@@ -2255,22 +2226,14 @@ class BlockerAccessibilityService : AccessibilityService() {
                 val dm = resources.displayMetrics
                 val sW = dm.widthPixels.coerceAtLeast(1)
                 val sH = dm.heightPixels.coerceAtLeast(1)
-                if (FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, ev, sW, sH) || isFacebookStory(r, ev)) {
-                    runCatching { r.safeRecycle() }
-                    return false
-                }
-                val isReelsOrVideo = FacebookReelsDetector.evaluate(r, ev, sW, sH, snapshot)
-                if (isReelsOrVideo) {
-                    runCatching { r.safeRecycle() }
-                    handleFacebookVideoOrReelBlock(pkg)
+                val verdict = FacebookReelsDetector.evaluateFacebook(r, ev, sW, sH, snapshot)
+                runCatching { r.safeRecycle() }
+                if (verdict.action != FacebookReelsDetector.FacebookBlockAction.NONE) {
+                    handleFacebookBlock(pkg, verdict)
                     return true
                 }
-                val isFeed = isNormalFacebookFeedScreen(r)
-                runCatching { r.safeRecycle() }
-                if (isFeed && eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                    return false // Allow normal newsfeed scrolling without running C++ video/transport detection
-                }
             }
+            return false // Always return false for FB when not reels, NEVER fall through to C++ native engine!
         }
 
         queueNodes.clear()
@@ -2469,47 +2432,86 @@ class BlockerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleFacebookVideoOrReelBlock(pkg: String) {
-        // 1. Show BlackoutShieldOverlay (0ms) + BilingualReminderOverlay ("Blocked: Facebook Video & Reels")
-        TamperShieldManager.showInstantShield(this)
+    private fun handleFacebookBlock(pkg: String, verdict: FacebookReelsDetector.FacebookVerdict) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("FB_REELS_GUARD", "trigger=${verdict.reason} action=${verdict.action}")
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        val last = lastFacebookBackMs.get()
+        if (now - last < 1500L) {
+            verdict.pauseNode?.safeRecycle()
+            return
+        }
+        if (!lastFacebookBackMs.compareAndSet(last, now)) {
+            verdict.pauseNode?.safeRecycle()
+            return
+        }
+
+        // Show non-blocking reminder banner (auto-dismissed in 1300ms)
         val isBn = isBangla()
         val msg = if (isBn) "ফেসবুক ভিডিও এবং রিলস ব্লক করা হয়েছে" else "Blocked: Facebook Video & Reels"
         OverlayHudManager.show(
             this,
             msg,
             6,
-            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Video & Reels")
+            BlockReason(BlockCategory.SHORT_FORM_VIDEO, "Facebook Video & Reels"),
+            1300L
         )
         BlockerStore.incr(this, "blocked_apps")
 
-        // 2. Fire performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        // 3. Schedule a 280ms post-check: if Facebook is STILL showing the full-screen video player or Reels viewer,
-        // immediately fire performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
-        main.postDelayed({
-            val r = runCatching { rootInActiveWindow }.getOrNull()
-            if (r != null) {
-                try {
-                    val dm = resources.displayMetrics
-                    val sW = dm.widthPixels.coerceAtLeast(1)
-                    val sH = dm.heightPixels.coerceAtLeast(1)
-                    val snapshot = com.blocker.data.RuleSnapshotHolder.snapshot
-                    if (!FacebookReelsDetector.isFacebookStoryViewerOrStoryClick(r, null, sW, sH) &&
-                        FacebookReelsDetector.evaluate(r, null, sW, sH, snapshot)) {
-                        performGlobalAction(GLOBAL_ACTION_HOME)
-                    } else {
-                        val homeTab = findHomeTabNode(r)
-                        if (homeTab != null) {
-                            clickNodeOrParent(homeTab)
-                            homeTab.safeRecycle()
-                        }
+        when (verdict.action) {
+            FacebookReelsDetector.FacebookBlockAction.PAUSE_INLINE -> {
+                var paused = false
+                val pn = verdict.pauseNode
+                if (pn != null) {
+                    try {
+                        paused = pn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    } finally {
+                        pn.safeRecycle()
                     }
-                } finally {
-                    runCatching { r.safeRecycle() }
+                }
+                if (!paused) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
                 }
             }
-        }, 280L)
+            FacebookReelsDetector.FacebookBlockAction.EXIT_BACK -> {
+                verdict.pauseNode?.safeRecycle()
+                performGlobalAction(GLOBAL_ACTION_BACK)
+
+                // Single 550ms follow-up check: if still in Reels/Video view, escalate once to HOME
+                main.postDelayed({
+                    val checkRoot = runCatching { rootInActiveWindow }.getOrNull()
+                    if (checkRoot != null) {
+                        try {
+                            val dm = resources.displayMetrics
+                            val sW = dm.widthPixels.coerceAtLeast(1)
+                            val sH = dm.heightPixels.coerceAtLeast(1)
+                            val currentSnapshot = com.blocker.data.RuleSnapshotHolder.snapshot
+                            if (currentSnapshot.blockFacebookReels) {
+                                val postVerdict = FacebookReelsDetector.evaluateFacebook(checkRoot, null, sW, sH, currentSnapshot)
+                                postVerdict.pauseNode?.safeRecycle()
+                                if (postVerdict.action == FacebookReelsDetector.FacebookBlockAction.EXIT_BACK) {
+                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                }
+                            }
+                        } finally {
+                            runCatching { checkRoot.safeRecycle() }
+                        }
+                    }
+                }, 550L)
+            }
+            else -> {
+                verdict.pauseNode?.safeRecycle()
+            }
+        }
+    }
+
+    private fun handleFacebookVideoOrReelBlock(pkg: String) {
+        handleFacebookBlock(
+            pkg,
+            FacebookReelsDetector.FacebookVerdict(FacebookReelsDetector.FacebookBlockAction.EXIT_BACK, "Legacy FB Exit")
+        )
     }
 
     private fun escapeClickedFacebookPlayer() {
@@ -2591,7 +2593,9 @@ class BlockerAccessibilityService : AccessibilityService() {
             previousEventPkg = pkg
 
             // --- CRITICAL ZERO-LAG FOCUS MODE ENFORCEMENT ON EVERY EVENT ---
-            if (FocusEnforcer.evaluateAndEnforce(this, ev)) {
+            if (SystemExemptions.isNeverBlockPackage(this, pkg)) {
+                // Never block exempt launcher or system package
+            } else if (FocusEnforcer.evaluateAndEnforce(this, ev)) {
                 return
             }
 
@@ -3036,6 +3040,9 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun studyBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
+        // Line 1 Guard: Never block exempt packages
+        if (SystemExemptions.isNeverBlockPackage(this, pkg)) return false
+
         // 1. If inside Blocker itself, never block! Let the user view and use the Pomodoro timer uninterrupted.
         if (pkg == packageName) return false
 
@@ -3065,7 +3072,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // 4. Home launcher:
         // Redirect smoothly back to Blocker's Pomodoro timer without looping.
-        if (pkg in launcherPackages()) {
+        if (isLauncherPkg(pkg)) {
             if (now - lastStudyRedirect >= 800L) {
                 lastStudyRedirect = now
                 bringBlockerToForeground()
@@ -3088,6 +3095,9 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         // 5. Unauthorized apps, Settings, Browsers, and Games:
         // Immediately kick off the screen back to Home, bring Blocker back to front, and show study lockout dialog.
+        if (SystemExemptions.isNeverBlockPackage(this, pkg)) return false
+        SystemExemptions.lastFocusHomeKickElapsedMs = SystemClock.elapsedRealtime()
+
         if (now - lastStudyRedirect >= 600L) {
             lastStudyRedirect = now
             BlockerStore.incr(this, "study")
@@ -3130,6 +3140,7 @@ class BlockerAccessibilityService : AccessibilityService() {
      * - Essential Telecom, In-Call UI, Dialer
      */
     fun isEssentialSystemOrNavigationPackage(pkg: String, label: String = ""): Boolean {
+        if (SystemExemptions.isNeverBlockPackage(this, pkg)) return true
         if (pkg.isEmpty() || pkg == packageName) return true
         val lowerPkg = pkg.lowercase()
         val lowerLabel = label.lowercase()
@@ -3231,7 +3242,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         return p
     }
 
-    fun isStrictCoreSystemExempt(pkg: String): Boolean = FocusEnforcer.isStrictCoreSystemExempt(this, pkg)
+    fun isStrictCoreSystemExempt(pkg: String): Boolean = SystemExemptions.isNeverBlockPackage(this, pkg)
 
     fun getAllowedFocusPackages(): Set<String> {
         val now = SecureTime.now(this)
@@ -3251,7 +3262,7 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     fun isAppAllowedInFocus(targetPkg: String): Boolean {
-        if (isStrictCoreSystemExempt(targetPkg)) return true
+        if (SystemExemptions.isNeverBlockPackage(this, targetPkg)) return true
         val isAnyFocusActive = BlockerStore.focusActive(this)
         if (!isAnyFocusActive) return true
         return targetPkg in getAllowedFocusPackages()
@@ -3259,6 +3270,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
     /** During focus mode everything outside the essential apps / system helpers is kicked to the home screen. */
     private fun focusBlocks(ev: AccessibilityEvent, pkg: String): Boolean {
+        if (SystemExemptions.isNeverBlockPackage(this, pkg)) return false
         return FocusEnforcer.evaluateAndEnforce(this, ev)
     }
 
@@ -6267,6 +6279,7 @@ class BlockerAccessibilityService : AccessibilityService() {
                 }
                 "com.facebook.katana", "com.facebook.lite" -> {
                     if (!snapshot.blockFacebookReels) {
+                        FacebookReelsDetector.pendingFacebookPlayerCheckUntilMs = 0L
                         FacebookReelsDetector.pendingFacebookReelCheckUntilMs = 0L
                         FacebookReelsDetector.pendingFacebookVideoCheckUntilMs = 0L
                         return false
@@ -6275,10 +6288,12 @@ class BlockerAccessibilityService : AccessibilityService() {
                     val dm = resources.displayMetrics
                     val sW = dm.widthPixels.coerceAtLeast(1)
                     val sH = dm.heightPixels.coerceAtLeast(1)
-                    if (FacebookReelsDetector.evaluate(root, ev, sW, sH, snapshot)) {
-                        handleFacebookVideoOrReelBlock(pkg)
+                    val verdict = FacebookReelsDetector.evaluateFacebook(root, ev, sW, sH, snapshot)
+                    if (verdict.action != FacebookReelsDetector.FacebookBlockAction.NONE) {
+                        handleFacebookBlock(pkg, verdict)
                         return true
                     }
+                    return false
                 }
             }
             return false
@@ -7783,6 +7798,10 @@ class BlockerAccessibilityService : AccessibilityService() {
         btnText: String? = null,
         blockReason: BlockReason? = null
     ) {
+        val checkPkg = targetPkg ?: currentFgPkg
+        if (SystemExemptions.isNeverBlockPackage(this, checkPkg)) {
+            return
+        }
         val now = System.currentTimeMillis()
 
         // 1. Immediately display instant shield & overlay BEFORE triggering heavy launcher transitions!

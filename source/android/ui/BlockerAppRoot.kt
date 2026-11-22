@@ -2,6 +2,7 @@ package com.blocker.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -114,13 +115,10 @@ fun BlockerAppRoot(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Box(modifier = Modifier.weight(1f)) {
-                                AnimatedContent(
+                                Crossfade(
                                     targetState = currentTab,
-                                    transitionSpec = {
-                                        (fadeIn(animationSpec = tween(240)) + slideInVertically(animationSpec = tween(240)) { it / 18 })
-                                            .togetherWith(fadeOut(animationSpec = tween(150)))
-                                    },
-                                    label = "tab_transition"
+                                    animationSpec = tween(180),
+                                    label = "tab_crossfade"
                                 ) { tab ->
                                     when (tab) {
                                         NavTab.HOME -> HomeScreen(repo = repo, onNavigateToFocus = { currentTab = NavTab.FOCUS })
@@ -161,87 +159,101 @@ fun CyberBottomNav(
         )
     }
 
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                this.shadowElevation = 18.dp.toPx()
-                this.shape = navShape
-                this.clip = false
-                this.spotShadowColor = Color(0xFF7C3AED)
-                this.ambientShadowColor = Color(0xFF7C3AED)
-            }
-            .clip(navShape)
-            .background(dockBg)
-            .border(1.2.dp, dockBorder, navShape)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically
+            .navigationBarsPadding()
     ) {
-        NavTab.values().forEach { tab ->
-            val isSelected = selectedTab == tab
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable { onTabSelected(tab) }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val activePillBrush = remember {
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
-                    )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    this.shadowElevation = 18.dp.toPx()
+                    this.shape = navShape
+                    this.clip = false
+                    this.spotShadowColor = Color(0xFF7C3AED)
+                    this.ambientShadowColor = Color(0xFF7C3AED)
                 }
-                val activePillBorder = remember {
-                    Brush.verticalGradient(
-                        listOf(Color(0xFFA78BFA).copy(alpha = 0.8f), Color(0xFF4C1D95).copy(alpha = 0.3f))
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(width = 48.dp, height = 30.dp)
-                        .clip(RoundedCornerShape(15.dp))
-                        .then(
-                            if (isSelected) {
-                                Modifier
-                                    .graphicsLayer {
-                                        shadowElevation = 4.dp.toPx()
-                                        spotShadowColor = Color(0xFF8B5CF6).copy(alpha = 0.22f)
-                                    }
-                                    .background(
-                                        Brush.radialGradient(
-                                            listOf(
-                                                Color(0xFF8B5CF6).copy(alpha = 0.22f),
-                                                Color.Transparent
-                                            )
-                                        )
-                                    )
-                                    .background(activePillBrush)
-                                    .border(1.2.dp, activePillBorder, RoundedCornerShape(15.dp))
-                            } else {
-                                Modifier.background(Color.Transparent)
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.label,
-                        tint = if (isSelected) NordicColors.OnAccentPrimary else NordicColors.TextSecondary,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = tab.label,
-                    color = if (isSelected) NordicColors.TextPrimary else NordicColors.TextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    softWrap = false
+                .clip(navShape)
+                .background(dockBg)
+                .border(1.2.dp, dockBorder, navShape)
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NavTab.values().forEach { tab ->
+                val isSelected = selectedTab == tab
+                val iconTint by animateColorAsState(
+                    targetValue = if (isSelected) Color(0xFFF5F3FF) else Color(0xFF7E74A8),
+                    animationSpec = tween(180),
+                    label = "dock_icon_tint"
                 )
+                val labelColor by animateColorAsState(
+                    targetValue = if (isSelected) Color(0xFFF5F3FF) else Color(0xFF7E74A8),
+                    animationSpec = tween(180),
+                    label = "dock_label_color"
+                )
+                val pillWidth by animateDpAsState(
+                    targetValue = if (isSelected) 48.dp else 40.dp,
+                    animationSpec = tween(180),
+                    label = "dock_pill_width"
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onTabSelected(tab) }
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val activePillBrush = remember {
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
+                        )
+                    }
+                    val activePillBorder = remember {
+                        Brush.verticalGradient(
+                            listOf(Color(0xFFA78BFA).copy(alpha = 0.8f), Color(0xFF4C1D95).copy(alpha = 0.3f))
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(width = pillWidth, height = 30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .then(
+                                if (isSelected) {
+                                    Modifier
+                                        .graphicsLayer {
+                                            shadowElevation = 4.dp.toPx()
+                                            spotShadowColor = Color(0xFF8B5CF6).copy(alpha = 0.22f)
+                                        }
+                                        .background(activePillBrush)
+                                        .border(1.2.dp, activePillBorder, RoundedCornerShape(15.dp))
+                                } else {
+                                    Modifier.background(Color.Transparent)
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.label,
+                            tint = iconTint,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = tab.label,
+                        color = labelColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
     }

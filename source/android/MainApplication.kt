@@ -7,6 +7,7 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        SystemExemptions.init(this)
         val binFile = File(filesDir, "blocklist.bin")
         if (!binFile.exists()) {
             runCatching {

@@ -496,15 +496,15 @@ private fun QuickShieldRow(
                 modifier = Modifier.weight(1f).padding(end = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RaisedSquirclePedestal(size = 36.dp) {
+                RaisedSquirclePedestal(size = 42.dp) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = NordicColors.AccentPrimary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
                         text = title,
@@ -519,7 +519,7 @@ private fun QuickShieldRow(
                         text = subtitle,
                         color = NordicColors.TextSecondary,
                         fontSize = 11.5.sp,
-                        lineHeight = 15.sp,
+                        lineHeight = 17.sp,
                         maxLines = 1,
                         softWrap = false
                     )
