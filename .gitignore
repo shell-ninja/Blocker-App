@@ -8,6 +8,9 @@ project/
 *.apk
 Blocker-*.apk
 apk/
+apk*/
+apk-*/
+apk_*
 .build_number
 
 # Dependencies & caches

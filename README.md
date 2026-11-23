@@ -33,7 +33,7 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
 ## What's New in v1.0.7
 
 - **Opt-in 10-Minute Temporary Accessibility Pause (Banking App Compatibility & Tamper Shield):**
-  - **Permission Setup Opt-In:** Added an optional toggle during initial setup ("Temporary Accessibility Pause") to allow users to enable a 10-minute accessibility pause for banking applications that flag active accessibility services. Defaults to OFF; when OFF, the feature remains completely hidden from Settings.
+  - **Permission Setup Opt-In & Seamless Upgrade Migration:** Added an optional toggle during initial setup ("Temporary Accessibility Pause") to allow users to enable a 10-minute accessibility pause for banking applications that flag active accessibility services. Defaults to OFF; when OFF, the feature remains completely hidden from Settings. Existing users upgrading to v1.0.7 receive an automatic one-time 3D migration prompt on HomeScreen to choose whether to enable the option or keep it permanently hidden.
   - **Strict 10-Minute Timer & Real-Time Countdown:** In Settings, users who opted in can trigger a 10-minute temporary accessibility pause with an active countdown display.
   - **Uncompromising Settings & Uninstall Shield:** While Accessibility is paused, a foreground guard service (`AccessibilityPauseGuardService`) runs with 100ms usage tracking, completely locking access to System Settings, PackageInstaller, Google Play Store, and OEM Security apps with touch-blocking overlays and instant Home redirects.
   - **Device Administrator Protection:** Intercepts deactivation requests while paused to prevent uninstall bypasses.
@@ -66,8 +66,8 @@ Blocker runs entirely on-device: no remote DNS, no tracking servers, no telemetr
   - Standardized `StatusPillBadge` typography with `11.5.sp`, `FontWeight.SemiBold`, subtle glowing status dot, and tabular numbers (`tnum`).
   - Refined `QuickShieldRow` on the Home screen with `42.dp` squircle pedestals, `20.dp` icons, `12.dp` spacing, and balanced subtitle line heights.
 - **Clean Monotonic Upgrade Pipeline:**
-  - Standardized APK deliverables: `Blocker-debug-1.0.7.apk` and `Blocker-release-1.0.7.apk` (clean naming without `-v` prefix).
-  - Monotonic `versionCode` progression (`1007138` debug / `1107138` release, `versionName = "1.0.7"`) ensuring smooth in-place upgrades.
+  - Standardized APK deliverables: `Blocker-debug-1.0.7.apk` and `Blocker-release-1.0.7.apk` (clean naming without `-v` prefix, stored in `apk/` for release uploads).
+  - Monotonic `versionCode` progression (`1007140` debug / `1107140` release, `versionName = "1.0.7"`) ensuring smooth in-place upgrades.
 
 ---
 
