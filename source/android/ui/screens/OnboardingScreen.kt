@@ -34,7 +34,10 @@ import com.blocker.MainActivity
 import com.blocker.PermissionFlowTracker
 import com.blocker.R
 import com.blocker.data.BlockerRepository
+import com.blocker.engine.tamper.AccessibilityPauseState
 import com.blocker.ui.components.CyberIcons
+import com.blocker.ui.components.Elevated3DCard
+import com.blocker.ui.components.NordicSwitch
 
 @Composable
 fun OnboardingScreen(
@@ -221,6 +224,41 @@ fun OnboardingScreen(
                 }
             }
         )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        val pauseState by AccessibilityPauseState.stateFlow.collectAsState()
+        LaunchedEffect(Unit) { AccessibilityPauseState.load(context) }
+
+        Elevated3DCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "Temporary Accessibility Pause (Optional)",
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF5F3FF),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Allow pausing Accessibility for 10 minutes later (for Banking apps). Leave OFF to keep this option completely hidden.",
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = Color(0xFF9E94C4)
+                    )
+                }
+                NordicSwitch(
+                    checked = pauseState.allowTempPauseOptIn,
+                    onCheckedChange = { AccessibilityPauseState.setOptIn(context, it) }
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 

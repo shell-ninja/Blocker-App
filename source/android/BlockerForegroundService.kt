@@ -307,6 +307,7 @@ class BlockerForegroundService : Service {
     }
 
     private fun checkAndNotifyIfAccessibilityDisabled() {
+        if (com.blocker.engine.tamper.AccessibilityPauseState.load(this).isPausedNow()) return
         runCatching {
             val cr = contentResolver
             val enabledServices = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()

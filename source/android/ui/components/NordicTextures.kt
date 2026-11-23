@@ -30,8 +30,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.blocker.ui.theme.NordicColors
 
 object BackgroundPatternCache {
@@ -428,6 +431,29 @@ fun Tactile3DButton(
         verticalAlignment = Alignment.CenterVertically,
         content = content
     )
+}
+
+@Composable
+fun Tactile3DButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: RoundedCornerShape = RoundedCornerShape(14.dp)
+) {
+    Tactile3DButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = shape
+    ) {
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
+    }
 }
 
 /**

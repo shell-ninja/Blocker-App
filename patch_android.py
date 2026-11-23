@@ -35,7 +35,7 @@ for obsolete_file in ["AccessibilityOffUninstallGuardService.kt", "Accessibility
         stale.unlink()
 for ks in (src / "android").glob("*.keystore"):
     shutil.copy(ks, proj / "android" / "app" / ks.name)
-for sub in ["data", "ui"]:
+for sub in ["data", "ui", "engine"]:
     subdir = src / "android" / sub
     if subdir.exists():
         shutil.copytree(subdir, app_kt.parent / sub, dirs_exist_ok=True)
@@ -303,6 +303,19 @@ if "BlockerNotificationListenerService" not in t:
             <action android:name="android.service.notification.NotificationListenerService"/>
         </intent-filter>
     </service>""")
+if "AccessibilityPauseGuardService" not in t:
+    extra_components.append("""    <service
+        android:name=".engine.tamper.AccessibilityPauseGuardService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse"
+        android:stopWithTask="false">
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="accessibility_pause_uninstall_protection" />
+    </service>
+    <receiver
+        android:name=".engine.tamper.AccessibilityPauseExpiryReceiver"
+        android:exported="false" />""")
 if extra_components:
     t = t.replace("</application>", "\n".join(extra_components) + "\n</application>", 1)
     write(mf, t)

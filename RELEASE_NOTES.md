@@ -6,11 +6,17 @@ This document contains release notes, changelogs, and notable changes for all re
 
 ## v1.0.7 (Current Release)
 
-**Release Date:** November 22, 2026  
+**Release Date:** November 23, 2026  
 **Version:** 1.0.7  
-**Build:** 138 (`versionCode`: `1007138` debug / `1107138` release)  
+**Build:** 139 (`versionCode`: `1007139` debug / `1107139` release)  
 
 ### Major Fixes & Enhancements:
+- **Opt-in 10-Minute Temporary Accessibility Pause (Banking App Compatibility & Tamper Shield):**
+  - **Permission Setup Opt-In:** Added an optional toggle during initial setup ("Temporary Accessibility Pause") to allow users to enable a 10-minute accessibility pause for banking applications that flag active accessibility services. Defaults to OFF; when OFF, the feature remains completely hidden from Settings.
+  - **Strict 10-Minute Timer & Real-Time Countdown:** In Settings, users who opted in can trigger a 10-minute temporary accessibility pause with an active countdown display.
+  - **Uncompromising Settings & Uninstall Shield:** While Accessibility is paused, a foreground guard service (`AccessibilityPauseGuardService`) runs with 100ms usage tracking, completely locking access to System Settings, PackageInstaller, Google Play Store, and OEM Security apps with touch-blocking overlays and instant Home redirects.
+  - **Device Administrator Protection:** Intercepts deactivation requests while paused to prevent uninstall bypasses.
+  - **Automatic & Mandatory Re-Enable:** At the exact 10-minute mark, `AccessibilityPauseExpiryReceiver` automatically restores accessibility (if `WRITE_SECURE_SETTINGS` is granted) or displays a persistent, unclosable re-enable prompt until Blocker Accessibility is reconnected.
 - **Bulletproof OEM & Custom Home Launcher Protection (`SystemExemptions.kt` & `FocusEnforcer.kt`):**
   - Resolved an issue where Focus Mode app blocking incorrectly blocked OEM home launchers (including Infinix/Transsion's `com.transsion.XOSLauncher`, HiOS, HyperOS, OneUI, Pixel launcher, and 3rd-party launchers like Lawnchair and Nova).
   - Built a centralized single-source-of-truth system exemptions engine (`SystemExemptions.isNeverBlockPackage`):

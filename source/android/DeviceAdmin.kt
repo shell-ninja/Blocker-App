@@ -159,6 +159,16 @@ open class BlockerDeviceAdminReceiver : DeviceAdminReceiver() {
 
     // Shown in the system's deactivation confirmation dialog. Android does not allow vetoing here.
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+        val snap = com.blocker.engine.tamper.AccessibilityPauseState.load(context)
+        if (snap.isGuardRequired()) {
+            com.blocker.engine.tamper.AccessibilityPauseGuardService.start(context, forceLockdownNow = true)
+            val home = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            runCatching { context.startActivity(home) }
+            return "Blocker Uninstall Protection is locked. Re-enable Accessibility first."
+        }
         if (!guardEngaged(context)) return "Deactivate this device admin app?"
         BlockerStore.incr(context, "tamper")
         // Signal the AccessibilityService via static flag (zero latency, same process)

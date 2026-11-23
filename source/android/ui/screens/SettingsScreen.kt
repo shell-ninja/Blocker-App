@@ -7,10 +7,15 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
+import com.blocker.BlockerAccessibilityService
 import com.blocker.BlockerDeviceAdminReceiver
 import com.blocker.MainActivity
 import com.blocker.PermissionFlowTracker
 import com.blocker.data.BlockerBackupManager
+import com.blocker.engine.tamper.AccessibilityPauseController
+import com.blocker.engine.tamper.AccessibilityPauseState
+import androidx.compose.ui.text.style.TextOverflow
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -425,6 +430,109 @@ fun SettingsScreen(
             onCheckedChange = { repo.setPreventPowerOff(it) },
             onCancelCooldown = { repo.cancelPowerOffCooldown() }
         )
+
+        val pauseState by AccessibilityPauseState.stateFlow.collectAsState()
+        LaunchedEffect(Unit) { AccessibilityPauseState.load(context) }
+
+        if (pauseState.allowTempPauseOptIn) {
+            Spacer(modifier = Modifier.height(10.dp))
+            var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            var errorMsg by remember { mutableStateOf<String?>(null) }
+
+            LaunchedEffect(pauseState.pauseUntilEpochMs) {
+                while (pauseState.pauseUntilEpochMs > System.currentTimeMillis()) {
+                    nowMs = System.currentTimeMillis()
+                    delay(1000L)
+                }
+                nowMs = System.currentTimeMillis()
+            }
+
+            val isPaused = pauseState.isPausedNow(nowMs)
+            val remainingSec = ((pauseState.pauseUntilEpochMs - nowMs).coerceAtLeast(0L) / 1000L)
+            val formattedCountdown = String.format(Locale.US, "%02d:%02d", remainingSec / 60L, remainingSec % 60L)
+
+            Elevated3DCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "BANKING APP COMPATIBILITY",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.1.sp,
+                        color = Color(0xFFA78BFA)
+                    )
+                    Text(
+                        text = "Temporary Accessibility Pause (10m)",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF5F3FF),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    when {
+                        isPaused -> {
+                            Text(
+                                text = "Accessibility Paused: $formattedCountdown remaining — Settings & Uninstall Locked",
+                                fontSize = 12.5.sp,
+                                color = Color(0xFF34D399),
+                                style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                            )
+                            Tactile3DButton(
+                                text = "Re-enable Accessibility Now",
+                                onClick = {
+                                    AccessibilityPauseController.openAccessibilitySettingsForReEnable(context)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        pauseState.isAwaitingReEnable -> {
+                            Text(
+                                text = "10-Minute Pause Ended — Re-enable Accessibility Required",
+                                fontSize = 12.5.sp,
+                                color = Color(0xFFFB7185)
+                            )
+                            Tactile3DButton(
+                                text = "Re-enable Accessibility Now",
+                                onClick = {
+                                    AccessibilityPauseController.openAccessibilitySettingsForReEnable(context)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        else -> {
+                            Text(
+                                text = "Disables Accessibility for 10 minutes so Banking apps work. System Settings & App Uninstallation remain strictly locked.",
+                                fontSize = 12.5.sp,
+                                lineHeight = 17.sp,
+                                color = Color(0xFF9E94C4)
+                            )
+                            if (errorMsg != null) {
+                                Text(text = errorMsg!!, fontSize = 12.sp, color = Color(0xFFFB7185))
+                            }
+                            Tactile3DButton(
+                                text = "Pause Accessibility for 10 Minutes",
+                                onClick = {
+                                    val (ok, reason) = AccessibilityPauseController.canStartPause(
+                                        context,
+                                        BlockerDeviceAdminReceiver::class.java
+                                    )
+                                    if (!ok) {
+                                        errorMsg = reason
+                                    } else {
+                                        errorMsg = null
+                                        AccessibilityPauseController.startTenMinutePause(context) {
+                                            BlockerAccessibilityService.instance?.disableSelf()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

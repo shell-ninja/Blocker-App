@@ -24,6 +24,13 @@ class BootReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
 
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            val pauseSnap = com.blocker.engine.tamper.AccessibilityPauseState.load(context)
+            if (pauseSnap.isGuardRequired()) {
+                com.blocker.engine.tamper.AccessibilityPauseGuardService.start(context)
+            }
+            if (pauseSnap.isPausedNow()) {
+                return
+            }
             BlockerForegroundService.start(context)
             DeviceOwnerHelper.enforceDisallowSafeBoot(context)
 

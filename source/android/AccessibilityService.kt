@@ -1118,6 +1118,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         try {
             super.onServiceConnected()
             instance = this
+            com.blocker.engine.tamper.AccessibilityPauseController.cancelExpiryAlarm(this)
+            com.blocker.engine.tamper.AccessibilityPauseState.clearAllOnAccessibilityReconnected(this)
+            com.blocker.engine.tamper.AccessibilityPauseGuardService.stop(this)
             SystemExemptions.init(this)
             runCatching {
                 val notif = buildQuietOngoingNotification()
