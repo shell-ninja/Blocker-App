@@ -18,9 +18,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.blocker.data.BlockerRepository
+import com.blocker.engine.tamper.AccessibilityPauseState
 import com.blocker.ui.components.*
 import com.blocker.ui.theme.NordicColors
 
@@ -31,6 +35,8 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val pauseState by AccessibilityPauseState.stateFlow.collectAsState()
+    LaunchedEffect(Unit) { AccessibilityPauseState.load(context) }
     val protection by repo.protectionState.collectAsState()
     val perms by repo.permissionsState.collectAsState()
     val stats by repo.statsState.collectAsState()
@@ -472,6 +478,62 @@ fun HomeScreen(
         )
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    if (!pauseState.hasDecidedOptIn) {
+        Dialog(
+            onDismissRequest = { /* Non-dismissible: user must make a one-time choice */ },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+            Elevated3DCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "NEW FEATURE SETUP",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.1.sp,
+                        color = Color(0xFFA78BFA)
+                    )
+                    Text(
+                        text = "Temporary Accessibility Pause (10m)",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF5F3FF)
+                    )
+                    Text(
+                        text = "Would you like to enable the 10-minute Accessibility pause option in Settings for Banking app compatibility? System Settings and Uninstall Protection stay strictly locked during the pause.\n\nThis is a one-time choice: if you keep it hidden, it will not appear in Settings.",
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp,
+                        color = Color(0xFF9E94C4)
+                    )
+                    Tactile3DButton(
+                        text = "Enable 10m Pause Option",
+                        onClick = {
+                            AccessibilityPauseState.finalizeOptInDecision(context, enabled = true)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            AccessibilityPauseState.finalizeOptInDecision(context, enabled = false)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, Color(0xFF4C3B87))
+                    ) {
+                        Text(
+                            text = "Keep Permanently Hidden",
+                            color = Color(0xFFD8B4FE),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

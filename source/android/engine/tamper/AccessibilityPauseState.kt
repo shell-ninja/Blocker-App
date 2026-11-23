@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class AccessibilityPauseSnapshot(
     val allowTempPauseOptIn: Boolean = false,
+    val hasDecidedOptIn: Boolean = false,
     val pauseUntilEpochMs: Long = 0L,
     val isAwaitingReEnable: Boolean = false
 ) {
@@ -21,6 +22,7 @@ data class AccessibilityPauseSnapshot(
 object AccessibilityPauseState {
     private const val PREF_NAME = "blocker_accessibility_pause_state"
     private const val KEY_OPT_IN = "allow_temp_pause_opt_in"
+    private const val KEY_HAS_DECIDED = "has_decided_temp_pause_opt_in"
     private const val KEY_PAUSE_UNTIL = "pause_until_epoch_ms"
     private const val KEY_AWAITING_REENABLE = "is_awaiting_reenable"
 
@@ -40,6 +42,7 @@ object AccessibilityPauseState {
         val p = prefs(context)
         val snap = AccessibilityPauseSnapshot(
             allowTempPauseOptIn = p.getBoolean(KEY_OPT_IN, false),
+            hasDecidedOptIn = p.getBoolean(KEY_HAS_DECIDED, false),
             pauseUntilEpochMs = p.getLong(KEY_PAUSE_UNTIL, 0L),
             isAwaitingReEnable = p.getBoolean(KEY_AWAITING_REENABLE, false)
         )
@@ -49,6 +52,14 @@ object AccessibilityPauseState {
 
     fun setOptIn(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_OPT_IN, enabled).commit()
+        load(context)
+    }
+
+    fun finalizeOptInDecision(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(KEY_OPT_IN, enabled)
+            .putBoolean(KEY_HAS_DECIDED, true)
+            .commit()
         load(context)
     }
 

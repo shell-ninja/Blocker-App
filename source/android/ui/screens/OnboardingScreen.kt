@@ -267,6 +267,10 @@ fun OnboardingScreen(
         if (coreGranted) {
             Button(
                 onClick = {
+                    AccessibilityPauseState.finalizeOptInDecision(
+                        context,
+                        AccessibilityPauseState.load(context).allowTempPauseOptIn
+                    )
                     repo.toggleProtection(true)
                     repo.setInitialSetupActivated(true)
                     com.blocker.PermissionFlowTracker.isOnPermissionSetupScreen = false

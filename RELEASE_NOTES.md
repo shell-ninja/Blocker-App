@@ -8,11 +8,11 @@ This document contains release notes, changelogs, and notable changes for all re
 
 **Release Date:** November 23, 2026  
 **Version:** 1.0.7  
-**Build:** 139 (`versionCode`: `1007139` debug / `1107139` release)  
+**Build:** 140 (`versionCode`: `1007140` debug / `1107140` release)  
 
 ### Major Fixes & Enhancements:
 - **Opt-in 10-Minute Temporary Accessibility Pause (Banking App Compatibility & Tamper Shield):**
-  - **Permission Setup Opt-In:** Added an optional toggle during initial setup ("Temporary Accessibility Pause") to allow users to enable a 10-minute accessibility pause for banking applications that flag active accessibility services. Defaults to OFF; when OFF, the feature remains completely hidden from Settings.
+  - **Permission Setup Opt-In & Seamless Upgrade Migration:** Added an optional toggle during initial setup ("Temporary Accessibility Pause") to allow users to enable a 10-minute accessibility pause for banking applications that flag active accessibility services. Defaults to OFF; when OFF, the feature remains completely hidden from Settings. Existing users upgrading from previous versions receive an automatic one-time 3D migration prompt on HomeScreen to choose whether to enable the option or keep it permanently hidden.
   - **Strict 10-Minute Timer & Real-Time Countdown:** In Settings, users who opted in can trigger a 10-minute temporary accessibility pause with an active countdown display.
   - **Uncompromising Settings & Uninstall Shield:** While Accessibility is paused, a foreground guard service (`AccessibilityPauseGuardService`) runs with 100ms usage tracking, completely locking access to System Settings, PackageInstaller, Google Play Store, and OEM Security apps with touch-blocking overlays and instant Home redirects.
   - **Device Administrator Protection:** Intercepts deactivation requests while paused to prevent uninstall bypasses.
